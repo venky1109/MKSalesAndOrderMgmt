@@ -19,14 +19,14 @@ export const createOrder = createAsyncThunk(
       const data = await response.json();
   
       // console.log( JSON.stringify(payload))
-     console.log('Status:', response.status); // should be 201
-console.log('Response OK:', response.ok); // should be true
-console.log('Data:', data);
+//      console.log('Status:', response.status); // should be 201
+// console.log('Response OK:', response.ok); // should be true
+// console.log('Data:', data);
 
 
 
       if (!response.ok) throw new Error(data.message || 'Order creation failed');
-      console.log('stock update '+JSON.stringify(cartItems));
+      // console.log('stock update '+JSON.stringify(cartItems));
       for (const item of cartItems) {
         const newStock = item.stock;
         if (newStock >= 0) {

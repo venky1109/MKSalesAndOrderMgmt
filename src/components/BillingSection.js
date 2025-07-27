@@ -26,7 +26,7 @@ function BillingSection() {
 
 useEffect(() => {
   dispatch(fetchLatestOrders());
-  console.log("Initial fetch");
+  // console.log("Initial fetch");
   // const interval = setInterval(() => {
   //   console.log("Auto-refresh triggered");
   //   dispatch(fetchLatestOrders());

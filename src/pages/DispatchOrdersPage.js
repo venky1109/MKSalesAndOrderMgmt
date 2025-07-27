@@ -8,7 +8,7 @@ const DispatchOrdersPage = () => {
   const dispatch = useDispatch();
  const orders = useSelector((state) => state.orders.dispatch);
   const userInfo = useSelector((state) => state.posUser.userInfo);
-  console.log(orders)
+  // console.log(orders)
 
   useEffect(() => {
     if (userInfo?.role === 'DISPATCH_AGENT') {

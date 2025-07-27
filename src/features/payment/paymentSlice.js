@@ -16,7 +16,7 @@ export const initiateDeliveryPayment = createAsyncThunk(
           amount,
         }
       );
-       console.log('Order payment response from 1 backend:', data);
+      //  console.log('Order payment response from 1 backend:', data);
       return data; // Should include redirect_url
     } catch (error) {
       console.error('🚨 Payment error:', error);

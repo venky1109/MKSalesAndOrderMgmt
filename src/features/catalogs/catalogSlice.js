@@ -8,7 +8,7 @@ export const fetchCatalogs = createAsyncThunk(
       headers: { Authorization: `Bearer ${token}` },
     });
     const data = await res.json();
-    console.log("📡 Fetched catalogs from API:", data);
+    // console.log("📡 Fetched catalogs from API:", data);
     if (!res.ok) throw new Error(data.error || 'Failed to fetch catalogs');
     return data;
   }
@@ -50,7 +50,7 @@ const catalogSlice = createSlice({
         state.error = '';
       })
       .addCase(fetchCatalogs.fulfilled, (state, action) => {
-        console.log("✅ catalogs fetched from API:", action.payload);
+        // console.log("✅ catalogs fetched from API:", action.payload);
         state.loading = false;
         state.all = action.payload;
       })

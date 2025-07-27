@@ -13,7 +13,7 @@ export const fetchOrderItemsByOrderId = createAsyncThunk(
       });
 
       const data = await response.json();
-      console.log('✅ Order Items Fetched:', data); // ✅ This will now run
+      // console.log('✅ Order Items Fetched:', data); // ✅ This will now run
 
       if (!response.ok) throw new Error(data.error || 'Failed to fetch order items');
       return data;

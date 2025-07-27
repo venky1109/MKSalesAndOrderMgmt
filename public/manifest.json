@@ -1,7 +1,7 @@
 {
-  "short_name": "Manakinana",
-  "name": "Manakinana App",
-  "description": "Manakinana online store app",
+  "short_name": "MKPOS",
+  "name": "MKPOS App",
+  "description": "ManaKirana Sales and Order Management",
   "icons": [
   {
     "src": "favicon.ico",

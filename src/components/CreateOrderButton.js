@@ -196,7 +196,7 @@ function CreateOrderButton() {
       const result = await dispatch(
         createOrder({ payload: orderPayload, token, cartItems })
       ).unwrap();
-      console.log('create order result '+result)
+      // console.log('create order result '+result)
       alert(`✅ Order Created: ID ${result._id}`);
 
       const fullOrder = {
@@ -212,7 +212,7 @@ function CreateOrderButton() {
       dispatch(fetchLatestOrders()); 
       dispatch(clearCart());
       dispatch(fetchAllProducts(token));
-      console.log('🧹 Cart and customer cleared after order!');
+      // console.log('🧹 Cart and customer cleared after order!');
     } catch (err) {
       console.error('❌ Error creating order:', err);
       alert('Failed to create order: ' + err.message);

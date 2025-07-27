@@ -11,7 +11,7 @@ export const fetchCustomerByPhone = createAsyncThunk(
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await res.json();
-       console.log(data);
+      //  console.log(data);
       if (!res.ok) throw new Error(data.message || 'Customer fetch failed');
       return data;
      

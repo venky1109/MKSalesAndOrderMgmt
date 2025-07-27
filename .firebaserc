@@ -1,0 +1,25 @@
+{
+  "projects": {
+    "default": "manakirana"
+  },
+  "targets": {
+    "manakirana": {
+      "hosting": {
+        "main": [
+          "manakirana"
+        ],
+        "pos": [
+          "pos-manakirana"
+        ]
+      }
+    },
+    "manakirana-988b3": {
+      "hosting": {
+        "pos": [
+          "pos-manakirana"
+        ]
+      }
+    }
+  },
+  "etags": {}
+}

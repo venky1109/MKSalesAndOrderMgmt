@@ -6,7 +6,7 @@ export const fetchAllProducts = createAsyncThunk(
       headers: { Authorization: `Bearer ${token}` }
     });
     const data = await res.json();
-    console.log('📦 products received:', data); // ✅ confirm this is an array
+    // console.log('📦 products received:', data); // ✅ confirm this is an array
     if (!res.ok) throw new Error(data.error || 'Failed to fetch products');
     return data;
   }
@@ -96,10 +96,10 @@ export const updateProduct = createAsyncThunk(
 export const updateProductStockOnly = createAsyncThunk(
   'products/updateStockOnly',
   async ({ productID, brandID, financialID, newQuantity, token }, thunkAPI) => {
-    console.log(productID);
-    console.log(brandID);
-    console.log(financialID);
-    console.log(newQuantity);
+    // console.log(productID);
+    // console.log(brandID);
+    // console.log(financialID);
+    // console.log(newQuantity);
 
     const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/products/stock/${productID}`, {
       method: 'PUT',
@@ -111,9 +111,9 @@ export const updateProductStockOnly = createAsyncThunk(
     });
 
     const data = await response.json();
-  console.log('📦 Response status:', response.status);
-console.log('📦 Response OK:', response.ok);
-console.log('📦 Response body:', data);
+//   console.log('📦 Response status:', response.status);
+// console.log('📦 Response OK:', response.ok);
+// console.log('📦 Response body:', data);
 
     if (!response.ok) throw new Error(data.message || 'Stock update failed');
     return data;
