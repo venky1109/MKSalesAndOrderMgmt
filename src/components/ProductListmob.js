@@ -5,10 +5,13 @@ import { useDispatch, useSelector } from 'react-redux';
 import { fetchAllProducts, fetchProductByBarcode } from '../features/products/productSlice';
 import { addToCart } from '../features/cart/cartSlice';
 import { FixedSizeGrid as Grid } from 'react-window';
+import { BrowserMultiFormatReader } from '@zxing/browser';
 
 const ProductList = forwardRef((props, ref) => {
   const dispatch = useDispatch();
   const barcodeRef = useRef(null);
+  const videoRef = useRef(null);
+  const codeReader = useRef(null);
 
   const token = useSelector((state) => state.posUser.userInfo?.token);
   const { all: products = [], loading, error } = useSelector((state) => state.products || {});
@@ -24,6 +27,8 @@ const ProductList = forwardRef((props, ref) => {
   const [brandFilter, setBrandFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [barcodeInput, setBarcodeInput] = useState('');
+  const [isMobile, setIsMobile] = useState(false);
+  const [scannedCode, setScannedCode] = useState('');
   const [windowWidth, setWindowWidth] = useState(window.innerWidth);
 
   useEffect(() => {
@@ -34,6 +39,7 @@ const ProductList = forwardRef((props, ref) => {
 
   useEffect(() => {
     const handleResize = () => {
+      setIsMobile(window.innerWidth < 768);
       setWindowWidth(window.innerWidth);
     };
     window.addEventListener('resize', handleResize);
@@ -42,8 +48,49 @@ const ProductList = forwardRef((props, ref) => {
   }, []);
 
   useEffect(() => {
+  if (!isMobile) {
     barcodeRef.current?.focus();
-  }, []);
+    return;
+  }
+
+  const reader = new BrowserMultiFormatReader();
+  codeReader.current = reader;
+
+  reader.decodeFromVideoDevice(
+    undefined,
+    videoRef.current,
+    (result, err) => {
+      if (result) {
+        const scanned = result.getText();
+        console.log("📦 Scanned Code:", scanned);
+        setScannedCode(scanned);
+      }
+    },
+    {
+      video: {
+        facingMode: { exact: 'environment' },
+        width: { ideal: 640 },
+        height: { ideal: 480 },
+      },
+    }
+  ).catch((error) => {
+    console.error('📷 Camera error:', error);
+    alert('Unable to access camera. Please grant permission.');
+  });
+
+  return () => {
+    // 🔁 FIX HERE:
+    codeReader.current?.stopDecoding?.();
+  };
+}, [isMobile]);
+
+
+  useEffect(() => {
+    if (scannedCode) {
+      handleBarcode(scannedCode);
+      setScannedCode('');
+    }
+  }, [scannedCode]);
 
   const handleBarcodeScan = async (e) => {
     if (e.key === 'Enter' && barcodeInput.trim()) {
@@ -213,15 +260,29 @@ const ProductList = forwardRef((props, ref) => {
   return (
     <div className="p-4 bg-white border rounded shadow-sm h-full overflow-y-auto">
       <div className="mb-4">
-        <input
-          type="text"
-          ref={barcodeRef}
-          value={barcodeInput}
-          onChange={(e) => setBarcodeInput(e.target.value)}
-          onKeyDown={handleBarcodeScan}
-          placeholder="📷 Scan barcode to add"
-          className="border p-2 w-full text-lg text-center"
-        />
+        {!isMobile ? (
+          <input
+            type="text"
+            ref={barcodeRef}
+            value={barcodeInput}
+            onChange={(e) => setBarcodeInput(e.target.value)}
+            onKeyDown={handleBarcodeScan}
+            placeholder="📷 Scan barcode to add"
+            className="border p-2 w-full text-lg text-center"
+          />
+        ) : (
+          <div className="flex flex-col items-center">
+            <video
+              ref={videoRef}
+              className="w-full max-w-[480px] h-[200px] object-contain rounded shadow mb-2"
+            />
+            {scannedCode && (
+              <div className="text-green-700 font-medium text-sm">
+                ✅ Scanned: <span className="font-mono">{scannedCode}</span>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Filters */}

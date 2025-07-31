@@ -1,5 +1,5 @@
 import POSLayout from '../layouts/POSLayout'
-import Footer from '../components/Footer';
+// import Footer from '../components/Footer';
 import BillingSection from '../components/BillingSection';
 import ProductList from '../components/ProductList';
 
@@ -19,9 +19,9 @@ function POS() {
           <ProductList />
         </div>
       </main>
-
-      <Footer />
-      </POSLayout>
+ </POSLayout>
+      
+     
     </div>
   );
 }

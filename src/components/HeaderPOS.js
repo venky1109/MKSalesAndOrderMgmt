@@ -16,52 +16,50 @@ function HeaderPOS({ onSidebarToggle }) {
   };
 
   return (
-    <header className="bg-gray-200 text-red-800 p-3 shadow-md w-full relative">
+    <header className="bg-white shadow-md p-3 sticky top-0 z-50">
       <div className="flex justify-between items-center">
-        {/* Logo and Shop Name */}
+        {/* Logo and Title */}
         <div className="flex items-center space-x-3">
           <Link to="/pos">
             <img
               src={logo}
               alt="ManaKirana Logo"
-              className="h-10 w-10 rounded-full object-cover cursor-pointer"
+              className="h-10 w-10 rounded-full object-cover"
             />
           </Link>
-          <h1 className="text-lg md:text-xl font-bold">
+          <h1 className="text-lg md:text-xl font-bold text-green-700">
             {process.env.REACT_APP_SHOP_NAME || "ManaKirana"} POS
           </h1>
         </div>
 
-        {/* Right Side Controls */}
+        {/* Right side: Greeting + Logout */}
         <div className="flex items-center space-x-4">
-          {/* Desktop Greeting and Logout */}
-          <span className="hidden md:inline-block font-medium">Hi {name}</span>
+          {/* Desktop View */}
+          <span className="hidden md:inline text-gray-800 font-medium"> Hi {name}</span>
           <button
             onClick={handleLogout}
-            className="hidden md:inline-block bg-red-800 text-white px-3 py-1 rounded hover:bg-red-700"
+            className="hidden md:inline bg-red-600 text-white px-3 py-1 rounded hover:bg-red-700"
           >
-            Logout
+           Logout
           </button>
 
-          {/* Hamburger Menu (Mobile only) */}
+          {/* Mobile View - Hamburger */}
           <div className="md:hidden relative">
             <button
-              className="text-2xl focus:outline-none"
+              className="text-2xl"
               onClick={() => setShowMobileMenu(!showMobileMenu)}
               aria-label="Toggle Mobile Menu"
             >
               ☰
             </button>
             {showMobileMenu && (
-              <div className="absolute right-0 mt-2 bg-white border rounded shadow-lg w-40 z-50">
-                <div className="p-2 border-b font-medium text-gray-700">
-                  Hi {name}
-                </div>
+              <div className="absolute right-0 mt-2 w-44 bg-white border rounded shadow-lg z-50">
+                <div className="p-2 border-b text-gray-700 font-medium">Hi {name}</div>
                 <button
                   onClick={handleLogout}
-                  className="w-full text-left px-4 py-2 text-sm text-red-700 hover:bg-red-100"
+                  className="block w-full text-left px-4 py-2 text-sm text-red-700 hover:bg-red-100"
                 >
-                  🔓 Logout
+                   Logout
                 </button>
               </div>
             )}

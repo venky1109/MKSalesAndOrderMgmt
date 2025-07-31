@@ -1,19 +1,17 @@
 // src/layouts/POSLayout.jsx
 import React from "react";
-// import Sidebar from "../components/Sidebar";
 import HeaderPOS from "../components/HeaderPOS";
 
 const POSLayout = ({ children }) => {
-  // const [sidebarOpen, setSidebarOpen] = useState(false);
-
   return (
-    <div className="flex min-h-screen">
-      {/* <Sidebar mobileOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} /> */}
+    <div className="flex flex-col min-h-screen bg-gray-100">
+      {/* Header stays on top */}
+      <HeaderPOS />
 
-      <div className="flex-1 bg-gray-100">
-        <HeaderPOS />
-        <main className="p-4">{children}</main>
-      </div>
+      {/* Main Content */}
+      <main className="flex-1 overflow-y-auto p-2 sm:p-4">
+        {children}
+      </main>
     </div>
   );
 };

@@ -2,12 +2,18 @@ import React from 'react';
 
 import { useEffect ,useState} from 'react';
 import { useSelector, useDispatch } from 'react-redux';
-import { updateQty, removeFromCart } from '../features/cart/cartSlice';
+import { updateQty, removeFromCart,clearCart } from '../features/cart/cartSlice';
 import CreateOrderButton from './CreateOrderButton';
 import { fetchLatestOrders } from '../features/orders/orderSlice';
 import { fetchOrderItemsByOrderId } from '../features/orderItems/orderItemSlice';
 // import { useAuth } from '../context/AuthContext'; // adjust path as needed
 import {formatDateTime} from '../utils/dateFormatter'
+import {initiateDeliveryPayment} from '../features/payment/paymentSlice'
+import {createOrder} from '../features/orders/orderSlice'
+import {
+  fetchCustomerByPhone,
+  createCustomer
+} from '../features/customers/customerSlice';
 // import OrdersTable from './OrdersTable';
 
 
@@ -23,6 +29,7 @@ function BillingSection() {
   const token = useSelector((state) => state.posUser.userInfo?.token);
   const recentOrders = useSelector((state) => state.orders.recent);
   const user = useSelector((state) => state.posUser.userInfo);
+
 
 useEffect(() => {
   dispatch(fetchLatestOrders());
@@ -55,6 +62,104 @@ const filteredOrders = recentOrders.filter((order) => {
   }
 });
 
+const handleUpiClick = async () => {
+  const phone = prompt(" Enter Customer Mobile Number (10 digits):");
+
+  if (!phone || !/^\d{10}$/.test(phone)) {
+    alert("⚠️ Please enter a valid 10-digit mobile number.");
+    return;
+  }
+
+  const cartData = JSON.parse(localStorage.getItem("cart") || "{}");
+  const cartItems = cartData.items || [];
+  const cartTotal = cartData.total || 0;
+
+  if (!cartItems.length || !cartTotal) {
+    alert("❌ Cart is empty or amount is missing.");
+    return;
+  }
+
+
+    let customer = null;
+try {
+
+  customer = await dispatch(fetchCustomerByPhone({ phone, token })).unwrap();
+} catch (error) {
+  customer = null; // proceed to create user
+  const name = prompt("👤 Enter Customer Name:");
+      const street = prompt("Enter Street:");
+      const city = prompt("Enter City:");
+      const postalCode = prompt("Enter Postal Code:");
+
+      if (!name || !street || !city || !postalCode) {
+        alert("❗ Please provide all delivery details.");
+        return;
+      }
+
+       const address = { street, city, postalCode };
+
+  
+       try {
+        customer = await dispatch(
+          createCustomer({ name, phone,  address, token })
+        ).unwrap();
+      } catch (err) {
+        alert('❌ Failed to create customer: ' + err.message);
+        return;
+      }
+}
+
+
+    
+
+     const orderPayload = {
+    user: customer._id,
+    
+  shippingAddress: {
+    street: customer.address || 'NA',
+    city: customer.city || 'NA',
+    postalCode: customer.postalCode || '000000',
+    country: 'India', // optional, default if needed
+  },
+  paymentMethod: 'Cash',
+  orderItems: cartItems.map((item) => ({
+    name: item.item, // ✅ match the name expected in schema
+    quantity: item.catalogQuantity, // or `item.quantity`, depending on your logic
+    units: item.units,
+    brand: item.brand,
+    qty: item.qty ?? item.quantity, // fallback for compatibility
+    image: item.image || '',
+    price: item.dprice, // or item.price if that's what you're showing
+    productId: item.id,          // Must be MongoDB ObjectId
+    brandId: item.brandId,       // Must be MongoDB ObjectId
+    financialId: item.financialId // Must be MongoDB ObjectId
+  })),
+  totalPrice: cartTotal,
+};
+
+    // ✅ Step 2: Create order
+     const createdOrder = await dispatch(
+        createOrder({ payload: orderPayload, token, cartItems })
+      ).unwrap();
+
+      dispatch(clearCart());
+    // ✅ Step 3: Initiate UPI payment
+    try{
+       const result = await dispatch(initiateDeliveryPayment({ customerId: phone, order_id: createdOrder._id,amount: cartTotal,source: 'CASHIER',paymentMethod: 'UPI' })).unwrap();
+     const redirectUrl = result?.data?.payment_links?.web;
+
+      if (redirectUrl) {
+        window.open(redirectUrl, '_blank');
+      } else {
+        alert('No payment link received.');
+      }
+    } catch (err) {
+      alert('❌ Payment failed: ' + (err?.message || err));
+    } 
+
+     
+ 
+};
 
 
   return (
@@ -62,78 +167,101 @@ const filteredOrders = recentOrders.filter((order) => {
       
       <div className="overflow-x-auto border rounded-lg  border-gray-200 shadow-sm">
         <h2 className="font-semibold text-center text-gray-700 text-xl" >Current Order Items</h2>
-        <table className="w-full table-auto text-sm">
-    <thead className="bg-gray-200 text-gray-700">
-      <tr>
-        <th className="px-10 p-2 text-left">Item</th>
-        <th>Quantity</th>
-        <th>Stock</th>
-        <th>Qty</th>
-        <th>Price</th>
-        <th>Discount</th>
-        <th>Amount</th>
-        <th>Bin</th>
+       <table className="w-full table-auto text-sm sm:text-xs">
+  <thead className="bg-gray-200 text-gray-700 text-sm sm:text-xs">
+    <tr>
+      <th className="px-4 sm:px-4 p-2 text-left">Item</th>
+      <th className="px-2">Quantity</th>
+      <th className="px-2">Stock</th>
+      <th className="px-2">Qty</th>
+      <th className="px-2">Price</th>
+      <th className="px-2">Discount</th>
+      <th className="px-2">dPrice</th>
+      <th className="px-2">Amount</th>
+      <th className="px-2">Bin</th>
+    </tr>
+  </thead>
+  <tbody>
+    {cartItems.length === 0 ? (
+      <tr className="text-center text-gray-600">
+        <td className="p-2" colSpan="9">No items added yet</td>
       </tr>
-    </thead>
-          <tbody>
-            {cartItems.length === 0 ? (
-              <tr className="text-center text-gray-600">
-                <td className="p-2" colSpan="7">No items added yet</td>
-              </tr>
-            ) : (
-              cartItems.map((item) => (
-                <tr  key={`${item.productId}-${item.brandId}-${item.financialId}`} className="text-center">
-                  <td className="p-2 font-medium text-left">{item.item}</td>
-                  <td>{item.catalogQuantity}{item.units}</td>
-                  <td>{item.stock}</td>
-                  <td>
-                    <input
-                      type="number"
-                      value={item.quantity}
-                      min="1"
-                   max={item.stock + item.quantity}
-                      className="w-14 border rounded px-1 text-center"
-                      onChange={(e) => dispatch(updateQty({ id: item.id, qty: parseInt(e.target.value) }))}
-                    />
-                  </td>
-                  <td>₹ {item.price}</td>
-                  <td>{item.discount} %</td>
-                  <td className="text-green-700 font-semibold">₹ {item.subtotal.toFixed(2)}</td>
-                  <td>
-                    <button
-                      className="text-red-500 hover:text-red-700"
-                      onClick={() => dispatch(removeFromCart({
-  productId: item.productId,
-  brandId: item.brandId,
-  financialId: item.financialId
-}))}
-                    >
-                      🗑️
-                    </button>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+    ) : (
+      cartItems.map((item) => (
+        <tr
+          key={`${item.productId}-${item.brandId}-${item.financialId}`}
+          className="text-center text-sm sm:text-xs"
+        >
+          <td className="p-2 font-medium text-left">
+  {/* Show full name on medium and up */}
+  <span className="hidden sm:inline">{item.item}</span>
+
+  {/* Show without Telugu on small screens */}
+  <span className="sm:hidden font-small text-xs ">
+    {item.item.replace(/\s*\([^)]*\)/g, '').trim()}
+  </span>
+</td>
+
+          <td>{item.catalogQuantity}{item.units}</td>
+          <td>{item.stock}</td>
+          <td>
+            <input
+              type="number"
+              value={item.qty}
+              min="1"
+              max={item.stock + item.qty}
+              className="w-14 border rounded px-1 text-center text-sm sm:text-xs"
+              onChange={(e) =>
+                dispatch(updateQty({ id: item.id, qty: parseInt(e.target.value) }))
+              }
+            />
+          </td>
+          <td>₹ {item.price}</td>
+          <td>{item.discount} %</td>
+          <td>₹ {item.dprice}</td>
+          <td className="text-green-700 font-semibold">
+            ₹ {Number(item.subtotal || 0).toFixed(2)}
+          </td>
+          <td>
+            <button
+              className="text-red-500 hover:text-red-700"
+              onClick={() =>
+                dispatch(
+                  removeFromCart({
+                    productId: item.productId,
+                    brandId: item.brandId,
+                    financialId: item.financialId,
+                  })
+                )
+              }
+            >
+              🗑️
+            </button>
+          </td>
+        </tr>
+      ))
+    )}
+  </tbody>
+</table>
+
       </div>
 
       {/* Totals */}
       <div className="bg-gray-200 p-2 rounded shadow-sm grid grid-cols-4 gap-2 items-center text-center text-sm font-medium">
         <div>
-          <div className="text-gray-600">Quantity:</div>
+          <div className="text-gray-600">Qty</div>
           <div className="text-black text-lg">{cartTotalQty}</div>
         </div>
         <div>
-          <div className="text-gray-600">Total Amount:</div>
+          <div className="text-gray-600">TotAmt</div>
           <div className="text-black text-lg">₹ {cartTotalRaw.toFixed(2)}</div>
         </div>
         <div>
-          <div className="text-gray-600">Total Discount:</div>
+          <div className="text-gray-600">TotDis</div>
           <div className="text-black text-lg">₹ {cartTotalDiscount.toFixed(2)}</div>
         </div>
         <div>
-          <div className="text-gray-600">Discounted Total:</div>
+          <div className="text-gray-600">PayAmt</div>
           <div className="text-black text-lg">₹ {cartTotal.toFixed(2)}</div>
         </div>
       </div>
@@ -148,12 +276,12 @@ const filteredOrders = recentOrders.filter((order) => {
       </div> */}
 
       <div className="grid grid-cols-4 gap-2 mt-2">
-   <button
+   {/* <button
   onClick={() => dispatch(fetchLatestOrders())}
   className="mb-3 px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 text-md active:translate-y-0.5 active:shadow-inner transition-all duration-75"
 >
   Refresh Orders
-</button>
+</button> */}
 
 <button
   className="bg-pink-600 text-white mb-3 px-4 py-2 text-md rounded-lg active:translate-y-0.5 active:shadow-inner transition-all duration-75"
@@ -164,8 +292,18 @@ const filteredOrders = recentOrders.filter((order) => {
 <button
   className="bg-blue-600 text-white mb-3 px-4 py-2 text-md rounded-lg active:translate-y-0.5 active:shadow-inner transition-all duration-75"
 >
-  Multiple
+  Multi
 </button>
+<button
+  className="bg-green-600 text-white mb-3 px-4 py-2 text-md rounded-lg active:translate-y-0.5 active:shadow-inner transition-all duration-75"
+  onClick={handleUpiClick}
+>
+  UPI
+</button>
+
+
+
+
 
 
         

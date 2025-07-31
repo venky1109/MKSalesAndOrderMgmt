@@ -61,29 +61,29 @@ const cartSlice = createSlice({
       return;
     }
 
-    existingItem.quantity += 1;
+    existingItem.qty += 1;
     existingItem.stock -= 1;
 
-    const discountAmount = existingItem.price * (existingItem.discount / 100);
+    // const discountAmount = existingItem.price * (existingItem.discount / 100);
     existingItem.subtotal = parseFloat(
-      ((existingItem.price - discountAmount) * existingItem.quantity).toFixed(2)
+      ((existingItem.dprice) * existingItem.qty).toFixed(2)
     );
   } else {
-    const stock = parseInt(product.countInStock || product.quantity || 0);
+    const stock = parseInt(product.countInStock || product.qty || 0);
     if (stock <= 0) {
       alert("❌ Stock unavailable for this item.");
       return;
     }
 
     const discount = product.discount || 0;
-    const discountAmount = product.MRP * (discount / 100);
-    const subtotal = parseFloat((product.MRP - discountAmount).toFixed(2));
+    // const discountAmount = product.dprice
+    const subtotal = parseFloat((product.dprice).toFixed(2));
 
     const newItem = {
       id: product.id, // composite ID like productId-brandId-financialId
       item: product.productName,
       stock: stock - 1,
-      quantity: 1,
+      quantity: product.quantity,
       price: product.MRP,
       catalogQuantity: product.catalogQuantity,
       discount,
@@ -93,7 +93,9 @@ const cartSlice = createSlice({
       brand: product.brand,
       brandId: product.brandId,
       financialId: product.financialId,
+      dprice:product.dprice,
       productId: product._id || product.productId || product.id.split('-')[0],
+      qty:1
     };
 
     state.items.push(newItem);
@@ -106,13 +108,13 @@ const cartSlice = createSlice({
   let totalRawAmount = 0;
 
   for (const item of state.items) {
-    const rawAmount = item.price * item.quantity;
-    const itemDiscount = item.price * (item.discount / 100);
+    const rawAmount = item.price * item.qty;
+    // const itemDiscount = item.dprice;
 
     totalRawAmount += rawAmount;
-    total += (item.price - itemDiscount) * item.quantity;
-    totalQty += item.quantity;
-    totalDiscount += itemDiscount * item.quantity;
+    total += (item.dprice) * item.qty;
+    totalQty += item.qty;
+    totalDiscount += (item.price-item.dprice) * item.qty;
   }
 
   state.totalRawAmount = parseFloat(totalRawAmount.toFixed(2));
@@ -141,7 +143,7 @@ const cartSlice = createSlice({
   }
 
   const item = state.items[itemIndex];
-  const originalQty = item.quantity;
+  const originalQty = item.qty;
   const diff = qty - originalQty;
 
   if (qty === 0) {
@@ -154,11 +156,11 @@ const cartSlice = createSlice({
       return;
     }
 
-    item.quantity = qty;
+    item.qty = qty;
     item.stock -= diff;
 
-    const discountAmount = item.price * (item.discount / 100);
-    item.subtotal = parseFloat(((item.price - discountAmount) * item.quantity).toFixed(2));
+    // const discountAmount = item.price * (item.discount / 100);
+    item.subtotal = parseFloat(((item.dprice) * item.qty).toFixed(2));
   }
 
   // 🔁 Recalculate totals
@@ -168,13 +170,13 @@ const cartSlice = createSlice({
   state.totalRawAmount = 0;
 
   for (const i of state.items) {
-    const rawAmount = i.price * i.quantity;
-    const itemDiscountAmount = i.price * (i.discount / 100);
+    const rawAmount = i.price * i.qty;
+    const itemDiscountAmount = i.dprice * i.qty;
 
-    state.total += (i.price - itemDiscountAmount) * i.quantity;
-    state.totalQty += i.quantity;
+     state.total += itemDiscountAmount ;
+    state.totalQty += i.qty;
     state.totalRawAmount += rawAmount;
-    state.totalDiscount += itemDiscountAmount * i.quantity;
+    state.totalDiscount += (rawAmount - itemDiscountAmount) ;
   }
 
   state.total = parseFloat(state.total.toFixed(2));
@@ -194,16 +196,16 @@ const cartSlice = createSlice({
   state.total = state.items.reduce((sum, item) => sum + item.subtotal, 0);
   state.total = parseFloat(state.total.toFixed(2));
 
-  state.totalRawAmount = state.items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  state.totalRawAmount = state.items.reduce((sum, item) => sum + item.price * item.qty, 0);
   state.totalRawAmount = parseFloat(state.totalRawAmount.toFixed(2));
 
   state.totalDiscount = state.items.reduce(
-    (sum, item) => sum + (item.price * (item.discount / 100) * item.quantity),
+    (sum, item) => sum + ((item.price-item.dprice) * item.qty),
     0
   );
   state.totalDiscount = parseFloat(state.totalDiscount.toFixed(2));
 
-  state.totalQty = state.items.reduce((sum, item) => sum + item.quantity, 0);
+  state.totalQty = state.items.reduce((sum, item) => sum + item.qty, 0);
 
   saveCartToStorage(state);
 },

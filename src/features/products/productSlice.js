@@ -266,21 +266,36 @@ const productSlice = createSlice({
 .addCase(updateProductStockOnly.fulfilled, (state, action) => {
   const updated = action.payload;
 
-  // ✅ Check that state.all is an array
   if (!Array.isArray(state.all)) {
     console.warn('❌ state.all is corrupted or not an array in updateProductStockOnly:', state.all);
-    state.all = []; // Optionally reset it
+    state.all = [];
     return;
   }
 
-  const index = state.all.findIndex((p) => p.id === updated.id);
-  if (index !== -1) {
-    state.all[index].quantity = updated.quantity;
-  } 
-  // else {
-  //   console.warn('⚠️ Product not found in state.all during stock update:', updated.id);
-  // }
+  const productIndex = state.all.findIndex((p) => p._id === updated._id);
+  if (productIndex === -1) {
+    console.warn('⚠️ Product not found:', updated._id);
+    return;
+  }
+
+  const product = state.all[productIndex];
+  const brand = product.details?.find(b => b._id === updated.brandID);
+  if (!brand) {
+    console.warn('⚠️ Brand not found in product:', updated.brandID);
+    return;
+  }
+
+  const financial = brand.financials?.find(f => f._id === updated.financialID);
+  if (!financial) {
+    console.warn('⚠️ Financial not found:', updated.financialID);
+    return;
+  }
+
+  // ✅ Safely update quantity
+  financial.quantity = updated.quantity;
 })
+
+
     .addCase(updateProductStockOnly.rejected, (state, action) => {
       state.error = action.payload || 'Stock update failed';
     })

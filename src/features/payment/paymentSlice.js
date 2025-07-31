@@ -27,6 +27,24 @@ export const initiateDeliveryPayment = createAsyncThunk(
   }
 );
 
+
+export const handleUpiPayment = createAsyncThunk(
+  'payment/handleUpiPayment',
+  async (paymentData, { rejectWithValue }) => {
+    try {
+      const { data } = await axios.post(
+        `${BASE_URL}/payments/initiateJuspayPayment`, // ✅ Make sure this backend route exists
+        paymentData
+      );
+      return data;
+    } catch (error) {
+      console.error('UPI Payment error:', error.response?.data || error.message);
+      return rejectWithValue(error.response?.data || error.message);
+    }
+  }
+);
+
+
 const paymentSlice = createSlice({
   name: 'payment',
   initialState: {
@@ -55,7 +73,20 @@ const paymentSlice = createSlice({
       .addCase(initiateDeliveryPayment.rejected, (state, action) => {
         state.loading = false;
         state.error = action.payload || 'Payment failed';
-      });
+      })
+      .addCase(handleUpiPayment.pending, (state) => {
+  state.loading = true;
+  state.error = null;
+})
+.addCase(handleUpiPayment.fulfilled, (state, action) => {
+  state.loading = false;
+  state.paymentResponse = action.payload;
+})
+.addCase(handleUpiPayment.rejected, (state, action) => {
+  state.loading = false;
+  state.error = action.payload;
+});
+
   },
 });
 

@@ -6,6 +6,7 @@ import { updateProductStockOnly } from '../products/productSlice';
 export const createOrder = createAsyncThunk(
   'orders/create',
   async ({ payload, token, cartItems }, thunkAPI) => {
+    
     try {
       const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/orders/pos`, {
         method: 'POST',
