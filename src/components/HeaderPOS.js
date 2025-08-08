@@ -2,7 +2,7 @@ import { useDispatch, useSelector } from "react-redux";
 import { Link } from 'react-router-dom';
 import { logout ,getPosUserBalance} from "../features/auth/posUserSlice";
 import logo from "../assests/ManaKiranaLogo1024x1024.png";
-import { useState, useMemo } from "react";
+import { useState, useMemo,useEffect } from "react";
 
 function HeaderPOS({ onSidebarToggle }) {
   const dispatch = useDispatch();
@@ -13,6 +13,13 @@ function HeaderPOS({ onSidebarToggle }) {
     const [balance, setBalance] = useState(posUserInfo?.balance ?? 0);
 
   const [showMobileMenu, setShowMobileMenu] = useState(false);
+
+  useEffect(() => {
+  if (posUserInfo?.balance !== undefined) {
+    setBalance(posUserInfo.balance);
+  }
+}, [posUserInfo?.balance]);
+
 
   // Format Rupees nicely
   const earningsText = useMemo(() => {
