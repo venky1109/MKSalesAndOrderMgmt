@@ -1,4 +1,3 @@
-// 📁 features/cart/cartSlice.js
 import { createSlice } from '@reduxjs/toolkit';
 
 const loadCartFromStorage = () => {
@@ -11,6 +10,10 @@ const loadCartFromStorage = () => {
     return undefined;
   }
 };
+
+
+
+
 
 const saveCartToStorage = (state) => {
   try {
@@ -216,9 +219,28 @@ const cartSlice = createSlice({
       state.totalDiscount = 0;
       state.totalRawAmount=0;
       localStorage.removeItem('cart');
-    }
+    },
+
+    setCart: (state, action) => {
+  const { items, total } = action.payload;
+  state.items = items;
+  state.total = total;
+  state.totalQty = items.reduce((sum, item) => sum + item.qty, 0);
+  state.totalDiscount = items.reduce((sum, item) => sum + (item.price - item.dprice) * item.qty, 0);
+  state.totalRawAmount = items.reduce((sum, item) => sum + item.price * item.qty, 0);
+
+  // ✅ Save to localStorage inside reducer as well
+  try {
+    localStorage.setItem('cart', JSON.stringify(state));
+  } catch (e) {
+    console.warn('Failed to save cart to storage:', e);
+  }
+}
+
   }
 });
+
+export const { setCart } = cartSlice.actions;
 
 export const { addToCart, updateQty, removeFromCart, clearCart } = cartSlice.actions;
 export default cartSlice.reducer;

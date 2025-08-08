@@ -25,6 +25,7 @@ const ProductList = forwardRef((props, ref) => {
   const [search, setSearch] = useState('');
   const [barcodeInput, setBarcodeInput] = useState('');
   const [windowWidth, setWindowWidth] = useState(window.innerWidth);
+  const [showFilters, setShowFilters] = useState(false); 
 
   useEffect(() => {
     if (token && safeProducts.length === 0) {
@@ -192,12 +193,12 @@ const ProductList = forwardRef((props, ref) => {
             qty: 1
           }))
         }
-        className="bg-green-100 border p-2 rounded shadow text-center cursor-pointer hover:bg-green-200 m-1"
+        className="bg-gray-100 w-full border p-2 rounded shadow text-center cursor-pointer hover:bg-blue-100 m-1"
       >
         <img
           src={d.images?.[0]?.image}
           alt={p.name}
-          className="w-full h-24 object-contain mb-2"
+          className="w-full h-20 object-contain mb-2"
           loading="lazy"
         />
         <div className="text-xs text-red-600 font-semibold">Qty: {f.quantity} {f.units}</div>
@@ -211,7 +212,9 @@ const ProductList = forwardRef((props, ref) => {
   };
 
   return (
-    <div className="p-4 bg-white border rounded shadow-sm h-full overflow-y-auto">
+     <div className="p-4 bg-white border rounded shadow-sm h-full overflow-y-auto">
+
+      {/* Barcode Scan */}
       <div className="mb-4">
         <input
           type="text"
@@ -223,7 +226,18 @@ const ProductList = forwardRef((props, ref) => {
           className="border p-2 w-full text-lg text-center"
         />
       </div>
+<div className="mb-3">
+    <button
+      onClick={() => setShowFilters((prev) => !prev)}
+      className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded w-full md:w-auto"
+    >
+      {showFilters ? "Hide Filters & Search" : "Show Filters & Search"}
+    </button>
+  </div>
 
+  {/* Filters + Product Grid — only shown when toggled */}
+  {showFilters && (
+    <>
       {/* Filters */}
       <div className="flex flex-wrap gap-2 mb-3">
         <select
@@ -259,7 +273,9 @@ const ProductList = forwardRef((props, ref) => {
 
       {/* Product Grid */}
       {loading ? (
-        <div className="text-center text-blue-500 font-medium">Loading products...</div>
+        <div className="text-center text-blue-500 font-medium">
+          Loading products...
+        </div>
       ) : error ? (
         <div className="text-red-600 text-sm">{error}</div>
       ) : flatProducts.length === 0 ? (
@@ -277,7 +293,10 @@ const ProductList = forwardRef((props, ref) => {
           {ProductCell}
         </Grid>
       )}
-    </div>
+    </>
+  )}
+</div>
+  
   );
 });
 

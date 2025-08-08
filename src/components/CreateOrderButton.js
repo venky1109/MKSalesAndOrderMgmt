@@ -9,7 +9,7 @@ import {
 } from '../features/customers/customerSlice';
 import { fetchAllProducts } from '../features/products/productSlice';
 // import { useAuth } from '../context/AuthContext'; // adjust path as needed
-
+import CashModal from './CashModal';
 
 
 function CreateOrderButton() {
@@ -18,6 +18,9 @@ function CreateOrderButton() {
   const formattedTime = now.toLocaleTimeString();
   const [orderCreated, setOrderCreated] = useState(false);
 
+
+  const [showCashModal, setShowCashModal] = useState(false);
+  const [pendingCustomer, setPendingCustomer] = useState(null);
 
   const dispatch = useDispatch();
   const cartItems = useSelector((state) => state.cart.items || []);
@@ -131,101 +134,128 @@ function CreateOrderButton() {
     printWindow.document.close();
   };
 
+
+
+
+
+
+  
   const handleCreateOrder = async () => {
-    if (orderCreated) return;
-    if (cartItems.length === 0) {
-      alert('🛒 Cart is empty. Please add items first.');
-      return;
-    }
+  if (orderCreated) return;
 
-    let customer = null;
-    const phone = prompt('📱 Enter customer mobile number:');
-    if (!phone || phone.trim().length < 10) {
-      alert('⚠️ Valid phone number is required.');
-      return;
-    }
+  if (cartItems.length === 0) {
+    alert('🛒 Cart is empty. Please add items first.');
+    return;
+  }
 
+  let customer = null;
+  const phone = prompt('📱 Enter customer mobile number:');
+  if (!phone || phone.trim().length < 10) {
+    alert('⚠️ Valid phone number is required.');
+    return;
+  }
+
+  try {
+    customer = await dispatch(fetchCustomerByPhone({ phone, token })).unwrap();
+  } catch {
+    let name = 'NA';
+    let address = 'NA';
     try {
-      // Step 1: Try fetching existing customer
-      customer = await dispatch(fetchCustomerByPhone({ phone, token })).unwrap();
-    } catch {
-      // Step 2: Prompt and create new customer if not found
-      let name = prompt('Enter customer name:')?.trim() || 'NA';
-      let address = prompt('Enter customer address:')?.trim() || 'NA';
-      // let email = prompt('📧 Enter customer email (optional):')?.trim() || 'NA';
-
-      try {
-        customer = await dispatch(
-          createCustomer({ name, phone,  address, token })
-        ).unwrap();
-      } catch (err) {
-        alert('❌ Failed to create customer: ' + err.message);
-        return;
-      }
-      setOrderCreated(true);
+      customer = await dispatch(
+        createCustomer({ name, phone, address, token })
+      ).unwrap();
+    } catch (err) {
+      alert('❌ Failed to create customer: ' + err.message);
+      return;
     }
+  }
 
-   const orderPayload = {
-    user: customer._id,
-    
-  shippingAddress: {
-    street: customer.address || 'NA',
-    city: customer.city || 'NA',
-    postalCode: customer.postalCode || '000000',
-    country: 'India', // optional, default if needed
-  },
-  paymentMethod: 'Cash',
-  orderItems: cartItems.map((item) => ({
-    name: item.item, // ✅ match the name expected in schema
-    quantity: item.catalogQuantity, // or `item.quantity`, depending on your logic
-    units: item.units,
-    brand: item.brand,
-    qty: item.qty ?? item.quantity, // fallback for compatibility
-    image: item.image || '',
-    price: item.dprice, // or item.price if that's what you're showing
-    productId: item.id,          // Must be MongoDB ObjectId
-    brandId: item.brandId,       // Must be MongoDB ObjectId
-    financialId: item.financialId // Must be MongoDB ObjectId
-  })),
-  totalPrice: total,
+  // ✅ Only show modal — don't create order here
+  setPendingCustomer(customer);
+  setShowCashModal(true);
 };
 
 
+const handleConfirmCash = async (cashGiven) => {
+  setShowCashModal(false);
 
-    try {
-      const result = await dispatch(
-        createOrder({ payload: orderPayload, token, cartItems })
-      ).unwrap();
-      // console.log('create order result '+result)
-      alert(`✅ Order Created: ID ${result._id}`);
-
-      const fullOrder = {
-        id: result._id,
-        items: cartItems,
-        total: result.total || total,
-        totalQty: result.totalQty || cartItems.reduce((sum, i) => sum + i.quantity, 0),
-        totalDiscount: result.totalDiscount || 0,
-        datetime: new Date().toISOString(),
-      };
-
-      openPrintWindow(fullOrder);
-      dispatch(fetchLatestOrders()); 
-      dispatch(clearCart());
-      dispatch(fetchAllProducts(token));
-      // console.log('🧹 Cart and customer cleared after order!');
-    } catch (err) {
-      console.error('❌ Error creating order:', err);
-      alert('Failed to create order: ' + err.message);
-    }
+  const orderPayload = {
+    user: pendingCustomer._id,
+    shippingAddress: {
+      street: pendingCustomer.address || 'NA',
+      city: pendingCustomer.city || 'NA',
+      postalCode: pendingCustomer.postalCode || '000000',
+      country: 'India',
+    },
+    paymentMethod: 'Cash',
+    orderItems: cartItems.map((item) => ({
+      name: item.item,
+      quantity: item.catalogQuantity,
+      units: item.units,
+      brand: item.brand,
+      qty: item.qty ?? item.quantity,
+      image: item.image || '',
+      price: item.dprice,
+      productId: item.id,
+      brandId: item.brandId,
+      financialId: item.financialId,
+    })),
+    totalPrice: total,
   };
 
+  try {
+    const result = await dispatch(
+      createOrder({ payload: orderPayload, token, cartItems })
+    ).unwrap();
+
+    alert(`✅ Order Created: ID ${result._id}`);
+
+    const fullOrder = {
+      id: result._id,
+      items: cartItems,
+      total: result.total || total,
+      totalQty: result.totalQty || cartItems.reduce((sum, i) => sum + i.quantity, 0),
+      totalDiscount: result.totalDiscount || 0,
+      cashGiven,
+      change: cashGiven - total,
+      datetime: new Date().toISOString(),
+    };
+
+    openPrintWindow(fullOrder);
+    dispatch(fetchLatestOrders());
+    dispatch(clearCart());
+    dispatch(fetchAllProducts(token));
+    setOrderCreated(true);
+  } catch (err) {
+    alert('❌ Order failed: ' + err.message);
+  }
+};
+
+
+  
+
   return (
+    <div className="grid">
     <button
       onClick={handleCreateOrder}
-      className="bg-purple-600 text-white mb-3 px-4 py-2  text-md rounded-lg w-full active:translate-y-0.5 active:shadow-inner transition-all duration-75"
+      className="bg-green-600 text-white mb-3 px-4 py-4 text-md rounded-lg active:translate-y-0.5 active:shadow-inner transition-all duration-75"
     >
        Cash
     </button>
+
+    {showCashModal && pendingCustomer && (
+  <CashModal
+    total={total}
+    onCancel={() => {
+      setShowCashModal(false);
+      setPendingCustomer(null);
+    }}
+    onConfirm={handleConfirmCash}
+  />
+)}
+    </div>
+
+
   );
 }
 
