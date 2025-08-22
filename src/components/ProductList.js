@@ -222,7 +222,7 @@ const ProductList = forwardRef((props, ref) => {
           value={barcodeInput}
           onChange={(e) => setBarcodeInput(e.target.value)}
           onKeyDown={handleBarcodeScan}
-          placeholder="📷 Scan barcode to add"
+          placeholder="Scan barcode to add"
           className="border p-2 w-full text-lg text-center"
         />
       </div>

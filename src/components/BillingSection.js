@@ -1,13 +1,14 @@
 import React from 'react';
 
-import { useEffect ,useState} from 'react';
+import { useEffect ,useState, useCallback} from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { updateQty, removeFromCart,clearCart,setCart } from '../features/cart/cartSlice';
 import CreateOrderButton from './CreateOrderButton';
 import { fetchLatestOrders } from '../features/orders/orderSlice';
-import { fetchOrderItemsByOrderId } from '../features/orderItems/orderItemSlice';
+import { fetchAllProducts } from '../features/products/productSlice';
+// import { fetchOrderItemsByOrderId } from '../features/orderItems/orderItemSlice';
 // import { useAuth } from '../context/AuthContext'; // adjust path as needed
-import {formatDateTime} from '../utils/dateFormatter'
+// import {formatDateTime} from '../utils/dateFormatter'
 import {initiateDeliveryPayment} from '../features/payment/paymentSlice'
 import {createOrder} from '../features/orders/orderSlice'
 import {
@@ -20,25 +21,36 @@ import ProductList from './ProductList';
 
 function BillingSection() {
   const [holds, setHolds] = useState([]);
-  const [showDetails, setShowDetails] = useState(false);
+  // const [showDetails, setShowDetails] = useState(false);
 
   const dispatch = useDispatch();
-  const [showModal, setShowModal] = useState(false);
-  const [selectedOrderId, setSelectedOrderId] = useState(null);
+  // const [showModal, setShowModal] = useState(false);
+  // const [selectedOrderId, setSelectedOrderId] = useState(null);
   const cartItems = useSelector(state => state.cart.items || []);
   const cartTotal = useSelector(state => state.cart.total || 0);
   const cartTotalQty = useSelector(state => state.cart.totalQty || 0);
   const cartTotalDiscount = useSelector(state => state.cart.totalDiscount || 0);
   const cartTotalRaw = useSelector(state => state.cart.totalRawAmount || 0);
   const token = useSelector((state) => state.posUser.userInfo?.token);
-  const recentOrders = useSelector((state) => state.orders.recent);
-  const user = useSelector((state) => state.posUser.userInfo);
+const [expandedKey, setExpandedKey] = useState(null);
+const toggleExpand = useCallback(
+  (key) => setExpandedKey(prev => (prev === key ? null : key)),
+  []
+);
+
+  // const recentOrders = useSelector((state) => state.orders.recent);
+  // const user = useSelector((state) => state.posUser.userInfo);
   const [loading, setLoading] = useState(false);
 
-
+  useEffect(() => {
+    if (token) dispatch(fetchAllProducts(token));
+  }, [dispatch, token]);
 
 useEffect(() => {
   dispatch(fetchLatestOrders());
+  // after storing posUser.userInfo
+
+
   // console.log("Initial fetch");
   // const interval = setInterval(() => {
   //   console.log("Auto-refresh triggered");
@@ -56,6 +68,17 @@ useEffect(() => {
     });
   setHolds(existing);
 }, []);
+
+useEffect(() => {
+    const payload = {
+      items: cartItems,
+      total: cartTotal,
+      totalQty: cartTotalQty,
+      totalDiscount: cartTotalDiscount,
+      totalRawAmount: cartTotalRaw,
+    };
+    localStorage.setItem('cart', JSON.stringify(payload));
+  }, [cartItems, cartTotal, cartTotalQty, cartTotalDiscount, cartTotalRaw]);
 
 
 
@@ -119,25 +142,25 @@ const handleRestoreHold = (holdKey) => {
 
 
 
-const handleClick = (orderId) => {
-  setSelectedOrderId(orderId);
-  dispatch(fetchOrderItemsByOrderId({ orderId, token }));
-  setShowModal(true);
-};
+// const handleClick = (orderId) => {
+//   setSelectedOrderId(orderId);
+//   dispatch(fetchOrderItemsByOrderId({ orderId, token }));
+//   setShowModal(true);
+// };
 
 
-const orderItems = useSelector((state) => state.orderItems.items || []);
-const filteredOrders = recentOrders.filter((order) => {
-  if (user?.role === 'CASHIER') {
-    return order.source === 'CASHIER'; // POS orders only
-  } else if (user?.role === 'ONLINE_CASHIER') {
-    return order.source === 'ONLINE'; // Online orders only
-  } else if (user?.role === 'HYBRID_CASHIER') {
-    return ['CASHIER', 'ONLINE'].includes(order.source); // All orders
-  } else {
-    return true; // Admins or general fallback
-  }
-});
+// const orderItems = useSelector((state) => state.orderItems.items || []);
+// const filteredOrders = recentOrders.filter((order) => {
+//   if (user?.role === 'CASHIER') {
+//     return order.source === 'CASHIER'; // POS orders only
+//   } else if (user?.role === 'ONLINE_CASHIER') {
+//     return order.source === 'ONLINE'; // Online orders only
+//   } else if (user?.role === 'HYBRID_CASHIER') {
+//     return ['CASHIER', 'ONLINE'].includes(order.source); // All orders
+//   } else {
+//     return true; // Admins or general fallback
+//   }
+// });
 
 const handleUpiClick = async () => {
   const phone = prompt("📱 Enter Customer Mobile Number (10 digits):");
@@ -250,77 +273,135 @@ const handleUpiClick = async () => {
 
   {/* Scrollable table area */}
   <div className="min-h-0 overflow-x-auto overflow-y-auto flex-1">
-    <table className="w-full table-auto text-sm sm:text-xs">
-      <thead className="bg-gray-200 text-gray-700 text-sm sm:text-xs sticky top-0 z-10">
-        <tr>
-          <th className="px-4 sm:px-4 p-2 text-left">ItemName</th>
-          <th className="px-2">Quantity</th>
-          <th className="px-2">Stock</th>
-          <th className="px-2">Qty</th>
-          <th className="px-2">Amount</th>
-          <th className="px-2">Price</th>
-          <th className="px-2">Discount</th>
-          <th className="px-2">dPrice</th>
-          <th className="px-2">Bin</th>
-        </tr>
-      </thead>
-      <tbody>
-        {cartItems.length === 0 ? (
-          <tr className="text-center text-gray-600">
-            <td className="p-2" colSpan={9}>No items added yet</td>
-          </tr>
-        ) : (
-          cartItems.map((item) => (
-            <tr
-              key={`${item.productId}-${item.brandId}-${item.financialId}`}
-              className="text-center text-sm sm:text-xs"
-            >
-              <td className="p-2 text-xs text-left">
+  <table className="w-full table-auto text-sm sm:text-xs">
+    <thead className="bg-gray-200 text-gray-700 text-sm sm:text-xs sticky top-0 z-10">
+      <tr>
+        {/* 👉 Only these 5 columns */}
+        <th className="px-4 sm:px-4 p-2 text-left">ItemName</th>
+        <th className="px-2">Quantity</th>
+        <th className="px-2">Qty</th>
+        <th className="px-2">dPrice</th>
+        <th className="px-2">Amount</th>
+      </tr>
+    </thead>
+
+   <tbody>
+  {cartItems.length === 0 ? (
+    <tr className="text-center text-gray-600">
+      <td className="p-2" colSpan={5}>No items added yet</td>
+    </tr>
+  ) : (
+    cartItems.map((item) => {
+      const rowKey = `${item.productId ?? item.id}-${item.brandId}-${item.financialId}`;
+      const amount = Number(item.subtotal || 0);
+
+      return (
+        <React.Fragment key={rowKey}>
+          {/* Compact row */}
+          <tr
+            className="text-center text-sm sm:text-xs hover:bg-blue-50 cursor-pointer"
+            onDoubleClick={() => toggleExpand(rowKey)}            // desktop dbl-click
+            onClick={(e) => { if (e.detail === 2) toggleExpand(rowKey); }} // dbl-click fallback
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') toggleExpand(rowKey); }}
+            tabIndex={0}
+            data-rowkey={rowKey}
+            title="Double-click (or tap chevron) to see details"
+          >
+            {/* Item name + chevron (works on mobile) */}
+            <td className="p-2 text-xs text-left">
+              <div className="flex items-center justify-between gap-2">
                 <span className="hidden sm:inline">{item.item}</span>
                 <span className="sm:hidden text-xs">
                   {item.item.replace(/\s*\([^)]*\)/g, '').trim()}
                 </span>
-              </td>
-              <td>{item.catalogQuantity}{item.units}</td>
-              <td>{item.stock}</td>
-              <td>
-                <input
-                  type="number"
-                  value={item.qty}
-                  min="1"
-                  max={item.stock + item.qty}
-                  className="w-14 border rounded px-1 text-center text-xs"
-                  onChange={(e) =>
-                    dispatch(updateQty({ id: item.id, qty: parseInt(e.target.value) }))
-                  }
-                />
-              </td>
-              <td className="text-green-700 font-semibold">
-                ₹ {Number(item.subtotal || 0).toFixed(2)}
-              </td>
-              <td>₹ {item.price}</td>
-              <td>{item.discount} %</td>
-              <td>₹ {item.dprice}</td>
-              <td>
                 <button
-                  className="text-red-500 hover:text-red-700"
-                  onClick={() =>
-                    dispatch(removeFromCart({
-                      productId: item.productId,
-                      brandId: item.brandId,
-                      financialId: item.financialId,
-                    }))
-                  }
+                  type="button"
+                  className="ml-2 text-gray-500 hover:text-gray-700 px-2 py-0.5 border rounded text-[11px]"
+                  onClick={(e) => { e.stopPropagation(); toggleExpand(rowKey); }}
+                  aria-expanded={expandedKey === rowKey}
+                  aria-label="Toggle details"
                 >
-                  🗑️
+                  {expandedKey === rowKey ? '▴' : '▾'}
                 </button>
+              </div>
+            </td>
+
+            {/* Quantity (catalog pack) */}
+            <td>{item.catalogQuantity}{item.units}</td>
+
+            {/* Order Qty (editable) */}
+            <td>
+              <input
+                type="number"
+                value={item.qty}
+                min="1"
+                max={(item.stock ?? 0) + (item.qty ?? 0)}
+                className="w-14 border rounded px-1 text-center text-xs"
+                onChange={(e) =>
+                  dispatch(updateQty({ id: item.id, qty: parseInt(e.target.value || '0', 10) }))
+                }
+              />
+            </td>
+
+            {/* dPrice */}
+            <td>₹ {item.dprice}</td>
+
+            {/* Amount */}
+            <td className="text-green-700 font-semibold">₹ {amount.toFixed(2)}</td>
+          </tr>
+
+          {/* Expanded drawer */}
+          {expandedKey === rowKey && (
+            <tr className="bg-white">
+              <td colSpan={5} className="p-2 border-t">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                  <div className="p-2 bg-gray-50 rounded">
+                    <div className="text-gray-500">Stock</div>
+                    <div className="font-semibold">{item.stock}</div>
+                  </div>
+                  <div className="p-2 bg-gray-50 rounded">
+                    <div className="text-gray-500">Price (MRP)</div>
+                    <div className="font-semibold">₹ {item.price}</div>
+                  </div>
+                  <div className="p-2 bg-gray-50 rounded">
+                    <div className="text-gray-500">Discount</div>
+                    <div className="font-semibold">{item.discount} %</div>
+                  </div>
+                  {/* <div className="p-2 bg-gray-50 rounded">
+                    <div className="text-gray-500">IDs</div>
+                    <div className="font-mono break-all">
+                      <div>Prod: {item.productId ?? item.id}</div>
+                      <div>Brand: {item.brandId}</div>
+                      <div>Fin: {item.financialId}</div>
+                    </div>
+                  </div> */}
+                  <div className="p-2 flex items-center">
+                    <button
+                      className="text-red-600 hover:text-red-700 px-3 py-1 border rounded"
+                      onClick={() =>
+                        dispatch(removeFromCart({
+                          productId: item.productId,
+                          brandId: item.brandId,
+                          financialId: item.financialId,
+                        }))
+                      }
+                    >
+                      🗑️ Remove
+                    </button>
+                  </div>
+                </div>
               </td>
             </tr>
-          ))
-        )}
-      </tbody>
-    </table>
-  </div>
+          )}
+        </React.Fragment>
+      );
+    })
+  )}
+</tbody>
+
+  </table>
+</div>
+
 
   {/* Sticky footer totals */}
   <div className="sticky bottom-0 bg-white border-t px-3 py-2">
@@ -363,7 +444,7 @@ const handleUpiClick = async () => {
         <input placeholder="Other Charges" className="border px-2 py-1 text-sm rounded w-32" />
       </div> */}
 
-      <div className="grid grid-cols-5 gap-2 ">
+      <div className="grid grid-cols-4 gap-2 ">
    {/* <button
   onClick={() => dispatch(fetchLatestOrders())}
   className="mb-3 px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 text-md active:translate-y-0.5 active:shadow-inner transition-all duration-75"
@@ -378,12 +459,12 @@ const handleUpiClick = async () => {
   Hold
 </button>
 
- <button
+ {/* <button
     onClick={() => setShowDetails(prev => !prev)}
     className="bg-gray-600 text-white mb-3 px-4 py-1 text-md rounded-lg active:translate-y-0.5 active:shadow-inner transition-all duration-75"
   >
     {showDetails ? "HTX" : "STX"}
-  </button>
+  </button> */}
 <button
   className="bg-orange-600 text-white mb-3 px-4 py-1 text-md rounded-lg active:translate-y-0.5 active:shadow-inner transition-all duration-75"
 >
@@ -415,6 +496,18 @@ const handleUpiClick = async () => {
 
 
       </div>
+{/* <div className="mb-4">
+        <input
+          type="text"
+          ref={barcodeRef}
+          value={barcodeInput}
+          onChange={(e) => setBarcodeInput(e.target.value)}
+          onKeyDown={handleBarcodeScan}
+          placeholder="Scan barcode to add"
+          className="border p-2 w-full text-lg text-center"
+        />
+      </div> */}
+
 <div
   className="w-full md:w-1/2 bg-gray-50 overflow-auto resize-y min-h-[120px] max-h-[85vh] rounded"
   style={{ height: '20vh' }}  // initial height
@@ -437,7 +530,7 @@ const handleUpiClick = async () => {
   ))}
 </div>
 
- 
+{/*  
 {showDetails && (
   <div className="mt-6">
     <div className="overflow-x-auto border rounded-lg bg-white shadow-sm">
@@ -519,8 +612,8 @@ const handleUpiClick = async () => {
       </table>
     </div>
   </div>
-)}
-
+)} */}
+{/* 
 {showModal && (
   <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
     <div className="bg-white rounded-lg shadow-lg w-[90%] max-w-2xl p-6 relative max-h-[85vh] flex flex-col">
@@ -567,7 +660,7 @@ const handleUpiClick = async () => {
       </button>
     </div>
   </div>
-)}
+)} */}
 
 
     </div>

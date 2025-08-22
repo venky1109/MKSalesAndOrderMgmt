@@ -8,10 +8,37 @@ import { AuthProvider } from './context/AuthContext';
 import PackingOrdersPage from './pages/PackingOrdersPage';
 import DispatchOrdersPage from './pages/DispatchOrdersPage';
 import DeliveryPage from './pages/DeliveryPage';
+import { hydrateFromCache, fetchAllProducts } from './features/products/productSlice';
+// import { publishQueuedOrders } from './features/orders/orderSlice';
+import { useEffect } from 'react';
+import { useDispatch, useSelector } from 'react-redux';
 
 function App() {
+  function AppBootHydrator() {
+  const dispatch = useDispatch();
+  const token = useSelector((s) => s.posUser?.userInfo?.token);
+
+  useEffect(() => {
+    // If offline at boot, hydrate products from cache
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      dispatch(hydrateFromCache());
+    }
+
+    // On reconnect: refresh products cache and publish queued orders
+    const onOnline = () => {
+      if (token) dispatch(fetchAllProducts(token));
+      // dispatch(publishQueuedOrders({ token }));
+    };
+
+    window.addEventListener('online', onOnline);
+    return () => window.removeEventListener('online', onOnline);
+  }, [dispatch, token]);
+
+  return null;
+}
   return (
     <AuthProvider>
+       <AppBootHydrator />
       <BrowserRouter>
         <Routes>
           {/* Public Login Route */}

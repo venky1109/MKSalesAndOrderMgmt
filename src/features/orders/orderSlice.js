@@ -1,12 +1,33 @@
 // 📁 src/features/orders/orderSlice.js
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import { updateProductStockOnly } from '../products/productSlice';
+import { enqueueOrder, peekOrdersQueue, setOrdersQueue } from '../../utils/offlineStorage';
+import { fetchCustomerByPhone, createCustomer } from '../customers/customerSlice'; 
+// -----------------------------
+// Save order offline (no network)
+// -----------------------------
+export const queueOrder = createAsyncThunk(
+  'orders/queueOrder',
+  async ({ payload, token, cartItems, phone }, thunkAPI) => {
+    const localOrder = {
+      _localId: `OFF-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      queuedAt: new Date().toISOString(),
+      payload,                   // what createOrder needs as "payload"
+      cartItems: cartItems || [],// snapshot for stock updates later
+      __token: token || null,    // optionally capture per-order token
+       phone: phone || null, 
+    };
+    enqueueOrder(localOrder);
+    return localOrder;
+  }
+);
 
-// ➕ Create POS Order
+// -----------------------------
+// Create order on server (yours)
+// -----------------------------
 export const createOrder = createAsyncThunk(
   'orders/create',
   async ({ payload, token, cartItems }, thunkAPI) => {
-    
     try {
       const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/orders/pos`, {
         method: 'POST',
@@ -18,45 +39,27 @@ export const createOrder = createAsyncThunk(
       });
 
       const data = await response.json();
-  
-      // console.log( JSON.stringify(payload))
-//      console.log('Status:', response.status); // should be 201
-// console.log('Response OK:', response.ok); // should be true
-// console.log('Data:', data);
-
-
-
       if (!response.ok) throw new Error(data.message || 'Order creation failed');
-      // console.log('stock update '+JSON.stringify(cartItems));
-      for (const item of cartItems) {
+
+      // Update product stocks sequentially (as you had)
+      for (const item of (cartItems || [])) {
         const newStock = item.stock;
         if (newStock >= 0) {
-          // // await thunkAPI.dispatch(
-          //   updateProductStockOnly({
-          //     productID: item.id,
-          //     brandID:item.brandId,
-          //     financialID:item.financialId,
-          //     newQuantity: newStock,
-          //     token,
-          //   })
-          // // );
           try {
-  await thunkAPI.dispatch(
-    updateProductStockOnly({
-      productID: item.id,
-      brandID: item.brandId,
-      financialID: item.financialId,
-      newQuantity: newStock,
-      token,
-    })
-  );
-} catch (err) {
-  console.warn('⚠️ Stock update failed for product:', item.id, err.message);
-}
-
+            await thunkAPI.dispatch(
+              updateProductStockOnly({
+                productID: item.id,
+                brandID: item.brandId,
+                financialID: item.financialId,
+                newQuantity: newStock,
+                token,
+              })
+            );
+          } catch (err) {
+            console.warn('⚠️ Stock update failed for product:', item.id, err.message);
+          }
         }
       }
-      
       return data;
     } catch (err) {
       return thunkAPI.rejectWithValue(err.message);
@@ -64,22 +67,128 @@ export const createOrder = createAsyncThunk(
   }
 );
 
+// // ------------------------------------------------------
+// // Publish queued orders, one-by-one, using createOrder()
+// // ------------------------------------------------------
+// export const publishQueuedOrdersSequential = createAsyncThunk(
+//   'orders/publishQueuedSequential',
+//   async ({ token }, thunkAPI) => {
+//     if (typeof navigator !== 'undefined' && !navigator.onLine) {
+//       return thunkAPI.rejectWithValue('Offline: cannot publish now');
+//     }
 
+//     const queue = peekOrdersQueue();
+//     if (!queue.length) return { published: 0, failed: 0, results: [] };
+
+//     const results = [];
+//     const remaining = [];
+//     let published = 0;
+
+//     for (const item of queue) {
+//       const { payload, cartItems, _localId, __token } = item;
+//       const tok = __token || token || thunkAPI.getState().posUser?.userInfo?.token;
+
+//       try {
+//         const res = await thunkAPI
+//           .dispatch(createOrder({ payload, token: tok, cartItems }))
+//           .unwrap();
+
+//         results.push({ localId: _localId, ok: true, serverId: res?._id });
+//         published += 1;
+//         // success → do not push to remaining
+//       } catch (e) {
+//         results.push({ localId: _localId, ok: false, error: e?.message || String(e) });
+//         remaining.push(item); // keep failed ones
+//       }
+//     }
+
+//     setOrdersQueue(remaining);
+//     return { published, failed: remaining.length, results };
+//   }
+// );
+// Publish queued orders sequentially, verifying/creating customer first
+export const publishQueuedOrdersSequential = createAsyncThunk(
+  'orders/publishQueuedSequential',
+  async ({ token }, thunkAPI) => {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      return thunkAPI.rejectWithValue('Offline: cannot publish now');
+    }
+
+    const state = thunkAPI.getState();
+    const fallbackToken = state.posUser?.userInfo?.token;
+    const queue = peekOrdersQueue();
+    if (!queue.length) return { published: 0, failed: 0, results: [] };
+
+    const remaining = [];
+    const results = [];
+    let published = 0;
+
+    for (const item of queue) {
+      const tok = item.__token || token || fallbackToken;
+      let payload = { ...item.payload }; // don’t mutate the queued snapshot
+
+      try {
+        // 1) Ensure customer is valid on server (by phone if we have it)
+        const phone = item.phone;
+        if (phone) {
+          let cust = null;
+          try {
+            cust = await thunkAPI.dispatch(fetchCustomerByPhone({ phone, token: tok })).unwrap();
+          } catch {
+            cust = null;
+          }
+          if (!cust?._id) {
+            const name = item.customerMeta?.name || 'NA';
+            // build address in whatever format your API expects
+            const addr =
+              item.customerMeta?.address || item.customerMeta?.city || item.customerMeta?.postalCode
+                ? { street: item.customerMeta?.address || 'NA',
+                    city: item.customerMeta?.city || 'NA',
+                    postalCode: item.customerMeta?.postalCode || '000000' }
+                : 'NA';
+            try {
+              cust = await thunkAPI
+                .dispatch(createCustomer({ name, phone, address: addr, token: tok }))
+                .unwrap();
+            } catch (e) {
+              results.push({ localId: item._localId, ok: false, error: 'Customer create failed: ' + (e?.message || e) });
+              remaining.push(item);
+              continue; // next queue item
+            }
+          }
+          payload.user = cust._id;
+        }
+
+        // 2) Create order on server (sequential via await)
+        const res = await thunkAPI
+          .dispatch(createOrder({ payload, token: tok, cartItems: item.cartItems }))
+          .unwrap();
+
+        results.push({ localId: item._localId, ok: true, serverId: res?._id });
+        published += 1;
+        // success → not pushed to remaining
+      } catch (e) {
+        results.push({ localId: item._localId, ok: false, error: e?.message || String(e) });
+        remaining.push(item); // keep to retry later
+      }
+    }
+
+    setOrdersQueue(remaining);
+    return { published, failed: remaining.length, results };
+  }
+);
+// -----------------------------
+// Other existing thunks (kept as-is)
+// -----------------------------
 export const fetchLatestOrders = createAsyncThunk(
   'orders/fetchLatest',
   async (_, thunkAPI) => {
     const token = thunkAPI.getState().posUser?.userInfo?.token;
-
     const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/orders/pos`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
+      headers: { Authorization: `Bearer ${token}` },
     });
-
     const data = await response.json();
-    
     if (!response.ok) throw new Error(data.message || 'Failed to fetch orders');
-
     return data;
   }
 );
@@ -89,9 +198,7 @@ export const fetchPackingOrders = createAsyncThunk(
   async (_, thunkAPI) => {
     const token = thunkAPI.getState().posUser?.userInfo?.token;
     const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/orders/pos/orders/packing`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
+      headers: { Authorization: `Bearer ${token}` },
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.message || 'Failed to fetch packing orders');
@@ -99,15 +206,12 @@ export const fetchPackingOrders = createAsyncThunk(
   }
 );
 
-
 export const fetchDispatchOrders = createAsyncThunk(
   'orders/fetchDispatch',
   async (_, thunkAPI) => {
     const token = thunkAPI.getState().posUser?.userInfo?.token;
     const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/orders/pos/orders/dispatch`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
+      headers: { Authorization: `Bearer ${token}` },
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.message || 'Failed to fetch dispatch orders');
@@ -115,15 +219,12 @@ export const fetchDispatchOrders = createAsyncThunk(
   }
 );
 
-
 export const fetchDeliveryOrders = createAsyncThunk(
   'orders/fetchDelivery',
   async (_, thunkAPI) => {
     const token = thunkAPI.getState().posUser?.userInfo?.token;
     const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/orders/pos/orders/delivery`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
+      headers: { Authorization: `Bearer ${token}` },
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.message || 'Failed to fetch delivery orders');
@@ -136,9 +237,7 @@ export const fetchAllOrdersWithTimers = createAsyncThunk(
   async (_, thunkAPI) => {
     const token = thunkAPI.getState().posUser?.userInfo?.token;
     const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/orders/pos/orders/all`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
+      headers: { Authorization: `Bearer ${token}` },
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.message || 'Failed to fetch all timed orders');
@@ -146,7 +245,6 @@ export const fetchAllOrdersWithTimers = createAsyncThunk(
   }
 );
 
-// Mark Packed
 export const markOrderAsPacked = createAsyncThunk(
   'orders/markPacked',
   async ({ id, token }, thunkAPI) => {
@@ -160,7 +258,6 @@ export const markOrderAsPacked = createAsyncThunk(
   }
 );
 
-// Mark Dispatched
 export const markOrderAsDispatched = createAsyncThunk(
   'orders/markDispatched',
   async ({ id, token }, thunkAPI) => {
@@ -174,20 +271,6 @@ export const markOrderAsDispatched = createAsyncThunk(
   }
 );
 
-// Mark Delivered
-// export const markOrderAsDelivered = createAsyncThunk(
-//   'orders/markDelivered',
-//   async ({ id, token }, thunkAPI) => {
-//     const res = await fetch(`${process.env.REACT_APP_API_BASE_URL}/orders/pos/${id}/mark-delivered`, {
-//       method: 'PUT',
-//       headers: { Authorization: `Bearer ${token}` },
-//     });
-//     const data = await res.json();
-//     if (!res.ok) throw new Error(data.message || 'Failed to mark delivered');
-//     return data;
-//   }
-// );
-// features/orders/orderSlice.js
 export const markOrderAsDelivered = createAsyncThunk(
   'orders/markAsDelivered',
   async (orderId, { rejectWithValue, getState }) => {
@@ -200,10 +283,8 @@ export const markOrderAsDelivered = createAsyncThunk(
           Authorization: `Bearer ${token}`,
         },
       });
-
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'Failed to mark as delivered');
-
       return data;
     } catch (error) {
       return rejectWithValue(error.message);
@@ -223,10 +304,8 @@ export const markOrderAsPaid = createAsyncThunk(
           Authorization: `Bearer ${token}`,
         },
       });
-
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'Failed to mark as paid');
-
       return data;
     } catch (error) {
       return rejectWithValue(error.message);
@@ -234,48 +313,71 @@ export const markOrderAsPaid = createAsyncThunk(
   }
 );
 
-
-
+// -----------------------------
+// Slice
+// -----------------------------
 const orderSlice = createSlice({
   name: 'orders',
- initialState: {
-  // orders:[],
-  all: [],
-  latest: null,
-  recent: [],
-   packing: [],
-  dispatch: [],
-  delivery: [],
-  managerView: [],
-  loading: false,
-  error: '',
-},
+  initialState: {
+    all: [],
+    latest: null,
+    recent: [],
+    packing: [],
+    dispatch: [],
+    delivery: [],
+    managerView: [],
+    loading: false,
+    error: '',
+    // offline queue/publish ui
+    queueCount: peekOrdersQueue().length,
+    publishStatus: 'idle',
+    publishMsg: '',
+    lastPublishResults: [],
+  },
   reducers: {},
   extraReducers: (builder) => {
     builder
+      // queue locally
+      .addCase(queueOrder.fulfilled, (state, action) => {
+        state.recent = [{ ...action.payload, _status: 'QUEUED' }, ...state.recent].slice(0, 50);
+        state.queueCount = peekOrdersQueue().length;
+      })
+
+      // create on server (existing)
       .addCase(createOrder.pending, (state) => {
         state.loading = true;
         state.error = '';
       })
-    .addCase(createOrder.fulfilled, (state, action) => {
-  state.loading = false;
-  state.latest = action.payload;
-
-  if (!Array.isArray(state.all)) {
-    console.warn('⚠️ state.all was not an array. Reinitializing it.');
-    state.all = [];
-  }
-
-  state.all.unshift(action.payload);
-})
-
-
-
+      .addCase(createOrder.fulfilled, (state, action) => {
+        state.loading = false;
+        state.latest = action.payload;
+        if (!Array.isArray(state.all)) state.all = [];
+        state.all.unshift(action.payload);
+      })
       .addCase(createOrder.rejected, (state, action) => {
         state.loading = false;
         state.error = action.payload;
       })
 
+      // publish queued → sequential
+      .addCase(publishQueuedOrdersSequential.pending, (state) => {
+        state.publishStatus = 'loading';
+        state.publishMsg = '';
+        state.lastPublishResults = [];
+      })
+      .addCase(publishQueuedOrdersSequential.fulfilled, (state, action) => {
+        state.publishStatus = 'succeeded';
+        const { published, failed, results } = action.payload || {};
+        state.publishMsg = `Published ${published} order(s).${failed ? ` ${failed} failed.` : ''}`;
+        state.queueCount = peekOrdersQueue().length;
+        state.lastPublishResults = results || [];
+      })
+      .addCase(publishQueuedOrdersSequential.rejected, (state, action) => {
+        state.publishStatus = 'failed';
+        state.publishMsg = action.payload || action.error?.message || 'Publish failed';
+      })
+
+      // existing lists…
       .addCase(fetchLatestOrders.pending, (state) => {
         state.loading = true;
         state.error = '';
@@ -288,7 +390,7 @@ const orderSlice = createSlice({
         state.loading = false;
         state.error = action.payload;
       })
-            // 🟨 Packing Orders
+
       .addCase(fetchPackingOrders.pending, (state) => {
         state.loading = true;
         state.error = '';
@@ -302,7 +404,6 @@ const orderSlice = createSlice({
         state.error = action.payload;
       })
 
-      // 🟧 Dispatch Orders
       .addCase(fetchDispatchOrders.pending, (state) => {
         state.loading = true;
         state.error = '';
@@ -316,7 +417,6 @@ const orderSlice = createSlice({
         state.error = action.payload;
       })
 
-      // 🟩 Delivery Orders
       .addCase(fetchDeliveryOrders.pending, (state) => {
         state.loading = true;
         state.error = '';
@@ -330,7 +430,6 @@ const orderSlice = createSlice({
         state.error = action.payload;
       })
 
-      // 🟦 All Orders for ONLINE_ORDER_MANAGER
       .addCase(fetchAllOrdersWithTimers.pending, (state) => {
         state.loading = true;
         state.error = '';
@@ -343,26 +442,25 @@ const orderSlice = createSlice({
         state.loading = false;
         state.error = action.payload;
       })
+
       .addCase(markOrderAsPacked.fulfilled, (state, action) => {
-      state.updatedOrder = action.payload;
-    })
-    .addCase(markOrderAsDispatched.fulfilled, (state, action) => {
-      state.updatedOrder = action.payload;
-    })
-    .addCase(markOrderAsDelivered.fulfilled, (state, action) => {
-      state.updatedOrder = action.payload;
-    })
-    .addCase(markOrderAsPaid.pending, (state) => {
-      state.paidStatus = { loading: true, success: false, error: null };
-    })
-    .addCase(markOrderAsPaid.fulfilled, (state) => {
-      state.paidStatus = { loading: false, success: true, error: null };
-    })
-    .addCase(markOrderAsPaid.rejected, (state, action) => {
-      state.paidStatus = { loading: false, success: false, error: action.payload };
-    });
-
-
+        state.updatedOrder = action.payload;
+      })
+      .addCase(markOrderAsDispatched.fulfilled, (state, action) => {
+        state.updatedOrder = action.payload;
+      })
+      .addCase(markOrderAsDelivered.fulfilled, (state, action) => {
+        state.updatedOrder = action.payload;
+      })
+      .addCase(markOrderAsPaid.pending, (state) => {
+        state.paidStatus = { loading: true, success: false, error: null };
+      })
+      .addCase(markOrderAsPaid.fulfilled, (state) => {
+        state.paidStatus = { loading: false, success: true, error: null };
+      })
+      .addCase(markOrderAsPaid.rejected, (state, action) => {
+        state.paidStatus = { loading: false, success: false, error: action.payload };
+      });
   },
 });
 

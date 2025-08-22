@@ -1,14 +1,44 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
+import { cacheProducts, getCachedProducts } from '../../utils/offlineStorage'; 
 export const fetchAllProducts = createAsyncThunk(
   'products/fetchAll',
-  async (token) => {
+  async (arg, thunkAPI) => {
+    const token = typeof arg === 'string' ? arg : arg?.token;
+    const localFirst = typeof arg === 'object' ? (arg.localFirst ?? true) : true;
+
+    const online = typeof navigator !== 'undefined' ? navigator.onLine : true;
+    const cached = getCachedProducts();
+    const hasCache = Array.isArray(cached) && cached.length > 0;
+
+    // 1) Use cache when available (local-first), regardless of online state
+    if (localFirst && hasCache) {
+      // console.log('🔁 Using cached products');
+      return cached; // <-- returns the array; reducer stays simple
+    }
+
+    // 2) If offline and no cache, fail gracefully
+    if (!online && !hasCache) {
+      return thunkAPI.rejectWithValue('offline-no-cache');
+    }
+
+    // 3) Fetch from API (first load / cache miss)
     const res = await fetch(`${process.env.REACT_APP_API_BASE_URL}/products`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     const data = await res.json();
-    // console.log('📦 products received:', data); // ✅ confirm this is an array
     if (!res.ok) throw new Error(data.error || 'Failed to fetch products');
-    return data;
+
+    const arr = Array.isArray(data) ? data : (data?.products || []);
+    // Persist for next offline session
+    try { cacheProducts(arr); } catch {}
+    return arr; // <-- always an array
+  },
+  {
+    // Optional: if Redux already has products loaded, skip running the thunk
+    condition: (arg, { getState }) => {
+      const all = getState()?.products?.all;
+      return !(Array.isArray(all) && all.length > 0);
+    }
   }
 );
 export const deleteProduct = createAsyncThunk(
@@ -116,7 +146,12 @@ export const updateProductStockOnly = createAsyncThunk(
 // console.log('📦 Response body:', data);
 
     if (!response.ok) throw new Error(data.message || 'Stock update failed');
-    return data;
+       return {
+      productID,
+      brandID,
+      financialID,
+      quantity: data?.quantity ?? newQuantity,
+    };
   }
 );
 
@@ -217,7 +252,8 @@ export const deletePOSProductBrand = createAsyncThunk(
 const productSlice = createSlice({
   name: 'products',
   initialState: {
-    all: [],
+    // all: [],
+    all: getCachedProducts(),  
     selected: null,
     suggestions: [],
     loading: false,
@@ -228,6 +264,9 @@ const productSlice = createSlice({
       state.selected = null;
       state.suggestions = [];
       state.error = '';
+    },
+    hydrateFromCache: (state) => {     // 🆕 allow manual hydration (optional)
+      state.all = getCachedProducts();
     }
   },
   extraReducers: (builder) => {
@@ -239,12 +278,23 @@ const productSlice = createSlice({
     .addCase(fetchAllProducts.fulfilled, (state, action) => {
       state.loading = false;
       state.all = action.payload; // ✅ This is the missing line
+      cacheProducts(state.all);   
     })
+    // .addCase(fetchAllProducts.rejected, (state, action) => {
+    //   state.loading = false;
+    //   // state.all = [];
+    //   state.all = getCachedProducts(); //
+    //   state.error = action.error.message;
+    // })
     .addCase(fetchAllProducts.rejected, (state, action) => {
-      state.loading = false;
-      state.all = [];
-      state.error = action.error.message;
-    })
+  state.loading = false;
+  if (action.payload === 'offline-no-cache') {
+    state.error = 'Offline and no local products available';
+    state.all = [];                   // or keep previous
+  } else {
+    state.error = action.error.message;
+  }
+})
 
     .addCase(fetchProductByBarcode.pending, (state) => {
       state.loading = true;
@@ -263,36 +313,56 @@ const productSlice = createSlice({
     .addCase(suggestProducts.fulfilled, (state, action) => {
       state.suggestions = action.payload;
     })
-.addCase(updateProductStockOnly.fulfilled, (state, action) => {
-  const updated = action.payload;
+// .addCase(updateProductStockOnly.fulfilled, (state, action) => {
+//   const updated = action.payload;
 
-  if (!Array.isArray(state.all)) {
-    console.warn('❌ state.all is corrupted or not an array in updateProductStockOnly:', state.all);
-    state.all = [];
-    return;
-  }
+//   if (!Array.isArray(state.all)) {
+//     console.warn('❌ state.all is corrupted or not an array in updateProductStockOnly:', state.all);
+//     state.all = [];
+//     return;
+//   }
 
-  const productIndex = state.all.findIndex((p) => p._id === updated._id);
-  if (productIndex === -1) {
-    console.warn('⚠️ Product not found:', updated._id);
-    return;
-  }
+//   const productIndex = state.all.findIndex((p) => p._id === updated._id);
+//   if (productIndex === -1) {
+//     console.warn('⚠️ Product not found:', updated._id);
+//     return;
+//   }
 
-  const product = state.all[productIndex];
-  const brand = product.details?.find(b => b._id === updated.brandID);
-  if (!brand) {
-    console.warn('⚠️ Brand not found in product:', updated.brandID);
-    return;
-  }
+//   const product = state.all[productIndex];
+//   const brand = product.details?.find(b => b._id === updated.brandID);
+//   if (!brand) {
+//     console.warn('⚠️ Brand not found in product:', updated.brandID);
+//     return;
+//   }
 
-  const financial = brand.financials?.find(f => f._id === updated.financialID);
-  if (!financial) {
-    console.warn('⚠️ Financial not found:', updated.financialID);
-    return;
-  }
+//   const financial = brand.financials?.find(f => f._id === updated.financialID);
+//   if (!financial) {
+//     console.warn('⚠️ Financial not found:', updated.financialID);
+//     return;
+//   }
 
-  // ✅ Safely update quantity
-  financial.quantity = updated.quantity;
+//   // ✅ Safely update quantity
+//   financial.quantity = updated.quantity;
+//   cacheProducts(state.all);
+// })
+.addCase(updateProductStockOnly.fulfilled, (state, { payload }) => {
+  const { productID, brandID, financialID, quantity } = payload || {};
+
+  if (!Array.isArray(state.all)) return;
+
+  const pIndex = state.all.findIndex(p => p._id === productID);
+  if (pIndex === -1) return;
+
+  const product = state.all[pIndex];
+  const brand = product.details?.find(b => b._id === brandID);
+  if (!brand) return;
+
+  const financial = brand.financials?.find(f => f._id === financialID);
+  if (!financial) return;
+
+  financial.quantity = quantity;         // ✅ apply update
+  // optional: financial.countInStock = quantity;
+  try { cacheProducts(state.all); } catch {}
 })
 
 
@@ -315,6 +385,7 @@ const productSlice = createSlice({
 .addCase(deleteProduct.fulfilled, (state, action) => {
     const { id } = action.payload;
     state.all = state.all.filter((p) => p._id !== id);
+     cacheProducts(state.all); 
   })
 .addCase(deleteProduct.rejected, (state, action) => {
     state.error = action.payload || 'Delete failed';
@@ -324,5 +395,5 @@ const productSlice = createSlice({
 
 });
 
-export const { clearProduct } = productSlice.actions;
+export const { clearProduct ,hydrateFromCache  } = productSlice.actions;
 export default productSlice.reducer;

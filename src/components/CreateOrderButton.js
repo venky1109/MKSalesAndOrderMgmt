@@ -1,12 +1,12 @@
 // 📁 src/components/CreateOrderButton.js
-import {useState} from 'react'
+import {useState, useEffect} from 'react'
 import { useDispatch, useSelector } from 'react-redux';
-import { createOrder, fetchLatestOrders } from '../features/orders/orderSlice';
+import {  fetchLatestOrders, queueOrder } from '../features/orders/orderSlice';
 import { clearCart } from '../features/cart/cartSlice';
-import {
-  fetchCustomerByPhone,
-  createCustomer
-} from '../features/customers/customerSlice';
+// import {
+//   fetchCustomerByPhone,
+//   createCustomer
+// } from '../features/customers/customerSlice';
 import { fetchAllProducts } from '../features/products/productSlice';
 // import { useAuth } from '../context/AuthContext'; // adjust path as needed
 import CashModal from './CashModal';
@@ -17,16 +17,21 @@ function CreateOrderButton() {
   const formattedDate = now.toLocaleDateString();
   const formattedTime = now.toLocaleTimeString();
   const [orderCreated, setOrderCreated] = useState(false);
-
+const [pendingPhone, setPendingPhone] = useState('');
 
   const [showCashModal, setShowCashModal] = useState(false);
-  const [pendingCustomer, setPendingCustomer] = useState(null);
+  // const [pendingCustomer, setPendingCustomer] = useState(null);
 
   const dispatch = useDispatch();
   const cartItems = useSelector((state) => state.cart.items || []);
   const total = useSelector((state) => state.cart.total || 0);
   // const { token } = useAuth();
   const token = useSelector((state) => state.posUser.userInfo?.token);
+  useEffect(() => {
+  if (cartItems.length === 0) {
+    setOrderCreated(false);
+  }
+}, [cartItems.length]);
   const openPrintWindow = (order) => {
     const printWindow = window.open('', '_blank', 'width=393,height=600');
 
@@ -148,30 +153,31 @@ function CreateOrderButton() {
     return;
   }
 
-  let customer = null;
+  // let customer = null;
   const phone = prompt('📱 Enter customer mobile number:');
   if (!phone || phone.trim().length < 10) {
     alert('⚠️ Valid phone number is required.');
     return;
   }
 
-  try {
-    customer = await dispatch(fetchCustomerByPhone({ phone, token })).unwrap();
-  } catch {
-    let name = 'NA';
-    let address = 'NA';
-    try {
-      customer = await dispatch(
-        createCustomer({ name, phone, address, token })
-      ).unwrap();
-    } catch (err) {
-      alert('❌ Failed to create customer: ' + err.message);
-      return;
-    }
-  }
+  // try {
+  //   customer = await dispatch(fetchCustomerByPhone({ phone, token })).unwrap();
+  // } catch {
+  //   let name = 'NA';
+  //   let address = 'NA';
+  //   try {
+  //     customer = await dispatch(
+  //       createCustomer({ name, phone, address, token })
+  //     ).unwrap();
+  //   } catch (err) {
+  //     alert('❌ Failed to create customer: ' + err.message);
+  //     return;
+  //   }
+  // }
 
   // ✅ Only show modal — don't create order here
-  setPendingCustomer(customer);
+  // setPendingCustomer(customer);
+   setPendingPhone(phone); 
   setShowCashModal(true);
 };
 
@@ -180,11 +186,12 @@ const handleConfirmCash = async (cashGiven) => {
   setShowCashModal(false);
 
   const orderPayload = {
-    user: pendingCustomer._id,
+    // user: pendingPhone,
+    
     shippingAddress: {
-      street: pendingCustomer.address || 'NA',
-      city: pendingCustomer.city || 'NA',
-      postalCode: pendingCustomer.postalCode || '000000',
+      street: 'Gollavelli',
+      city: 'Amalapuram',
+      postalCode: '533222',
       country: 'India',
     },
     paymentMethod: 'Cash',
@@ -193,7 +200,7 @@ const handleConfirmCash = async (cashGiven) => {
       quantity: item.catalogQuantity,
       units: item.units,
       brand: item.brand,
-      qty: item.qty ?? item.quantity,
+      qty: item.qty,
       image: item.image || '',
       price: item.dprice,
       productId: item.id,
@@ -204,17 +211,18 @@ const handleConfirmCash = async (cashGiven) => {
   };
 
   try {
+    // console.log("phone"+pendingPhone)
     const result = await dispatch(
-      createOrder({ payload: orderPayload, token, cartItems })
+       queueOrder({ payload: orderPayload, token, cartItems, phone: pendingPhone })
     ).unwrap();
 
-    alert(`✅ Order Created: ID ${result._id}`);
+    alert(`✅ Order queued for ${pendingPhone} with ID ${result._localId}`);
 
     const fullOrder = {
-      id: result._id,
+      id: result,
       items: cartItems,
       total: result.total || total,
-      totalQty: result.totalQty || cartItems.reduce((sum, i) => sum + i.quantity, 0),
+      totalQty: result.totalQty || cartItems.reduce((sum, i) => sum + i.qty, 0),
       totalDiscount: result.totalDiscount || 0,
       cashGiven,
       change: cashGiven - total,
@@ -226,6 +234,7 @@ const handleConfirmCash = async (cashGiven) => {
     dispatch(clearCart());
     dispatch(fetchAllProducts(token));
     setOrderCreated(true);
+    setPendingPhone(null)
   } catch (err) {
     alert('❌ Order failed: ' + err.message);
   }
@@ -243,12 +252,13 @@ const handleConfirmCash = async (cashGiven) => {
        Cash
     </button>
 
-    {showCashModal && pendingCustomer && (
+    {showCashModal  && pendingPhone && (
   <CashModal
     total={total}
     onCancel={() => {
       setShowCashModal(false);
-      setPendingCustomer(null);
+      // setPendingCustomer(null);
+      // setPendingPhone(null)
     }}
     onConfirm={handleConfirmCash}
   />

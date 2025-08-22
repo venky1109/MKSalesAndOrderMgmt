@@ -3,6 +3,7 @@ import POSLayout from '../layouts/POSLayout'
 import BillingSection from '../components/BillingSection';
 // import ProductList from '../components/ProductList';
 
+
 function POS() {
   return (
     <div className="flex flex-col h-screen">
