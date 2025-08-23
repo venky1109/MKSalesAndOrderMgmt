@@ -1,6 +1,7 @@
 // src/layouts/POSLayout.jsx
 import React from "react";
 import HeaderPOS from "../components/HeaderPOS";
+import Footer from "../components/Footer"
 
 const POSLayout = ({ children }) => {
   return (
@@ -12,6 +13,7 @@ const POSLayout = ({ children }) => {
       <main className="flex-1 overflow-y-auto p-2 sm:p-4">
         {children}
       </main>
+      <Footer/>
     </div>
   );
 };

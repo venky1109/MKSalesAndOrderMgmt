@@ -247,7 +247,8 @@ const handleConfirmCash = async (cashGiven) => {
     <div className="grid">
     <button
       onClick={handleCreateOrder}
-      className="bg-green-600 text-white mb-3 px-4 py-4 text-md rounded-lg active:translate-y-0.5 active:shadow-inner transition-all duration-75"
+      className="h-10 p-3 inline-flex items-center justify-center rounded-lg bg-green-600 text-white font-medium shadow-sm
+                   active:translate-y-[1px] active:shadow-inner transition-all hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-white/50"
     >
        Cash
     </button>

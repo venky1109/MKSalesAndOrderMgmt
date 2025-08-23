@@ -6,6 +6,7 @@ import cartReducer from '../features/cart/cartSlice';
 import orderReducer from '../features/orders/orderSlice';
 import orderItemsReducer from '../features/orderItems/orderItemSlice';
 import paymentReducer from '../features/payment/paymentSlice';
+import productFiltersReducer from '../features/products/productFiltersSlice';
 
 const stateMutationLogger = store => next => action => {
   const result = next(action);
@@ -25,6 +26,7 @@ export const store = configureStore({
     customers: customerReducer,
     cart: cartReducer,
     orders: orderReducer,
+    productFilters: productFiltersReducer,
     orderItems: orderItemsReducer,
     payment: paymentReducer,
   },
