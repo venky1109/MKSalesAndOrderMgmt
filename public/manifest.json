@@ -3,19 +3,19 @@
   "name": "ManaKirana POS ",
   "icons": [
     {
-      "src": "/images/logoSquare192_v1.webp",
+      "src": "/images/logoSquare192_v1.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "maskable any"
     },
     {
-      "src": "/images/logoSquare512_v1.webp",
+      "src": "/images/logoSquare512_v1.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable any"
     },
     {
-      "src": "/images/logoSquare1024_v1.webp",
+      "src": "/images/logoSquare1024_v1.png",
       "sizes": "1024x1024",
       "type": "image/png"
     }

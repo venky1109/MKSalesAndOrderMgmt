@@ -33,7 +33,7 @@ function Login() {
     if (userInfo?.token) {
       const role = userInfo.role;
 
-      if (['CASHIER', 'ONLINE_CASHIER', 'HYBRID_CASHIER'].includes(role)) {
+      if (['CASHIER', 'ONLINE_CASHIER', 'HYBRID_CASHIER','ADMIN'].includes(role)) {
         navigate('/pos');
       } else if (role === 'PACKING_AGENT') {
         navigate('/packing');

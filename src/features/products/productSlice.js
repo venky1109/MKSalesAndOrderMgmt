@@ -1,5 +1,43 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import { cacheProducts, getCachedProducts } from '../../utils/offlineStorage'; 
+
+export const fetchAllProductsFresh = createAsyncThunk(
+  'products/fetchAllFresh',
+  async (arg, thunkAPI) => {
+    const token = typeof arg === 'string' ? arg : (arg && arg.token);
+    if (!token) return thunkAPI.rejectWithValue('missing-token');
+
+    // Must be online to hit DB
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      return thunkAPI.rejectWithValue('offline');
+    }
+
+    // Drop any stale local copy before fetching (your two keys are kept;
+    // add any others you may have used in the past)
+    try {
+      localStorage.removeItem('mkpos.products');
+      localStorage.removeItem('mk_products_v1');
+      // localStorage.removeItem('products');      // (optional)
+      // localStorage.removeItem('allProducts');   // (optional)
+      // localStorage.removeItem('catalog');       // (optional)
+    } catch {}
+
+    const res = await fetch(`${process.env.REACT_APP_API_BASE_URL}/products`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.error || 'Failed to fetch products');
+
+    const arr = Array.isArray(data) ? data : (data && data.products) ? data.products : [];
+    try { cacheProducts(arr); } catch {}
+    return arr; // always an array
+  },
+  {
+    // Always run; do NOT skip even if state already has data
+    condition: () => true,
+  }
+);
 export const fetchAllProducts = createAsyncThunk(
   'products/fetchAll',
   async (arg, thunkAPI) => {

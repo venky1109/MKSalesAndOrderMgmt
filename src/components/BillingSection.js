@@ -326,9 +326,9 @@ const handleRestoreHold = (holdKey) => {
     <div className=" space-y-2 mt-1 bg-white">
  
      <div className="border rounded-lg border-gray-200 shadow-sm flex flex-col h-[68vh] ">
-  <h2 className="font-semibold text-center text-gray-700 text-xl p-1">
-    Current Order Items
-  </h2>
+      <h2 className="font-semibold text-center text-gray-700 text-xl p-1">
+        Current Order Items
+      </h2>
 
   {/* Scrollable table area */}
   <div className="min-h-0 overflow-x-auto overflow-y-auto flex-1" >

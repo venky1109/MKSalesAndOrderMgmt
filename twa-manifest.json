@@ -1,0 +1,51 @@
+{
+  "packageId": "app.web.pos_manakirana.twa",
+  "host": "pos-manakirana.web.app",
+  "name": "ManaKirana POS",
+  "launcherName": "MKPOS",
+  "display": "standalone",
+  "themeColor": "#CFF8CC",
+  "themeColorDark": "#000000",
+  "navigationColor": "#000000",
+  "navigationColorDark": "#000000",
+  "navigationDividerColor": "#000000",
+  "navigationDividerColorDark": "#000000",
+  "backgroundColor": "#CFF8CC",
+  "enableNotifications": true,
+  "startUrl": "/",
+  "iconUrl": "https://pos-manakirana.web.app/images/logoSquare1024_v1.png",
+  "maskableIconUrl": "https://pos-manakirana.web.app/images/logoSquare512_v1.png",
+  "monochromeIconUrl": "https://pos-manakirana.web.app/images/logoSquare192_v1.png",
+  "splashScreenFadeOutDuration": 300,
+  "signingKey": {
+    "path": "C:\\MKSDMgmt\\SalesAndOrderMgmt\\android\\app\\mkpos-release.jks",
+    "alias": "MKAndroid"
+  },
+  "appVersionName": "1",
+  "appVersionCode": 1,
+  "shortcuts": [],
+  "generatorApp": "bubblewrap-cli",
+  "webManifestUrl": "https://pos-manakirana.web.app/manifest.json",
+  "fallbackType": "customtabs",
+  "features": {
+    "locationDelegation": {
+      "enabled": true
+    }
+  },
+  "alphaDependencies": {
+    "enabled": false
+  },
+  "enableSiteSettingsShortcut": true,
+  "isChromeOSOnly": false,
+  "isMetaQuest": false,
+  "fullScopeUrl": "https://pos-manakirana.web.app/",
+  "minSdkVersion": 21,
+  "orientation": "portrait",
+  "fingerprints": [],
+  "additionalTrustedOrigins": [],
+  "retainedBundles": [],
+  "protocolHandlers": [],
+  "fileHandlers": [],
+  "launchHandlerClientMode": "",
+  "appVersion": "1"
+}

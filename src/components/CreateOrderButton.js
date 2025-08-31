@@ -10,6 +10,7 @@ import { clearCart } from '../features/cart/cartSlice';
 import { fetchAllProducts } from '../features/products/productSlice';
 // import { useAuth } from '../context/AuthContext'; // adjust path as needed
 import CashModal from './CashModal';
+import PhoneModal from './PhoneModal'
 
 
 function CreateOrderButton() {
@@ -17,7 +18,9 @@ function CreateOrderButton() {
   const formattedDate = now.toLocaleDateString();
   const formattedTime = now.toLocaleTimeString();
   const [orderCreated, setOrderCreated] = useState(false);
-const [pendingPhone, setPendingPhone] = useState('');
+    const [showPhoneModal, setShowPhoneModal] = useState(false);   // 👈 NEW
+  const [pendingPhone, setPendingPhone] = useState(null);  
+
 
   const [showCashModal, setShowCashModal] = useState(false);
   // const [pendingCustomer, setPendingCustomer] = useState(null);
@@ -141,8 +144,7 @@ const [pendingPhone, setPendingPhone] = useState('');
 
 
 
-
-
+  
 
   
   const handleCreateOrder = async () => {
@@ -154,11 +156,9 @@ const [pendingPhone, setPendingPhone] = useState('');
   }
 
   // let customer = null;
-  const phone = prompt('📱 Enter customer mobile number:');
-  if (!phone || phone.trim().length < 10) {
-    alert('⚠️ Valid phone number is required.');
-    return;
-  }
+ 
+// Called from PhoneModal
+
 
   // try {
   //   customer = await dispatch(fetchCustomerByPhone({ phone, token })).unwrap();
@@ -177,10 +177,16 @@ const [pendingPhone, setPendingPhone] = useState('');
 
   // ✅ Only show modal — don't create order here
   // setPendingCustomer(customer);
-   setPendingPhone(phone); 
-  setShowCashModal(true);
+
+  setShowPhoneModal(true); 
+
 };
 
+  const handlePhoneConfirm = (digits) => {
+    setShowPhoneModal(false);
+    setPendingPhone(digits);  // store phone
+    setShowCashModal(true);   // open cash modal next
+  };  
 
 const handleConfirmCash = async (cashGiven) => {
   setShowCashModal(false);
@@ -252,6 +258,12 @@ const handleConfirmCash = async (cashGiven) => {
     >
        Cash
     </button>
+        {showPhoneModal && (
+        <PhoneModal
+          onCancel={() => setShowPhoneModal(false)}
+          onConfirm={handlePhoneConfirm}
+        />
+      )}
 
     {showCashModal  && pendingPhone && (
   <CashModal

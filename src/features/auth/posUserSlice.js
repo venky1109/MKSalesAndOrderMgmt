@@ -1,26 +1,46 @@
 // src/features/auth/posUserSlice.js
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
+import { fetchAllProductsFresh } from '../products/productSlice'; // ⬅️ add this
 
 const userFromStorage = localStorage.getItem('posUserInfo')
   ? JSON.parse(localStorage.getItem('posUserInfo'))
   : null;
 
+// Small helper so we don't repeat keys everywhere
+const clearProductCache = () => {
+  try {
+    localStorage.removeItem('mkpos.products');
+    localStorage.removeItem('mk_products_v1');
+  } catch {}
+};
+
 export const loginPosUser = createAsyncThunk(
   'posUser/login',
-  async ({ username, password,location }, { rejectWithValue }) => {
+  async ({ username, password, location }, thunkAPI) => {
     try {
       const res = await fetch(`${process.env.REACT_APP_API_BASE_URL}/posusers/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password, location }),
-        // credentials: 'include',
       });
 
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || 'Login failed');
+
+      // After successful login:
+      const tokenFromLogin = data?.token;
+
+      // If we're online, clear old product cache and fetch fresh from DB.
+      // If offline, keep cache so POS still works.
+      const online = typeof navigator !== 'undefined' ? navigator.onLine : true;
+      if (tokenFromLogin && online) {
+        clearProductCache();
+        thunkAPI.dispatch(fetchAllProductsFresh(tokenFromLogin));
+      }
+
       return data;
     } catch (err) {
-      return rejectWithValue(err.message);
+      return thunkAPI.rejectWithValue(err.message);
     }
   }
 );
@@ -39,23 +59,19 @@ export const adjustPosUserBalance = createAsyncThunk(
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || 'Failed to adjust balance');
-      return data; // updated user (projection includes balance)
+      return data;
     } catch (err) {
       return rejectWithValue(err.message);
     }
   }
 );
-// 🔹 NEW: Get balance only
+
 export const getPosUserBalance = createAsyncThunk(
   'posUser/getBalance',
   async (_, { getState, rejectWithValue }) => {
     try {
       const { _id, token } = getState().posUser.userInfo || {};
-      // console.log('123'+getState().posUserInfo )
-
-      if (!_id || !token) {
-        throw new Error('User ID or token missing');
-      }
+      if (!_id || !token) throw new Error('User ID or token missing');
 
       const res = await fetch(
         `${process.env.REACT_APP_API_BASE_URL}/posusers/balance/${_id}`,
@@ -70,19 +86,13 @@ export const getPosUserBalance = createAsyncThunk(
 
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || 'Failed to fetch balance');
-
-      return data; // expected { _id, balance }
+      return data; // { _id, balance }
     } catch (err) {
       return rejectWithValue(err.message);
     }
   }
 );
 
-/**
- * Set balance to an exact value
- * PATCH /api/pos_users/:id/balance
- * body: { balance }
- */
 export const setPosUserBalance = createAsyncThunk(
   'posUser/setBalance',
   async ({ id, balance, token }, { rejectWithValue }) => {
@@ -97,7 +107,7 @@ export const setPosUserBalance = createAsyncThunk(
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || 'Failed to set balance');
-      return data; // updated user (projection includes balance)
+      return data;
     } catch (err) {
       return rejectWithValue(err.message);
     }
@@ -114,11 +124,14 @@ const posUserSlice = createSlice({
   reducers: {
     logout: (state) => {
       state.userInfo = null;
+      // clear user + product caches
       localStorage.removeItem('posUserInfo');
+      clearProductCache();
     },
   },
   extraReducers: (builder) => {
     builder
+      // login
       .addCase(loginPosUser.pending, (state) => {
         state.loading = true;
         state.error = null;
@@ -131,12 +144,13 @@ const posUserSlice = createSlice({
       .addCase(loginPosUser.rejected, (state, action) => {
         state.loading = false;
         state.error = action.payload;
-      }) 
-            .addCase(setPosUserBalance.pending, (state) => {
+      })
+
+      // set balance
+      .addCase(setPosUserBalance.pending, (state) => {
         state.error = null;
       })
       .addCase(setPosUserBalance.fulfilled, (state, action) => {
-        // action.payload is updated user with new balance
         const updated = action.payload;
         if (state.userInfo && state.userInfo._id === updated._id) {
           state.userInfo = { ...state.userInfo, balance: updated.balance };
@@ -146,6 +160,8 @@ const posUserSlice = createSlice({
       .addCase(setPosUserBalance.rejected, (state, action) => {
         state.error = action.payload;
       })
+
+      // adjust balance
       .addCase(adjustPosUserBalance.pending, (state) => {
         state.error = null;
       })
@@ -158,7 +174,9 @@ const posUserSlice = createSlice({
       })
       .addCase(adjustPosUserBalance.rejected, (state, action) => {
         state.error = action.payload;
-      }) // Get balance only
+      })
+
+      // get balance
       .addCase(getPosUserBalance.fulfilled, (state, action) => {
         const updated = action.payload;
         if (state.userInfo && state.userInfo._id === updated._id) {
