@@ -9,7 +9,6 @@ import html2canvas from 'html2canvas';
 
 import CashModal from './CashModal';
 import PhoneModal from './PhoneModal';
-// 👇 your WhatsApp share helper
 import WhatsAppShare from './WhatsAppShare';
 
 function CreateOrderButton() {
@@ -33,10 +32,10 @@ function CreateOrderButton() {
   const [lastFullOrder, setLastFullOrder] = useState(null);
   const [pendingCapture, setPendingCapture] = useState(false);
 
-  // Printer profile selection (narrow default to avoid clipping)
+  // Printer profile (narrow safe default to avoid clipping)
   const [printWidth, setPrintWidth] = useState(352);
 
-  // WhatsApp share ref
+  // WhatsApp bridge
   const waRef = useRef(null);
 
   useEffect(() => {
@@ -49,10 +48,7 @@ function CreateOrderButton() {
   const formattedTime = now.toLocaleTimeString();
 
   // Remove anything inside parentheses from item names
-  const sanitizeName = (name) => (name || '').replace(/\s*\([^)]*\)/g, '').trim();
-
-  // Ensure 10-digit Indian phone (use last 10 digits)
-  const toPhone10 = (p) => String(p || '').replace(/\D/g, '').slice(-10);
+  // const sanitizeName = (name) => (name || '').replace(/\s*\([^)]*\)/g, '').trim();
 
   // Capture AFTER the receipt DOM is rendered with latest order
   useEffect(() => {
@@ -151,21 +147,19 @@ function CreateOrderButton() {
 
   const printCurrent = () => printImageAtWidth(invoiceImgUrl, printWidth);
 
-  // ---------- WhatsApp share (uses your helper) ----------
+  // ---------- WhatsApp: share IMAGE to a specific number ----------
   const handleShareWhatsApp = () => {
-    const phone10 = toPhone10(lastFullOrder?.phone || pendingPhone);
-    if (!phone10 || !waRef.current) {
-      alert('❌ Missing/invalid customer phone.');
+    if (!waRef.current || !invoiceImgUrl) {
+      alert('❌ Invoice image not ready yet.');
       return;
     }
-    // text-only invoice share
-    waRef.current.sendText(lastFullOrder, phone10);
+    const phone = lastFullOrder?.phone || pendingPhone;
+    waRef.current.sendImage(lastFullOrder, phone, invoiceImgUrl);
   };
 
   // Order flow
   const handleCreateOrder = () => {
     if (orderCreated) return;
-
     if (cartItems.length === 0) {
       alert('🛒 Cart is empty. Please add items first.');
       return;
@@ -299,10 +293,7 @@ function CreateOrderButton() {
               <button onClick={printCurrent} disabled={!invoiceImgUrl}>
                 Print
               </button>
-              <button
-                onClick={handleShareWhatsApp}
-                disabled={!lastFullOrder || !toPhone10(lastFullOrder?.phone || pendingPhone)}
-              >
+              <button onClick={handleShareWhatsApp} disabled={!invoiceImgUrl}>
                 Share WhatsApp
               </button>
               <a href={invoiceImgUrl || '#'} download="invoice.png">
@@ -345,12 +336,12 @@ function CreateOrderButton() {
       <div
         ref={receiptRef}
         style={{
-          width: '56mm',
-          padding: '3mm 3mm 7mm',
+          width: '56mm',                 // narrower logical width to reduce edge clipping
+          padding: '3mm 3mm 7mm',        // extra bottom padding so last line never clips
           background: '#fff',
           color: '#000',
           fontFamily: 'Menlo, Consolas, "Courier New", monospace',
-          fontSize: '10px',
+          fontSize: '10px',              // reduced font size
           lineHeight: 1.32,
           letterSpacing: '0.1px',
           position: 'fixed',
@@ -378,7 +369,7 @@ function CreateOrderButton() {
 
         {/* Items */}
         {lastFullOrder?.items?.map((it, idx) => {
-          const name = sanitizeName(it.item);
+          const name = (it.item || '').replace(/\s*\([^)]*\)/g, '').trim();
           const lineTotal = Number(it.qty || 0) * Number(it.dprice || it.price || 0);
           return (
             <div key={idx} style={{ marginBottom: '2px' }}>
@@ -421,7 +412,7 @@ function CreateOrderButton() {
         <div style={{ textAlign: 'center' }}>Thank you! Visit again</div>
       </div>
 
-      {/* Mount your WhatsApp helper (no UI) */}
+      {/* Mount WhatsApp helper (no UI) */}
       <WhatsAppShare ref={waRef} />
 
       {/* Modal portal */}
