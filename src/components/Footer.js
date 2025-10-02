@@ -42,7 +42,7 @@ function useOfflineCatalog() {
   }, []);
 
   const list = storeList?.length ? storeList : lsList;
-
+  
   // Build a lookup map: barcode -> {p,d,f}
   const barcodeMap = useMemo(() => {
     const map = new Map();
@@ -217,10 +217,10 @@ function Footer() {
     try {
       customer = await dispatch(fetchCustomerByPhone({ phone, token })).unwrap();
     } catch {
-      const name = prompt("👤 Enter Customer Name:") || "NA";
-      const street = prompt(" Enter Street:") || "NA";
-      const city = prompt(" Enter City:") || "NA";
-      const postalCode = prompt(" Enter Postal Code:") || "000000";
+      const name ="OUTLET CUSTOMER";
+      const street = "GOLLAVILLI";
+      const city = "GOLLAVILLI";
+      const postalCode = "533222";
       try {
         customer = await dispatch(
           createCustomer({ name, phone, address: { street, city, postalCode }, token })
@@ -270,7 +270,7 @@ function Footer() {
           paymentMethod: "UPI",
         })
       ).unwrap();
-
+      // console.log(result)
       const redirectUrl = result?.data?.payment_links?.web;
       if (redirectUrl) window.open(redirectUrl, "_blank");
       else alert("No payment link received.");

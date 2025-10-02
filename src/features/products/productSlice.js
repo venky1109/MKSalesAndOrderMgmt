@@ -188,7 +188,7 @@ export const updateProductStockOnly = createAsyncThunk(
       productID,
       brandID,
       financialID,
-      quantity: data?.quantity ?? newQuantity,
+      countInStock: data?.quantity ?? newQuantity,
     };
   }
 );
@@ -384,7 +384,7 @@ const productSlice = createSlice({
 //   cacheProducts(state.all);
 // })
 .addCase(updateProductStockOnly.fulfilled, (state, { payload }) => {
-  const { productID, brandID, financialID, quantity } = payload || {};
+  const { productID, brandID, financialID, countInStock } = payload || {};
 
   if (!Array.isArray(state.all)) return;
 
@@ -398,7 +398,7 @@ const productSlice = createSlice({
   const financial = brand.financials?.find(f => f._id === financialID);
   if (!financial) return;
 
-  financial.quantity = quantity;         // ✅ apply update
+  financial.countInStock = countInStock;         // ✅ apply update
   // optional: financial.countInStock = quantity;
   try { cacheProducts(state.all); } catch {}
 })

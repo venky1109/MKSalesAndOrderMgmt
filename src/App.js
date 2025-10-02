@@ -65,17 +65,19 @@ function App() {
           />
            {/* Order Lifecycle Pages */}
           <Route path="/packing" element={
-            <ProtectedRoute role="PACKING_AGENT">
+               <ProtectedRoute role={["ADMIN","PACKING_AGENT"]}>
               <PackingOrdersPage />
             </ProtectedRoute>
           } />
           <Route path="/dispatch" element={
-            <ProtectedRoute role="DISPATCH_AGENT">
+            // <ProtectedRoute role="DISPATCH_AGENT">
+               <ProtectedRoute role={["ADMIN","DISPATCH_AGENT"]}>
               <DispatchOrdersPage />
             </ProtectedRoute>
           } />
           <Route path="/delivery" element={
-            <ProtectedRoute role="DELIVERY_AGENT">
+
+              <ProtectedRoute role={["ADMIN","DELIVERY_AGENT"]}>
               <DeliveryPage />
             </ProtectedRoute>
           } />
