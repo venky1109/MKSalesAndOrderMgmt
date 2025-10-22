@@ -341,7 +341,7 @@ function CreateOrderButton() {
           background: '#fff',
           color: '#000',
           fontFamily: 'Menlo, Consolas, "Courier New", monospace',
-          fontSize: '10px',              // reduced font size
+          fontSize: '14px',              // reduced font size
           lineHeight: 1.32,
           letterSpacing: '0.1px',
           position: 'fixed',
@@ -374,7 +374,7 @@ function CreateOrderButton() {
           return (
             <div key={idx} style={{ marginBottom: '2px' }}>
               <div>{name}</div>
-              <div style={{ fontSize: '8.5px', display: 'flex', justifyContent: 'space-between' }}>
+              <div style={{ fontSize: '12px', display: 'flex', justifyContent: 'space-between' }}>
                 <span>
                   {it.qty} x {money(it.dprice || it.price)} ({it.catalogQuantity} {it.units})
                 </span>
