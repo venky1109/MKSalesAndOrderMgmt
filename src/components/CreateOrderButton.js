@@ -33,7 +33,7 @@ function CreateOrderButton() {
   const [pendingCapture, setPendingCapture] = useState(false);
 
   // Printer profile (narrow safe default to avoid clipping)
-  const [printWidth, setPrintWidth] = useState(352);
+  const [printWidth, setPrintWidth] = useState(270);
 
   // WhatsApp bridge
   const waRef = useRef(null);
@@ -362,10 +362,10 @@ function CreateOrderButton() {
           {process.env.REACT_APP_SHOP_PHONE && <div>Phone: {process.env.REACT_APP_SHOP_PHONE}</div>}
         </div>
 
-        <div style={{ borderTop: '1px dashed #000', margin: '2mm 0' }} />
+        <div style={{ borderTop: '1px dashed #000', margin: '1mm 0' }} />
         <div>Bill To: {lastFullOrder?.phone || pendingPhone || '--'}</div>
         <div>Date: {formattedDate} {formattedTime}</div>
-        <div style={{ borderTop: '1px dashed #000', margin: '2mm 0' }} />
+        <div style={{ borderTop: '1px dashed #000', margin: '1mm 0' }} />
 
         {/* Items */}
         {lastFullOrder?.items?.map((it, idx) => {
@@ -374,7 +374,7 @@ function CreateOrderButton() {
           return (
             <div key={idx} style={{ marginBottom: '2px' }}>
               <div>{name}</div>
-              <div style={{ fontSize: '9.5px', display: 'flex', justifyContent: 'space-between' }}>
+              <div style={{ fontSize: '8.5px', display: 'flex', justifyContent: 'space-between' }}>
                 <span>
                   {it.qty} x {money(it.dprice || it.price)} ({it.catalogQuantity} {it.units})
                 </span>
@@ -384,7 +384,7 @@ function CreateOrderButton() {
           );
         })}
 
-        <div style={{ borderTop: '1px dashed #000', margin: '2mm 0' }} />
+        <div style={{ borderTop: '1px dashed #000', margin: '1mm 0' }} />
 
         {/* Totals */}
         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -408,7 +408,7 @@ function CreateOrderButton() {
           <div>{money(lastFullOrder?.change || 0)}</div>
         </div>
 
-        <div style={{ borderTop: '1px dashed #000', margin: '2mm 0' }} />
+        <div style={{ borderTop: '1px dashed #000', margin: '1mm 0' }} />
         <div style={{ textAlign: 'center' }}>Thank you! Visit again</div>
       </div>
 
