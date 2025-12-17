@@ -11,6 +11,7 @@ import {
 import { initiateDeliveryPayment } from "../features/payment/paymentSlice";
 import { createOrder } from "../features/orders/orderSlice";
 import logo from "../assests/ManaKiranaLogo1024x1024.png";
+import { CiBarcode } from "react-icons/ci";
 
 /** Offline catalog (store-first, localStorage fallback) + fast barcode map */
 function useOfflineCatalog() {
@@ -291,7 +292,9 @@ function Footer() {
       <div className="bg-yellow-500 sticky bottom-0 left-0 right-0 z-40 backdrop-blur">
         {/* Barcode input */}
         <div className="px-3 py-1">
-          <div className="mb-2">
+          {/* <div className="mb-2">
+      
+  
             <input
               type="text"
               ref={barcodeRef}
@@ -303,10 +306,43 @@ function Footer() {
                   setBarcodeInput("");
                 }
               }}
-              placeholder="📷 Scan barcode to add"
+              placeholder="Scan barcode to add"
               className="border p-2 w-full text-base text-center rounded bg-white text-slate-900"
+              
             />
-          </div>
+    
+          </div> */}
+<div className="relative">
+  <CiBarcode className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xl pointer-events-none" />
+
+  <input
+    type="text"
+    ref={barcodeRef}
+    value={barcodeInput}
+    inputMode="none" 
+    onChange={(e) => setBarcodeInput(e.target.value)}
+    onKeyDown={(e) => {
+      if (e.key === "Enter" && barcodeInput.trim()) {
+        handleBarcode(barcodeInput.trim());
+        setBarcodeInput("");
+      }
+    }}
+    placeholder="Scan barcode to add"
+    className="
+      border
+      p-2
+      pl-10
+      pr-10
+      w-full
+      text-base
+      text-center
+      rounded
+      bg-white
+      text-slate-900
+    "
+  />
+</div>
+
 
           {/* Totals */}
           <div className="rounded-xl border border-white/10 p-1">
