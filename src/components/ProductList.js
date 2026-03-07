@@ -90,12 +90,183 @@ function useOfflineCatalog() {
   return { productsList: list, barcodeMap };
 }
 
+function SearchKeyboard({ visible, onKeyPress, onClose }) {
+  const [isLandscape, setIsLandscape] = useState(false);
+
+  useEffect(() => {
+    const updateLayout = () => {
+      setIsLandscape(window.innerWidth > window.innerHeight);
+    };
+
+    updateLayout();
+    window.addEventListener("resize", updateLayout);
+    return () => window.removeEventListener("resize", updateLayout);
+  }, []);
+
+  if (!visible) return null;
+
+  const rows = [
+    ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"],
+    ["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"],
+    ["A", "S", "D", "F", "G", "H", "J", "K", "L"],
+    ["Z", "X", "C", "V", "B", "N", "M"],
+  ];
+
+  const keyBaseClass =
+    "flex-1 min-w-0 rounded-lg border border-gray-300 bg-gray-50 font-bold text-slate-800 active:scale-95";
+  const portraitKeyClass = `${keyBaseClass} px-1 py-3 text-sm`;
+  const landscapeKeyClass = `${keyBaseClass} px-1 py-2 text-[13px]`;
+
+  if (isLandscape) {
+    return (
+      <div className="absolute inset-x-0 bottom-0 z-50 border-t border-gray-300 bg-white shadow-2xl">
+        <div className="w-full max-w-full overflow-x-auto">
+          <div className="min-w-0 p-2">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <div className="text-sm font-semibold text-slate-700">
+                Search Keyboard
+              </div>
+
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => onKeyPress("SPACE")}
+                  className="rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-sm font-bold text-slate-800 active:scale-95"
+                >
+                  Space
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => onKeyPress("BACKSPACE")}
+                  className="rounded-lg border border-yellow-300 bg-yellow-50 px-3 py-2 text-sm font-bold text-yellow-800 active:scale-95"
+                >
+                  ⌫
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => onKeyPress("CLEAR")}
+                  className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm font-bold text-red-700 active:scale-95"
+                >
+                  Clear
+                </button>
+
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="rounded-lg bg-gray-200 px-3 py-2 text-sm font-semibold text-slate-800 active:scale-95"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              {rows.map((row, idx) => (
+                <div key={idx} className="flex w-full gap-1.5">
+                  {row.map((key) => (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => onKeyPress(key)}
+                      className={landscapeKeyClass}
+                    >
+                      {key}
+                    </button>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="absolute inset-x-0 bottom-0 z-50 border-t border-gray-300 bg-white shadow-2xl">
+      <div className="w-full p-2 sm:p-3">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <div className="text-sm font-semibold text-slate-700">
+            Search Keyboard
+          </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg bg-gray-200 px-3 py-2 text-sm font-semibold text-slate-800 active:scale-95"
+          >
+            Close
+          </button>
+        </div>
+
+        <div className="flex flex-col gap-2">
+          {rows.map((row, idx) => (
+            <div key={idx} className="flex w-full gap-1.5">
+              {row.map((key) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => onKeyPress(key)}
+                  className={portraitKeyClass}
+                >
+                  {key}
+                </button>
+              ))}
+            </div>
+          ))}
+
+          <div className="flex w-full gap-1.5 pt-1">
+            <button
+              type="button"
+              onClick={() => onKeyPress("SPACE")}
+              className="flex-[2] min-w-0 rounded-lg border border-gray-300 bg-gray-50 px-2 py-3 text-sm font-bold text-slate-800 active:scale-95"
+            >
+              Space
+            </button>
+
+            <button
+              type="button"
+              onClick={() => onKeyPress("BACKSPACE")}
+              className="flex-1 min-w-0 rounded-lg border border-yellow-300 bg-yellow-50 px-2 py-3 text-sm font-bold text-yellow-800 active:scale-95"
+            >
+              ⌫
+            </button>
+
+            <button
+              type="button"
+              onClick={() => onKeyPress("CLEAR")}
+              className="flex-1 min-w-0 rounded-lg border border-red-300 bg-red-50 px-2 py-3 text-sm font-bold text-red-700 active:scale-95"
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const ProductList = forwardRef((props, ref) => {
   const dispatch = useDispatch();
 
   const token = useSelector((state) => state.posUser.userInfo?.token);
   const { loading, error } = useSelector((state) => state.products || {});
   const { productsList: safeProducts, barcodeMap } = useOfflineCatalog();
+
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [brandFilter, setBrandFilter] = useState("all");
+  const [search, setSearch] = useState("");
+  const [showSearchKeyboard, setShowSearchKeyboard] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(270);
+
+  const barcodeRef = useRef(null);
+  const searchInputRef = useRef(null);
+  const [barcodeInput, setBarcodeInput] = useState("");
+
+  const gridWrapRef = useRef(null);
+  const [gridSize, setGridSize] = useState({ width: 0, height: 0 });
 
   useEffect(() => {
     if (safeProducts?.length) {
@@ -111,19 +282,19 @@ const ProductList = forwardRef((props, ref) => {
     }
   }, [safeProducts.length, token, dispatch]);
 
-  const [categoryFilter, setCategoryFilter] = useState("all");
-  const [brandFilter, setBrandFilter] = useState("all");
-  const [search, setSearch] = useState("");
-
-  const barcodeRef = useRef(null);
-  const [barcodeInput, setBarcodeInput] = useState("");
-
   useEffect(() => {
     barcodeRef.current?.focus();
   }, []);
 
-  const gridWrapRef = useRef(null);
-  const [gridSize, setGridSize] = useState({ width: 0, height: 0 });
+  useEffect(() => {
+    const updateKeyboardHeight = () => {
+      setKeyboardHeight(window.innerWidth > window.innerHeight ? 190 : 270);
+    };
+
+    updateKeyboardHeight();
+    window.addEventListener("resize", updateKeyboardHeight);
+    return () => window.removeEventListener("resize", updateKeyboardHeight);
+  }, []);
 
   useEffect(() => {
     const el = gridWrapRef.current;
@@ -152,6 +323,7 @@ const ProductList = forwardRef((props, ref) => {
     setCategoryFilter("all");
     setBrandFilter("all");
     setSearch("");
+    setShowSearchKeyboard(false);
     setTimeout(() => barcodeRef.current?.focus(), 50);
   }, []);
 
@@ -181,6 +353,8 @@ const ProductList = forwardRef((props, ref) => {
           subtotal: Number(f?.dprice || 0),
         })
       );
+
+      setShowSearchKeyboard(false);
 
       setTimeout(() => {
         barcodeRef.current?.focus();
@@ -213,8 +387,11 @@ const ProductList = forwardRef((props, ref) => {
             fetchProductByBarcode({ barcode: scanned, token })
           ).unwrap();
 
-          if (result) dispatch(addToCart(result));
-          else alert("❌ Product not found.");
+          if (result) {
+            dispatch(addToCart(result));
+          } else {
+            alert("❌ Product not found.");
+          }
         } catch (err) {
           alert("❌ Error: " + (err?.message || err));
         }
@@ -227,6 +404,20 @@ const ProductList = forwardRef((props, ref) => {
     },
     [dispatch, token, barcodeMap, addItemToCart]
   );
+
+  const handleSearchKeyPress = useCallback((key) => {
+    setSearch((prev) => {
+      if (key === "BACKSPACE") return prev.slice(0, -1);
+      if (key === "SPACE") return prev + " ";
+      if (key === "CLEAR") return "";
+      return prev + key;
+    });
+  }, []);
+
+  const openSearchKeyboard = useCallback(() => {
+    setShowSearchKeyboard(true);
+    setTimeout(() => searchInputRef.current?.blur(), 0);
+  }, []);
 
   const filteredProducts = useMemo(() => {
     const s = safeLower(search);
@@ -307,21 +498,21 @@ const ProductList = forwardRef((props, ref) => {
       : 1;
 
   const columnWidth =
-    gridSize.width > 0 ? Math.floor(gridSize.width / columnCount) : MIN_CARD_WIDTH;
+    gridSize.width > 0
+      ? Math.floor(gridSize.width / columnCount)
+      : MIN_CARD_WIDTH;
 
   const rowCount = Math.ceil(flatProducts.length / columnCount);
 
   return (
     <div
       ref={ref}
-      className="h-full min-h-0 flex flex-col overflow-hidden bg-gray-50"
+      className="relative h-full min-h-0 flex flex-col overflow-hidden bg-gray-50"
     >
-      {/* Top controls */}
       <div className="shrink-0 border-b bg-white p-2 sm:p-3">
-        {/* Barcode */}
         <div className="mb-2">
           <div className="relative">
-            <CiBarcode className="absolute left-3 top-1/2 -translate-y-1/2 text-xl text-slate-400 pointer-events-none" />
+            <CiBarcode className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xl text-slate-400" />
             <input
               type="text"
               ref={barcodeRef}
@@ -339,8 +530,7 @@ const ProductList = forwardRef((props, ref) => {
           </div>
         </div>
 
-        {/* Desktop / tablet filters */}
-        <div className="mb-2 hidden md:flex items-center gap-2">
+        <div className="mb-2 hidden items-center gap-2 md:flex">
           <select
             value={categoryFilter}
             onChange={(e) => setCategoryFilter(e.target.value)}
@@ -371,8 +561,8 @@ const ProductList = forwardRef((props, ref) => {
             type="button"
             onClick={handleClearFilters}
             className="
-              shrink-0 rounded bg-red-600 text-white font-bold transition hover:bg-red-700
-              px-2 py-1 text-xs
+              shrink-0 rounded bg-red-600 text-xs font-bold text-white transition hover:bg-red-700
+              px-2 py-1
               lg:px-3 lg:py-2 lg:text-sm
               xl:px-4 xl:py-2
             "
@@ -381,25 +571,26 @@ const ProductList = forwardRef((props, ref) => {
           </button>
         </div>
 
-        {/* Search */}
         <div>
           <input
             type="text"
+            ref={searchInputRef}
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            readOnly
+            inputMode="none"
+            onFocus={openSearchKeyboard}
+            onClick={openSearchKeyboard}
             placeholder="🔍 Search product"
             className="w-full rounded border bg-white px-3 py-2 text-sm"
           />
         </div>
 
-        {/* Mobile clear button */}
         <div className="mt-2 md:hidden">
           <button
             type="button"
             onClick={handleClearFilters}
             className="
-              w-full rounded bg-red-600 text-white font-bold transition hover:bg-red-700
-              px-3 py-2 text-sm
+              w-full rounded bg-red-600 px-3 py-2 text-sm font-bold text-white transition hover:bg-red-700
               sm:px-4 sm:py-2.5 sm:text-base
             "
           >
@@ -408,8 +599,12 @@ const ProductList = forwardRef((props, ref) => {
         </div>
       </div>
 
-      {/* Product grid area */}
-      <div className="flex-1 min-h-0 overflow-hidden">
+      <div
+        className="flex-1 min-h-0 overflow-hidden"
+        style={{
+          paddingBottom: showSearchKeyboard ? `${keyboardHeight}px` : 0,
+        }}
+      >
         {loading ? (
           <div className="flex h-full items-center justify-center font-medium text-blue-500">
             Loading products...
@@ -444,7 +639,9 @@ const ProductList = forwardRef((props, ref) => {
                   const mrp = Number(f?.price || 0);
                   const rate = Number(f?.dprice || 0);
                   const stock = Number(f?.countInStock || 0);
-                  const qtyLabel = `${Number(f?.quantity || 0)} ${f?.units || ""}`;
+                  const qtyLabel = `${Number(f?.quantity || 0)} ${
+                    f?.units || ""
+                  }`;
                   const discount = calcDiscount(f?.price, f?.dprice);
 
                   return (
@@ -469,7 +666,9 @@ const ProductList = forwardRef((props, ref) => {
                                 loading="lazy"
                               />
                             ) : (
-                              <div className="text-xs text-gray-400">No Image</div>
+                              <div className="text-xs text-gray-400">
+                                No Image
+                              </div>
                             )}
                           </div>
 
@@ -518,6 +717,15 @@ const ProductList = forwardRef((props, ref) => {
           </div>
         )}
       </div>
+
+      <SearchKeyboard
+        visible={showSearchKeyboard}
+        onKeyPress={handleSearchKeyPress}
+        onClose={() => {
+          setShowSearchKeyboard(false);
+          setTimeout(() => barcodeRef.current?.focus(), 50);
+        }}
+      />
     </div>
   );
 });
