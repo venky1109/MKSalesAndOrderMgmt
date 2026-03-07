@@ -134,7 +134,7 @@ const handleClearCart = useCallback(() => {
           >
             {isPublishing ? "Publishing…" : "Publish"}
             {queueCount > 0 && (
-              <span className="ml-1 inline-flex items-center justify-center text-[10px] bg-white text-indigo-700 rounded-full min-w-[20px] h-5 px-1">
+              <span className="ml-1 inline-flex items-center justify-center text-[8px] bg-white text-indigo-700 rounded-full min-w-[20px] h-5 px-1">
                 {queueCount}
               </span>
             )}
@@ -154,7 +154,7 @@ const handleClearCart = useCallback(() => {
     "bg-red-600 text-white border border-red-300 hover:bg-red-700",
   ].join(" ")}
 >
-  Clear
+  Clear Cart
 </button>
           <button className={[baseBtn, orangeBtn, mobileBtn].join(" ")}>
             Multi
@@ -196,65 +196,64 @@ const handleClearCart = useCallback(() => {
         </div>
 
         {/* Actions */}
-        <div className="flex-1 min-h-0 px-2 py-3 flex flex-col gap-2">
-          <button
-            onClick={handlePublish}
-            disabled={isPublishing || !queueCount || !navigator.onLine}
-            className={[
-              "w-full h-11 rounded-xl border font-bold text-sm text-white transition",
-              queueCount && !isPublishing && navigator.onLine
-                ? "bg-slate-500 hover:bg-slate-600 border-slate-300"
-                : "bg-gray-400 border-gray-300 cursor-not-allowed",
-            ].join(" ")}
-            title={
-              !navigator.onLine
-                ? "Offline – connect to publish"
-                : queueCount
-                ? "Publish queued orders"
-                : "No queued orders"
-            }
-          >
-            <div className="flex items-center justify-center gap-1">
-              <span>{isPublishing ? "Publishing…" : "Publish"}</span>
-              {queueCount > 0 && (
-                <span className="inline-flex items-center justify-center text-[10px] bg-white text-slate-700 rounded-full min-w-[20px] h-5 px-1">
-                  {queueCount}
-                </span>
-              )}
-            </div>
-          </button>
+        <div className="flex-1 min-h-0 px-2 py-2 flex flex-col gap-1.5">
+  <button
+    onClick={handlePublish}
+    disabled={isPublishing || !queueCount || !navigator.onLine}
+    className={[
+      "w-full h-9 rounded-lg border font-semibold text-xs text-white transition",
+      queueCount && !isPublishing && navigator.onLine
+        ? "bg-slate-500 hover:bg-slate-600 border-slate-300"
+        : "bg-gray-400 border-gray-300 cursor-not-allowed",
+    ].join(" ")}
+    title={
+      !navigator.onLine
+        ? "Offline – connect to publish"
+        : queueCount
+        ? "Publish queued orders"
+        : "No queued orders"
+    }
+  >
+    <div className="flex items-center justify-center gap-1">
+      <span>{isPublishing ? "Publishing…" : "Publish"}</span>
+      {queueCount > 0 && (
+        <span className="inline-flex items-center justify-center text-[7px] bg-white text-slate-700 rounded-full min-w-[16px] h-4 px-1">
+          {queueCount}
+        </span>
+      )}
+    </div>
+  </button>
 
-          <button
-            onClick={handleHold}
-            className={[baseBtn, orangeBtn, desktopBtn].join(" ")}
-          >
-            Hold
-          </button>
-          <button
-  onClick={handleClearCart}
-  className={[
-    baseBtn,
-    desktopBtn,
-    "bg-red-600 text-white border border-red-300 hover:bg-red-700",
-  ].join(" ")}
->
-  Clear Cart
-</button>
+  <button
+    onClick={handleHold}
+    className={[baseBtn, orangeBtn, "h-9 text-xs", desktopBtn].join(" ")}
+  >
+    Hold
+  </button>
 
-          <button className={[baseBtn, orangeBtn, desktopBtn].join(" ")}>
-            Multi
-          </button>
+  <button
+    onClick={handleClearCart}
+    className={[
+      baseBtn,
+      desktopBtn,
+      "h-9 text-xs bg-red-600 text-white border border-red-300 hover:bg-red-700",
+    ].join(" ")}
+  >
+    Clear Cart
+  </button>
 
-          <button className={[baseBtn, orangeBtn, desktopBtn].join(" ")}>
-            UPI
-          </button>
+  <button className={[baseBtn, orangeBtn, "h-9 text-xs", desktopBtn].join(" ")}>
+    Multi
+  </button>
 
-         
+  <button className={[baseBtn, orangeBtn, "h-9 text-xs", desktopBtn].join(" ")}>
+    UPI
+  </button>
 
-          <div className="w-full [&>*]:w-full [&>*]:h-11 [&>*]:rounded-xl [&>*]:font-bold">
-            <CreateOrderButton />
-          </div>
-        </div>
+  <div className="w-full [&>*]:w-full [&>*]:h-9 [&>*]:rounded-lg [&>*]:font-semibold [&>*]:text-xs">
+    <CreateOrderButton />
+  </div>
+</div>
 
         {/* Bottom user panel */}
         <div className="shrink-0 border-t bg-white px-2 py-3">

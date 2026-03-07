@@ -323,7 +323,7 @@ function CreateOrderButton() {
       <button
         onClick={handleCreateOrder}
        
-      className={[actionBtn, orangeBtn, desktopBtn].join(" ")}>
+      className={[actionBtn, orangeBtn, "h-9 text-xs", desktopBtn].join(" ")}>
         Cash
       </button>
 
