@@ -6,15 +6,15 @@ function buildOrderText(order) {
   const shopName = (process.env.REACT_APP_SHOP_NAME || 'MANAKIRANA').trim();
   const addr1 = (process.env.REACT_APP_SHOP_ADDRESS_LINE1 || 'Uppalaguptham').trim();
   const addr2 = (process.env.REACT_APP_SHOP_ADDRESS_LINE2 || 'Konaseema').trim();
-  const rawGst = (process.env.REACT_APP_SHOP_GST || 'GSTIN123456780').trim();
-  const gst = rawGst.replace(/^(\s*GST\s*Number\s*:\s*|\s*GSTIN\s*:\s*)/i, '').trim();
+  // const rawGst = (process.env.REACT_APP_SHOP_GST || 'GSTIN123456780').trim();
+  // const gst = rawGst.replace(/^(\s*GST\s*Number\s*:\s*|\s*GSTIN\s*:\s*)/i, '').trim();
   const phones = (process.env.REACT_APP_SHOP_PHONE || '8121774325, 08856-297898')
     .split(',')
     .map((n) => n.trim())
     .filter(Boolean)
     .join(' | ');
 
-  const id = order?.order_number || order?.id || '';
+  // const id = order?.order_number || order?.id || '';
   const dt = new Date(order?.datetime || Date.now());
   const date = dt.toLocaleDateString();
   const time = dt.toLocaleTimeString();
