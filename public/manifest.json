@@ -38,6 +38,6 @@
   "display": "standalone",
 "background_color": "#cff8cc",
 "theme_color": "#cff8cc",
-  "orientation": "portrait",
+  "orientation": "any",
   "description": "ManaKirana is an online grocery store."
 }

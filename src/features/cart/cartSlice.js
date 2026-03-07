@@ -131,55 +131,66 @@ const cartSlice = createSlice({
 
 ,
     updateQty: (state, action) => {
-  const { id, qty } = action.payload;
+  const { productId, brandId, financialId, qty } = action.payload;
 
-  // 🛑 Basic validation
-  if (!id || typeof qty !== 'number' || isNaN(qty) || qty < 0) {
+  if (
+    !productId ||
+    !brandId ||
+    !financialId ||
+    typeof qty !== "number" ||
+    isNaN(qty) ||
+    qty < 0
+  ) {
     console.warn("🛑 Invalid quantity update", action.payload);
     return;
   }
 
-  const itemIndex = state.items.findIndex(i => i.id === id);
+  const itemIndex = state.items.findIndex(
+    (i) =>
+      i.productId === productId &&
+      i.brandId === brandId &&
+      i.financialId === financialId
+  );
+
   if (itemIndex === -1) {
-    console.warn("⚠️ Item not found in cart for update:", id);
+    console.warn("⚠️ Item not found in cart for update:", action.payload);
     return;
   }
 
   const item = state.items[itemIndex];
-  const originalQty = item.qty;
-  const diff = qty - originalQty;
+  const originalQty = Number(item.qty || 0);
+  const nextQty = Number(qty);
+  const diff = nextQty - originalQty;
 
-  if (qty === 0) {
-    // ❌ Remove item completely and skip recalculating it
+  if (nextQty === 0) {
     state.items.splice(itemIndex, 1);
   } else {
-    // ⛔ Prevent exceeding stock
-    if (diff > 0 && item.stock < diff) {
+    if (diff > 0 && Number(item.stock || 0) < diff) {
       alert("❌ Not enough stock available.");
       return;
     }
 
-    item.qty = qty;
+    item.qty = nextQty;
     item.stock -= diff;
-
-    // const discountAmount = item.price * (item.discount / 100);
-    item.subtotal = parseFloat(((item.dprice) * item.qty).toFixed(2));
+    item.subtotal = parseFloat(
+      (Number(item.dprice || 0) * nextQty).toFixed(2)
+    );
   }
 
-  // 🔁 Recalculate totals
   state.total = 0;
   state.totalQty = 0;
   state.totalDiscount = 0;
   state.totalRawAmount = 0;
 
   for (const i of state.items) {
-    const rawAmount = i.price * i.qty;
-    const itemDiscountAmount = i.dprice * i.qty;
+    const rowQty = Number(i.qty || 0);
+    const rawAmount = Number(i.price || 0) * rowQty;
+    const billedAmount = Number(i.dprice || 0) * rowQty;
 
-     state.total += itemDiscountAmount ;
-    state.totalQty += i.qty;
+    state.total += billedAmount;
+    state.totalQty += rowQty;
     state.totalRawAmount += rawAmount;
-    state.totalDiscount += (rawAmount - itemDiscountAmount) ;
+    state.totalDiscount += rawAmount - billedAmount;
   }
 
   state.total = parseFloat(state.total.toFixed(2));

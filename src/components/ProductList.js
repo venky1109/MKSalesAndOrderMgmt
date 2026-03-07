@@ -1,302 +1,524 @@
 import React, {
-  forwardRef, useEffect, useRef, useState, useMemo, useCallback,
-} from 'react';
-import { useDispatch, useSelector } from 'react-redux';
-import { fetchAllProducts, fetchProductByBarcode } from '../features/products/productSlice';
-import { addToCart } from '../features/cart/cartSlice';
-import { FixedSizeGrid as Grid } from 'react-window';
+  forwardRef,
+  useEffect,
+  useRef,
+  useState,
+  useMemo,
+  useCallback,
+} from "react";
+import { useDispatch, useSelector } from "react-redux";
+import {
+  fetchAllProducts,
+  fetchProductByBarcode,
+} from "../features/products/productSlice";
+import { addToCart } from "../features/cart/cartSlice";
+import { FixedSizeGrid as Grid } from "react-window";
+import { CiBarcode } from "react-icons/ci";
+
+/** helpers */
+const safeLower = (v) => (typeof v === "string" ? v.toLowerCase() : "");
+const asArray = (v) => (Array.isArray(v) ? v : v != null ? [v] : []);
+
+const calcDiscount = (price, dprice) => {
+  const p = Number(price);
+  const dp = Number(dprice);
+  if (!Number.isFinite(p) || p <= 0 || !Number.isFinite(dp)) return 0;
+  return Math.max(0, Math.round(((p - dp) / p) * 100));
+};
+
+const normalizeScan = (raw) => {
+  let s = String(raw ?? "").trim();
+  try {
+    const parsed = JSON.parse(s);
+    if (Array.isArray(parsed) && parsed[0]) s = String(parsed[0]);
+  } catch {}
+  return s.replace(/\s+/g, "");
+};
+
+/** Offline catalog (store-first, localStorage fallback) + fast barcode map */
+function useOfflineCatalog() {
+  const storeAll = useSelector((s) => s.products?.all);
+  const storeList = Array.isArray(storeAll)
+    ? storeAll
+    : Array.isArray(storeAll?.products)
+    ? storeAll.products
+    : [];
+
+  const lsList = useMemo(() => {
+    const keys = [
+      "mkpos.products",
+      "products",
+      "allProducts",
+      "catalog",
+      "mkpos.products.json",
+    ];
+
+    for (const k of keys) {
+      try {
+        const raw = localStorage.getItem(k);
+        if (!raw) continue;
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed;
+        if (Array.isArray(parsed?.products)) return parsed.products;
+      } catch {}
+    }
+    return [];
+  }, []);
+
+  const list = storeList?.length ? storeList : lsList;
+
+  const barcodeMap = useMemo(() => {
+    const map = new Map();
+
+    for (const p of list || []) {
+      for (const d of asArray(p?.details)) {
+        for (const f of asArray(d?.financials)) {
+          let bars = Array.isArray(f?.barcode) ? f.barcode : [f?.barcode];
+          bars = bars.filter(Boolean).map((b) => String(b).trim());
+
+          for (const b of bars) {
+            if (!b) continue;
+            if (!map.has(b)) map.set(b, { p, d, f });
+          }
+        }
+      }
+    }
+
+    return map;
+  }, [list]);
+
+  return { productsList: list, barcodeMap };
+}
 
 const ProductList = forwardRef((props, ref) => {
   const dispatch = useDispatch();
-  const barcodeRef = useRef(null);
 
   const token = useSelector((state) => state.posUser.userInfo?.token);
-  const { all: products = [], loading, error } = useSelector((state) => state.products || {});
-  const safeProducts = useMemo(() => (
-    Array.isArray(products)
-      ? products
-      : Array.isArray(products?.products)
-        ? products.products
-        : []
-  ), [products]);
-
-  const [categoryFilter, setCategoryFilter] = useState('all');
-  const [brandFilter, setBrandFilter] = useState('all');
-  const [search, setSearch] = useState('');
-  const [barcodeInput, setBarcodeInput] = useState('');
-  const [windowWidth, setWindowWidth] = useState(window.innerWidth);
-  const [showFilters, setShowFilters] = useState(false); 
+  const { loading, error } = useSelector((state) => state.products || {});
+  const { productsList: safeProducts, barcodeMap } = useOfflineCatalog();
 
   useEffect(() => {
-    if (token && safeProducts.length === 0) {
+    if (safeProducts?.length) {
+      try {
+        localStorage.setItem("mkpos.products", JSON.stringify(safeProducts));
+      } catch {}
+    }
+  }, [safeProducts]);
+
+  useEffect(() => {
+    if (!safeProducts.length && token && navigator.onLine) {
       dispatch(fetchAllProducts(token));
     }
-  }, [dispatch, token, safeProducts.length]);
+  }, [safeProducts.length, token, dispatch]);
 
-  useEffect(() => {
-    const handleResize = () => {
-      setWindowWidth(window.innerWidth);
-    };
-    window.addEventListener('resize', handleResize);
-    handleResize();
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [brandFilter, setBrandFilter] = useState("all");
+  const [search, setSearch] = useState("");
+
+  const barcodeRef = useRef(null);
+  const [barcodeInput, setBarcodeInput] = useState("");
 
   useEffect(() => {
     barcodeRef.current?.focus();
   }, []);
 
-  const handleBarcodeScan = async (e) => {
-    if (e.key === 'Enter' && barcodeInput.trim()) {
-      handleBarcode(barcodeInput.trim());
-      setBarcodeInput('');
-    }
-  };
+  const gridWrapRef = useRef(null);
+  const [gridSize, setGridSize] = useState({ width: 0, height: 0 });
 
-  const handleBarcode = useCallback(async (scannedRaw) => {
-    let scanned = scannedRaw;
+  useEffect(() => {
+    const el = gridWrapRef.current;
+    if (!el) return;
 
-    if (typeof scannedRaw === 'string') {
-      try {
-        const parsed = JSON.parse(scannedRaw);
-        if (Array.isArray(parsed)) scanned = parsed[0];
-      } catch {
-        scanned = scannedRaw.replace(/\[\]"]+/g, '');
+    const updateSize = () => {
+      setGridSize({
+        width: el.clientWidth,
+        height: el.clientHeight,
+      });
+    };
+
+    updateSize();
+
+    const ro = new ResizeObserver(updateSize);
+    ro.observe(el);
+    window.addEventListener("resize", updateSize);
+
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", updateSize);
+    };
+  }, []);
+
+  const handleClearFilters = useCallback(() => {
+    setCategoryFilter("all");
+    setBrandFilter("all");
+    setSearch("");
+    setTimeout(() => barcodeRef.current?.focus(), 50);
+  }, []);
+
+  const addItemToCart = useCallback(
+    (p, d, f) => {
+      dispatch(
+        addToCart({
+          id: p._id,
+          productId: p._id,
+          item: p.name,
+          productName: p.name,
+          category: p.category,
+          brand: d?.brand,
+          brandId: d?._id,
+          financialId: f?._id,
+          price: Number(f?.price || 0),
+          MRP: Number(f?.price || 0),
+          dprice: Number(f?.dprice || 0),
+          quantity: Number(f?.quantity || 0),
+          countInStock: Number(f?.countInStock || 0),
+          stock: Number(f?.countInStock || 0),
+          units: f?.units,
+          image: d?.images?.[0]?.image || "",
+          catalogQuantity: Number(f?.quantity || 0),
+          discount: calcDiscount(f?.price, f?.dprice),
+          qty: 1,
+          subtotal: Number(f?.dprice || 0),
+        })
+      );
+
+      setTimeout(() => {
+        barcodeRef.current?.focus();
+      }, 50);
+    },
+    [dispatch]
+  );
+
+  const handleBarcode = useCallback(
+    async (raw) => {
+      const scanned = normalizeScan(raw);
+      if (!scanned) return;
+
+      const hit =
+        barcodeMap.get(scanned) ||
+        barcodeMap.get(scanned.replace(/^0+/, "")) ||
+        null;
+
+      if (hit) {
+        const { p, d, f } = hit;
+        addItemToCart(p, d, f);
+        setBarcodeInput("");
+        setTimeout(() => barcodeRef.current?.focus(), 50);
+        return;
       }
-    }
 
-    const matchedProduct = safeProducts.find((p) =>
-      p.details?.some((d) =>
-        d.financials?.some((f) =>
-          (Array.isArray(f.barcode) ? f.barcode : [f.barcode || ""]).includes(scanned)
-        )
-      )
-    );
+      if (navigator.onLine) {
+        try {
+          const result = await dispatch(
+            fetchProductByBarcode({ barcode: scanned, token })
+          ).unwrap();
 
-    if (matchedProduct) {
-      const detail = matchedProduct.details.find((d) =>
-        d.financials?.some((f) =>
-          (Array.isArray(f.barcode) ? f.barcode : [f.barcode || ""]).includes(scanned)
-        )
-      );
-      const financial = detail.financials.find((f) =>
-        (Array.isArray(f.barcode) ? f.barcode : [f.barcode || ""]).includes(scanned)
-      );
-
-      dispatch(addToCart({
-        id: matchedProduct._id,
-        productName: matchedProduct.name,
-        category: matchedProduct.category,
-        brand: detail.brand,
-        brandId: detail._id,
-        financialId: financial._id,
-        MRP: financial.price,
-        dprice: financial.dprice,
-        quantity: financial.quantity,
-        countInStock: financial.countInStock,
-        units: financial.units,
-        image: detail.images?.[0]?.image,
-        catalogQuantity: financial.quantity,
-        discount: Math.round(((financial.price - financial.dprice) / financial.price) * 100),
-        qty: 1
-      }));
-    } else {
-      try {
-        const result = await dispatch(fetchProductByBarcode({ barcode: scanned, token })).unwrap();
-        if (result) {
-          dispatch(addToCart(result));
-        } else {
-          alert('❌ Product not found');
+          if (result) dispatch(addToCart(result));
+          else alert("❌ Product not found.");
+        } catch (err) {
+          alert("❌ Error: " + (err?.message || err));
         }
-      } catch (err) {
-        alert('❌ Error: ' + err.message);
+      } else {
+        alert("📴 Offline and product not found in cache.");
       }
-    }
 
-    setTimeout(() => barcodeRef.current?.focus(), 100);
-  }, [dispatch, token, safeProducts]);
+      setBarcodeInput("");
+      setTimeout(() => barcodeRef.current?.focus(), 50);
+    },
+    [dispatch, token, barcodeMap, addItemToCart]
+  );
 
   const filteredProducts = useMemo(() => {
-    return safeProducts.filter((product) => {
-      const matchCategory = categoryFilter === 'all' || (product.category || '').toLowerCase() === categoryFilter;
-      const matchBrand = brandFilter === 'all' || product.details.some(d => (d.brand || '').toLowerCase() === brandFilter);
+    const s = safeLower(search);
+
+    return (safeProducts || []).filter((product) => {
+      const category = safeLower(product?.category);
+      const details = asArray(product?.details);
+
+      const matchCategory =
+        categoryFilter === "all" || category === categoryFilter;
+
+      const matchBrand =
+        brandFilter === "all" ||
+        details.some((d) => safeLower(d?.brand) === brandFilter);
+
       const matchSearch =
-        !search ||
-        product.name.toLowerCase().includes(search.toLowerCase()) ||
-        product.details.some(d => d.brand.toLowerCase().includes(search.toLowerCase()));
+        !s ||
+        safeLower(product?.name).includes(s) ||
+        details.some((d) => safeLower(d?.brand).includes(s));
 
       return matchCategory && matchBrand && matchSearch;
     });
   }, [safeProducts, categoryFilter, brandFilter, search]);
 
   const filteredCategories = useMemo(() => {
-    return [...new Set(
-      safeProducts
-        .filter(p =>
-          brandFilter === 'all' ||
-          p.details.some(d => (d.brand || '').toLowerCase() === brandFilter)
-        )
-        .map(p => (p.category || '').toLowerCase())
-        .filter(Boolean)
-    )];
+    const set = new Set();
+
+    for (const p of safeProducts || []) {
+      const details = asArray(p?.details);
+      if (
+        brandFilter === "all" ||
+        details.some((d) => safeLower(d?.brand) === brandFilter)
+      ) {
+        const cat = safeLower(p?.category);
+        if (cat) set.add(cat);
+      }
+    }
+
+    return [...set].sort((a, b) => a.localeCompare(b));
   }, [safeProducts, brandFilter]);
 
   const filteredBrands = useMemo(() => {
-    return [...new Set(
-      safeProducts
-        .filter(p =>
-          categoryFilter === 'all' || (p.category || '').toLowerCase() === categoryFilter
-        )
-        .flatMap(p => (p.details || []).map(d => (d.brand || 'unbranded').toLowerCase()))
-        .filter(Boolean)
-    )];
+    const set = new Set();
+
+    for (const p of safeProducts || []) {
+      const cat = safeLower(p?.category);
+      if (categoryFilter !== "all" && cat !== categoryFilter) continue;
+
+      const details = asArray(p?.details);
+      for (const d of details) {
+        const brand = safeLower(d?.brand || "unbranded");
+        if (brand) set.add(brand);
+      }
+    }
+
+    return [...set].filter(Boolean).sort((a, b) => a.localeCompare(b));
   }, [safeProducts, categoryFilter]);
 
-  const flatProducts = useMemo(() => (
-    filteredProducts.flatMap(p =>
-      (p.details || []).flatMap(d =>
-        (d.financials || []).map(f => ({ p, d, f }))
-      )
-    )
-  ), [filteredProducts]);
+  const flatProducts = useMemo(
+    () =>
+      filteredProducts.flatMap((p) =>
+        asArray(p?.details).flatMap((d) =>
+          asArray(d?.financials)
+            .filter(Boolean)
+            .map((f) => ({ p, d, f }))
+        )
+      ),
+    [filteredProducts]
+  );
 
-  const COLUMN_COUNT = windowWidth < 768 ? 2 : 3;
-  const ROW_HEIGHT = 250;
-  const COLUMN_WIDTH = windowWidth < 768 ? windowWidth / 2 - 24 : 240;
+  const MIN_CARD_WIDTH = 180;
+  const CARD_HEIGHT = 220;
+  const CARD_GAP = 10;
 
-  const ProductCell = ({ columnIndex, rowIndex, style, data }) => {
-    const index = rowIndex * COLUMN_COUNT + columnIndex;
-    const item = data[index];
-    if (!item) return null;
+  const columnCount =
+    gridSize.width > 0
+      ? Math.max(1, Math.floor(gridSize.width / MIN_CARD_WIDTH))
+      : 1;
 
-    const { p, d, f } = item;
+  const columnWidth =
+    gridSize.width > 0 ? Math.floor(gridSize.width / columnCount) : MIN_CARD_WIDTH;
 
-    return (
-      <div
-        style={style}
-        onClick={() =>
-          dispatch(addToCart({
-            id: p._id,
-            productName: p.name,
-            category: p.category,
-            brand: d.brand,
-            brandId: d._id,
-            financialId: f._id,
-            MRP: f.price,
-            dprice: f.dprice,
-            quantity: f.quantity,
-            countInStock: f.countInStock,
-            units: f.units,
-            image: d.images?.[0]?.image,
-            catalogQuantity: f.quantity,
-            discount: Math.round(((f.price - f.dprice) / f.price) * 100),
-            qty: 1
-          }))
-        }
-        className="bg-gray-100 w-full border p-2 rounded shadow text-center cursor-pointer hover:bg-blue-100 m-1"
-      >
-        <img
-          src={d.images?.[0]?.image}
-          alt={p.name}
-          className="w-full h-20 object-contain mb-2"
-          loading="lazy"
-        />
-        <div className="text-xs text-red-600 font-semibold">Qty: {f.quantity} {f.units}</div>
-        <div className="font-bold text-sm">{p.name}</div>
-        <div className="text-xs text-gray-500 italic">{d.brand}</div>
-        <div className="text-green-700 font-semibold">₹ {f.dprice}</div>
-        <div className="text-gray-500 line-through text-xs">₹ {f.price}</div>
-        <div className="text-xs text-red-800 font-semibold">Stock: {f.countInStock}</div>
-      </div>
-    );
-  };
+  const rowCount = Math.ceil(flatProducts.length / columnCount);
 
   return (
-     <div className="p-4 bg-white border rounded shadow-sm h-full overflow-y-auto">
-
-      {/* Barcode Scan */}
-      <div className="mb-4">
-        <input
-          type="text"
-          ref={barcodeRef}
-          value={barcodeInput}
-          onChange={(e) => setBarcodeInput(e.target.value)}
-          onKeyDown={handleBarcodeScan}
-          placeholder="Scan barcode to add"
-          className="border p-2 w-full text-lg text-center"
-        />
-      </div>
-<div className="mb-3">
-    <button
-      onClick={() => setShowFilters((prev) => !prev)}
-      className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded w-full md:w-auto"
+    <div
+      ref={ref}
+      className="h-full min-h-0 flex flex-col overflow-hidden bg-gray-50"
     >
-      {showFilters ? "Hide Filters & Search" : "Show Filters & Search"}
-    </button>
-  </div>
+      {/* Top controls */}
+      <div className="shrink-0 border-b bg-white p-2 sm:p-3">
+        {/* Barcode */}
+        <div className="mb-2">
+          <div className="relative">
+            <CiBarcode className="absolute left-3 top-1/2 -translate-y-1/2 text-xl text-slate-400 pointer-events-none" />
+            <input
+              type="text"
+              ref={barcodeRef}
+              value={barcodeInput}
+              inputMode="none"
+              onChange={(e) => setBarcodeInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && barcodeInput.trim()) {
+                  handleBarcode(barcodeInput.trim());
+                }
+              }}
+              placeholder="Scan barcode to add"
+              className="w-full rounded border bg-white p-2 pl-10 pr-10 text-center text-sm text-slate-900 md:text-base"
+            />
+          </div>
+        </div>
 
-  {/* Filters + Product Grid — only shown when toggled */}
-  {showFilters && (
-    <>
-      {/* Filters */}
-      <div className="flex flex-wrap gap-2 mb-3">
-        <select
-          value={categoryFilter}
-          onChange={(e) => setCategoryFilter(e.target.value)}
-          className="border px-2 py-1 rounded text-sm flex-1 min-w-[130px]"
-        >
-          <option value="all">All Categories</option>
-          {filteredCategories.map((cat, idx) => (
-            <option key={idx} value={cat}>{cat}</option>
-          ))}
-        </select>
+        {/* Desktop / tablet filters */}
+        <div className="mb-2 hidden md:flex items-center gap-2">
+          <select
+            value={categoryFilter}
+            onChange={(e) => setCategoryFilter(e.target.value)}
+            className="min-w-[130px] flex-1 rounded border bg-white px-2 py-2 text-sm"
+          >
+            <option value="all">All Categories</option>
+            {filteredCategories.map((cat) => (
+              <option key={cat} value={cat}>
+                {cat.toUpperCase()}
+              </option>
+            ))}
+          </select>
 
-        <select
-          value={brandFilter}
-          onChange={(e) => setBrandFilter(e.target.value)}
-          className="border px-2 py-1 rounded text-sm flex-1 min-w-[130px]"
-        >
-          <option value="all">All Brands</option>
-          {filteredBrands.map((brand, idx) => (
-            <option key={idx} value={brand}>{brand}</option>
-          ))}
-        </select>
+          <select
+            value={brandFilter}
+            onChange={(e) => setBrandFilter(e.target.value)}
+            className="min-w-[130px] flex-1 rounded border bg-white px-2 py-2 text-sm"
+          >
+            <option value="all">All Brands</option>
+            {filteredBrands.map((brand) => (
+              <option key={brand} value={brand}>
+                {brand.toUpperCase()}
+              </option>
+            ))}
+          </select>
 
-        <input
-          type="text"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="🔍 Search product"
-          className="border px-2 py-1 rounded text-sm flex-1 min-w-[150px]"
-        />
+          <button
+            type="button"
+            onClick={handleClearFilters}
+            className="
+              shrink-0 rounded bg-red-600 text-white font-bold transition hover:bg-red-700
+              px-2 py-1 text-xs
+              lg:px-3 lg:py-2 lg:text-sm
+              xl:px-4 xl:py-2
+            "
+          >
+            Clear
+          </button>
+        </div>
+
+        {/* Search */}
+        <div>
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="🔍 Search product"
+            className="w-full rounded border bg-white px-3 py-2 text-sm"
+          />
+        </div>
+
+        {/* Mobile clear button */}
+        <div className="mt-2 md:hidden">
+          <button
+            type="button"
+            onClick={handleClearFilters}
+            className="
+              w-full rounded bg-red-600 text-white font-bold transition hover:bg-red-700
+              px-3 py-2 text-sm
+              sm:px-4 sm:py-2.5 sm:text-base
+            "
+          >
+            Clear
+          </button>
+        </div>
       </div>
 
-      {/* Product Grid */}
-      {loading ? (
-        <div className="text-center text-blue-500 font-medium">
-          Loading products...
-        </div>
-      ) : error ? (
-        <div className="text-red-600 text-sm">{error}</div>
-      ) : flatProducts.length === 0 ? (
-        <div className="text-gray-500 italic">No matching products found.</div>
-      ) : (
-        <Grid
-          columnCount={COLUMN_COUNT}
-          columnWidth={COLUMN_WIDTH}
-          height={window.innerHeight - 250}
-          rowCount={Math.ceil(flatProducts.length / COLUMN_COUNT)}
-          rowHeight={ROW_HEIGHT}
-          width={COLUMN_WIDTH * COLUMN_COUNT}
-          itemData={flatProducts}
-        >
-          {ProductCell}
-        </Grid>
-      )}
-    </>
-  )}
-</div>
-  
+      {/* Product grid area */}
+      <div className="flex-1 min-h-0 overflow-hidden">
+        {loading ? (
+          <div className="flex h-full items-center justify-center font-medium text-blue-500">
+            Loading products...
+          </div>
+        ) : error ? (
+          <div className="flex h-full items-center justify-center text-sm text-red-600">
+            {error}
+          </div>
+        ) : flatProducts.length === 0 ? (
+          <div className="flex h-full items-center justify-center italic text-gray-500">
+            No matching products found.
+          </div>
+        ) : (
+          <div ref={gridWrapRef} className="h-full w-full overflow-hidden">
+            {gridSize.width > 0 && gridSize.height > 0 ? (
+              <Grid
+                columnCount={columnCount}
+                columnWidth={columnWidth}
+                height={gridSize.height}
+                rowCount={rowCount}
+                rowHeight={CARD_HEIGHT}
+                width={gridSize.width}
+                itemData={flatProducts}
+              >
+                {({ columnIndex, rowIndex, style, data }) => {
+                  const index = rowIndex * columnCount + columnIndex;
+                  const item = data[index];
+                  if (!item) return null;
+
+                  const { p, d, f } = item;
+                  const imageUrl = d?.images?.[0]?.image;
+                  const mrp = Number(f?.price || 0);
+                  const rate = Number(f?.dprice || 0);
+                  const stock = Number(f?.countInStock || 0);
+                  const qtyLabel = `${Number(f?.quantity || 0)} ${f?.units || ""}`;
+                  const discount = calcDiscount(f?.price, f?.dprice);
+
+                  return (
+                    <div
+                      style={{
+                        ...style,
+                        padding: CARD_GAP / 2,
+                      }}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => addItemToCart(p, d, f)}
+                        className="h-full w-full overflow-hidden rounded-xl border border-gray-200 bg-white p-3 text-left shadow-sm transition hover:border-blue-300 hover:shadow-md active:scale-[0.99]"
+                      >
+                        <div className="flex h-full flex-col">
+                          <div className="mb-2 flex h-20 w-full items-center justify-center overflow-hidden rounded-md bg-gray-50">
+                            {imageUrl ? (
+                              <img
+                                src={imageUrl}
+                                alt={p?.name || "Product"}
+                                className="h-full w-full object-contain"
+                                loading="lazy"
+                              />
+                            ) : (
+                              <div className="text-xs text-gray-400">No Image</div>
+                            )}
+                          </div>
+
+                          <div className="text-center text-[10px] font-semibold text-red-600">
+                            Qty: {qtyLabel}
+                          </div>
+
+                          <div className="min-h-[2.5rem] overflow-hidden text-center text-sm font-semibold leading-5 text-gray-800">
+                            {p?.name}
+                          </div>
+
+                          <div className="text-center text-[11px] italic text-gray-500">
+                            {d?.brand || "Unbranded"}
+                          </div>
+
+                          <div className="mt-1 flex items-end justify-between gap-2">
+                            <div className="min-w-0">
+                              <div className="whitespace-nowrap text-base font-bold text-green-700">
+                                ₹ {rate.toFixed(2)}
+                              </div>
+                              <div className="whitespace-nowrap text-[11px] text-gray-400 line-through">
+                                ₹ {mrp.toFixed(2)}
+                              </div>
+                            </div>
+
+                            <div className="shrink-0 text-right">
+                              <div className="text-[11px] font-semibold text-orange-600">
+                                {discount}% OFF
+                              </div>
+                              <div className="text-[11px] font-semibold text-red-700">
+                                Stock: {stock}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </button>
+                    </div>
+                  );
+                }}
+              </Grid>
+            ) : (
+              <div className="flex h-full items-center justify-center text-sm text-gray-400">
+                Measuring product area...
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
   );
 });
 

@@ -116,6 +116,7 @@ export const publishQueuedOrdersSequential = createAsyncThunk(
 
     const state = thunkAPI.getState();
     const fallbackToken = state.posUser?.userInfo?.token;
+    // console.log("sssss"+token)
     const queue = peekOrdersQueue();
     if (!queue.length) return { published: 0, failed: 0, results: [] };
 
@@ -125,6 +126,7 @@ export const publishQueuedOrdersSequential = createAsyncThunk(
 
     for (const item of queue) {
       const tok = item.__token || token || fallbackToken;
+      // console.log(tok)
       let payload = { ...item.payload }; // don’t mutate the queued snapshot
 
       try {

@@ -2,7 +2,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 
-import { logout, getPosUserBalance } from "../features/auth/posUserSlice";
+import { logout } from "../features/auth/posUserSlice";
 import { publishQueuedOrdersSequential } from "../features/orders/orderSlice";
 import { setSearch } from "../features/products/productFiltersSlice";
 import { addToCart } from "../features/cart/cartSlice";
@@ -38,7 +38,9 @@ function useSafeProducts() {
         if (parsed?.products && Array.isArray(parsed.products)) {
           return parsed.products;
         }
-      } catch {/* ignore */}
+      } catch {
+        /* ignore */
+      }
     }
     return [];
   }, []);
@@ -72,14 +74,6 @@ export default function HeaderPOS() {
       return `₹${Number(balance).toLocaleString("en-IN")}`;
     }
   }, [balance]);
-
-  // mobile menu
-  const [showMobileMenu, setShowMobileMenu] = useState(false);
-  const toggleMobile = () => {
-    const next = !showMobileMenu;
-    setShowMobileMenu(next);
-    if (next && posUserInfo?._id) dispatch(getPosUserBalance());
-  };
 
   // filters / search text
   const { category = "all", brand = "all", search = "" } =
@@ -170,7 +164,7 @@ export default function HeaderPOS() {
   const addSuggestionToCart = (item) => {
     if (!item?.p || !item?.d || !item?.f) return;
     const { p, d, f } = item;
-    // normalize payload like your cart expects
+
     const payload = {
       id: p._id,
       productName: p.name,
@@ -191,6 +185,7 @@ export default function HeaderPOS() {
           : 0,
       qty: 1,
     };
+
     dispatch(addToCart(payload));
     dispatch(setSearch(""));
     setShowSug(false);
@@ -199,6 +194,7 @@ export default function HeaderPOS() {
 
   const onSearchKeyDown = (e) => {
     if (!showSug || sug.length === 0) return;
+
     if (e.key === "ArrowDown") {
       e.preventDefault();
       setActiveIdx((idx) => (idx + 1) % sug.length);
@@ -230,11 +226,12 @@ export default function HeaderPOS() {
       return;
     }
     if (!queueCount) return;
+
     try {
       const res = await dispatch(
         publishQueuedOrdersSequential({ token })
       ).unwrap();
-      setShowMobileMenu(false);
+
       alert(
         res?.published
           ? `✅ Published ${res.published} order(s).${
@@ -256,8 +253,8 @@ export default function HeaderPOS() {
   return (
     <header className="bg-yellow-500 shadow-md p-3 sticky top-0 z-50">
       <div className="flex items-center gap-2 w-full">
-        {/* Search (flex-1, always enabled even offline) */}
-        <div className="relative flex-1 min-w-0">
+        {/* Search only on mobile */}
+        <div className="relative flex-1 min-w-0 md:hidden">
           <input
             ref={inputRef}
             type="text"
@@ -265,11 +262,12 @@ export default function HeaderPOS() {
             onChange={(e) => dispatch(setSearch(e.target.value))}
             onKeyDown={onSearchKeyDown}
             placeholder="Search products"
-            className="w-full border px-2 py-1 rounded text-sm"
+            className="w-full border px-2 py-2 rounded text-sm"
             onFocus={() => {
               if (sug.length) setShowSug(true);
             }}
           />
+
           {showSug && sug.length > 0 && (
             <div
               ref={sugBoxRef}
@@ -312,57 +310,8 @@ export default function HeaderPOS() {
           )}
         </div>
 
-        {/* Mobile hamburger */}
-        <div className="relative md:hidden shrink-0">
-          <button
-            className="text-2xl text-white"
-            onClick={toggleMobile}
-            aria-label="Toggle Mobile Menu"
-          >
-            ☰
-          </button>
-          {showMobileMenu && (
-            <div className="absolute right-0 mt-2 w-64 bg-white border rounded shadow-lg z-50">
-              <div className="p-2 border-b text-gray-700 font-medium">
-                Hi {name}
-              </div>
-
-              <button
-                onClick={handlePublish}
-                disabled={isPublishing || !queueCount || !navigator.onLine}
-                className={`w-full text-left px-4 py-2 text-sm ${
-                  queueCount
-                    ? "text-indigo-700 hover:bg-indigo-50"
-                    : "text-gray-400 cursor-not-allowed"
-                }`}
-              >
-                {isPublishing
-                  ? "Publishing…"
-                  : `Publish Orders${queueCount ? ` (${queueCount})` : ""}`}
-              </button>
-
-              <div className="px-4 py-2 text-sm text-green-800 bg-green-50 border-y">
-                <div className="flex items-baseline font-medium gap-2">
-                  <div>Earnings:</div>
-                  <div className="font-bold">{earningsText}</div>
-                </div>
-              </div>
-
-              <button
-                onClick={() => {
-                  setShowMobileMenu(false);
-                  handleLogout();
-                }}
-                className="block w-full text-left px-4 py-2 text-sm text-red-700 hover:bg-red-100"
-              >
-                Logout
-              </button>
-            </div>
-          )}
-        </div>
-
-        {/* Desktop actions */}
-        <div className="hidden md:flex items-center gap-3 shrink-0">
+        {/* Desktop actions only */}
+        <div className="hidden md:flex items-center gap-3 shrink-0 ml-auto">
           <button
             onClick={handlePublish}
             disabled={isPublishing || !queueCount || !navigator.onLine}
@@ -399,7 +348,6 @@ export default function HeaderPOS() {
         </div>
       </div>
 
-      {/* (Optional) connection hint – search still works offline */}
       {!navigator.onLine && (
         <div className="mt-2 text-xs text-yellow-900 bg-yellow-100 px-2 py-1 rounded">
           You’re offline. Search works from cached products; publishing is disabled.

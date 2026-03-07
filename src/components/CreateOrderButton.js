@@ -46,6 +46,12 @@ function CreateOrderButton() {
   const now = new Date();
   const formattedDate = now.toLocaleDateString();
   const formattedTime = now.toLocaleTimeString();
+  const actionBtn =
+    "rounded-xl font-bold transition active:translate-y-[1px] whitespace-nowrap";
+  const orangeBtn =
+    "bg-[#ff7400] text-white border border-[#FFD700] hover:bg-[#e66a00]";
+  // const mobileBtn = "h-10 px-3 te?xt-xs shrink-0";
+  const desktopBtn = "w-full h-12 text-sm md:text-base";
 
   // Remove anything inside parentheses from item names
   // const sanitizeName = (name) => (name || '').replace(/\s*\([^)]*\)/g, '').trim();
@@ -316,9 +322,8 @@ function CreateOrderButton() {
     <div className="grid">
       <button
         onClick={handleCreateOrder}
-        className="h-10 p-3 inline-flex items-center justify-center rounded-lg bg-green-600 text-white font-medium shadow-sm
-                   active:translate-y-[1px] active:shadow-inner transition-all hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-white/50"
-      >
+       
+      className={[actionBtn, orangeBtn, desktopBtn].join(" ")}>
         Cash
       </button>
 
