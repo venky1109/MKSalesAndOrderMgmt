@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { logout } from "../features/auth/posUserSlice";
 import {
@@ -330,6 +330,7 @@ export default function POSActionsBar() {
     "bg-[#ff8a00] text-white border border-[#FFD700] hover:bg-[#e57b00]";
   const mobileBtn = "h-10 px-3 text-xs shrink-0";
   const desktopBtn = "w-full h-11 text-sm";
+  // console.log(posOrdersList)
   const ordersTotalAmount = (posOrdersList || []).reduce(
   (sum, order) => sum + Number(order.totalPrice || 0),
   0
@@ -512,7 +513,7 @@ export default function POSActionsBar() {
                       >
                         <td className="px-3 py-2">{index + 1}</td>
                         <td className="px-3 py-2">{formatDateTime(order.createdAt)}</td>
-                        <td className="px-3 py-2">{order.orderId}</td>
+                        <td className="px-3 py-2">{order._id}</td>
                         <td className="px-3 py-2">{order.phoneNo || "-"}</td>
                         <td className="px-3 py-2 text-right">₹{Number(order.totalPrice || 0).toFixed(2)}</td>
                       </tr>
@@ -549,7 +550,7 @@ export default function POSActionsBar() {
               <>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 rounded-xl border p-3 bg-slate-50">
                   <div className="text-sm font-semibold">
-                    <span className="text-gray-500">Order ID:</span> {posOrderDetails.orderId}
+                    <span className="text-gray-500">Order ID:</span> {posOrderDetails._id}
                   </div>
                   <div className="text-sm font-semibold">
                     <span className="text-gray-500">Phone Number:</span> {posOrderDetails.phoneNo || "-"}
