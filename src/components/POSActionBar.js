@@ -330,6 +330,10 @@ export default function POSActionsBar() {
     "bg-[#ff8a00] text-white border border-[#FFD700] hover:bg-[#e57b00]";
   const mobileBtn = "h-10 px-3 text-xs shrink-0";
   const desktopBtn = "w-full h-11 text-sm";
+  const ordersTotalAmount = (posOrdersList || []).reduce(
+  (sum, order) => sum + Number(order.totalPrice || 0),
+  0
+);
 
   return (
     <>
@@ -515,6 +519,16 @@ export default function POSActionsBar() {
                     ))
                   )}
                 </tbody>
+                <tfoot>
+  <tr className="border-t bg-yellow-100 font-bold">
+    <td colSpan="4" className="px-3 py-3 text-right">
+      Total Amount
+    </td>
+    <td className="px-3 py-3 text-right">
+      ₹{ordersTotalAmount.toFixed(2)}
+    </td>
+  </tr>
+</tfoot>
               </table>
             </div>
           </div>
