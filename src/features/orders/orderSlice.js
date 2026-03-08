@@ -314,6 +314,56 @@ export const markOrderAsPaid = createAsyncThunk(
     }
   }
 );
+export const fetchPOSOrders = createAsyncThunk(
+  'orders/fetchPOSOrders',
+  async ({ mode = 'latest', phone = '', from = '', to = '' }, thunkAPI) => {
+    try {
+      const token = thunkAPI.getState().posUser?.userInfo?.token;
+
+      const params = new URLSearchParams();
+      params.set('mode', mode);
+
+      if (phone) params.set('phone', phone);
+      if (from) params.set('from', from);
+      if (to) params.set('to', to);
+
+      const response = await fetch(
+        `${process.env.REACT_APP_API_BASE_URL}/orders/pos/orders/search?${params.toString()}`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Failed to fetch POS orders');
+      return data;
+    } catch (error) {
+      return thunkAPI.rejectWithValue(error.message);
+    }
+  }
+);
+
+export const fetchPOSOrderDetails = createAsyncThunk(
+  'orders/fetchPOSOrderDetails',
+  async (id, thunkAPI) => {
+    try {
+      const token = thunkAPI.getState().posUser?.userInfo?.token;
+
+      const response = await fetch(
+        `${process.env.REACT_APP_API_BASE_URL}/orders/pos/orders/details/${id}`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Failed to fetch order details');
+      return data;
+    } catch (error) {
+      return thunkAPI.rejectWithValue(error.message);
+    }
+  }
+);
 
 // -----------------------------
 // Slice
@@ -335,6 +385,12 @@ const orderSlice = createSlice({
     publishStatus: 'idle',
     publishMsg: '',
     lastPublishResults: [],
+      posOrdersList: [],
+  posOrdersListLoading: false,
+  posOrdersListError: '',
+  posOrderDetails: null,
+  posOrderDetailsLoading: false,
+  posOrderDetailsError: '',
   },
   reducers: {},
   extraReducers: (builder) => {
@@ -462,6 +518,31 @@ const orderSlice = createSlice({
       })
       .addCase(markOrderAsPaid.rejected, (state, action) => {
         state.paidStatus = { loading: false, success: false, error: action.payload };
+      })
+            .addCase(fetchPOSOrders.pending, (state) => {
+        state.posOrdersListLoading = true;
+        state.posOrdersListError = '';
+      })
+      .addCase(fetchPOSOrders.fulfilled, (state, action) => {
+        state.posOrdersListLoading = false;
+        state.posOrdersList = action.payload || [];
+      })
+      .addCase(fetchPOSOrders.rejected, (state, action) => {
+        state.posOrdersListLoading = false;
+        state.posOrdersListError = action.payload || 'Failed to fetch POS orders';
+      })
+
+      .addCase(fetchPOSOrderDetails.pending, (state) => {
+        state.posOrderDetailsLoading = true;
+        state.posOrderDetailsError = '';
+      })
+      .addCase(fetchPOSOrderDetails.fulfilled, (state, action) => {
+        state.posOrderDetailsLoading = false;
+        state.posOrderDetails = action.payload;
+      })
+      .addCase(fetchPOSOrderDetails.rejected, (state, action) => {
+        state.posOrderDetailsLoading = false;
+        state.posOrderDetailsError = action.payload || 'Failed to fetch order details';
       });
   },
 });

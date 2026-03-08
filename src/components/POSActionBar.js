@@ -1,7 +1,11 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { logout } from "../features/auth/posUserSlice";
-import { publishQueuedOrdersSequential } from "../features/orders/orderSlice";
+import {
+  publishQueuedOrdersSequential,
+  fetchPOSOrders,
+  fetchPOSOrderDetails,
+} from "../features/orders/orderSlice";
 import { pingBackend } from "../utils/network";
 import { clearCart } from "../features/cart/cartSlice";
 import CreateOrderButton from "./CreateOrderButton";
@@ -18,6 +22,7 @@ function AppModal({
   cancelText = "Cancel",
   showCancel = false,
   children,
+  size = "max-w-md",
 }) {
   if (!open) return null;
 
@@ -32,12 +37,15 @@ function AppModal({
 
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/45 px-4">
-      <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl overflow-hidden animate-[fadeIn_.15s_ease-out]">
-        <div className={`${accent} px-4 py-3`}>
+      <div className={`w-full ${size} rounded-2xl bg-white shadow-2xl overflow-hidden animate-[fadeIn_.15s_ease-out]`}>
+        <div className={`${accent} px-4 py-3 flex items-center justify-between`}>
           <h3 className="text-white text-base font-bold">{title}</h3>
+          <button onClick={onClose} className="text-white text-lg font-bold">
+            ×
+          </button>
         </div>
 
-        <div className="px-4 py-4">
+        <div className="px-4 py-4 max-h-[80vh] overflow-auto">
           {message ? (
             <p className="text-sm text-gray-700 whitespace-pre-line">{message}</p>
           ) : null}
@@ -45,23 +53,27 @@ function AppModal({
           {children ? <div className="mt-3">{children}</div> : null}
         </div>
 
-        <div className="flex justify-end gap-2 px-4 py-3 border-t bg-gray-50">
-          {showCancel && (
-            <button
-              onClick={onClose}
-              className="h-10 px-4 rounded-xl border border-gray-300 bg-white text-gray-700 font-semibold hover:bg-gray-100 transition"
-            >
-              {cancelText}
-            </button>
-          )}
+        {(onConfirm || showCancel) && (
+          <div className="flex justify-end gap-2 px-4 py-3 border-t bg-gray-50">
+            {showCancel && (
+              <button
+                onClick={onClose}
+                className="h-10 px-4 rounded-xl border border-gray-300 bg-white text-gray-700 font-semibold hover:bg-gray-100 transition"
+              >
+                {cancelText}
+              </button>
+            )}
 
-          <button
-            onClick={onConfirm || onClose}
-            className={`h-10 px-4 rounded-xl text-white font-semibold transition ${accent} hover:opacity-90`}
-          >
-            {confirmText}
-          </button>
-        </div>
+            {onConfirm && (
+              <button
+                onClick={onConfirm}
+                className={`h-10 px-4 rounded-xl text-white font-semibold transition ${accent} hover:opacity-90`}
+              >
+                {confirmText}
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -88,6 +100,17 @@ function Toast({ open, message, type = "info" }) {
   );
 }
 
+function formatDateTime(value) {
+  if (!value) return "";
+  const d = new Date(value);
+  const day = String(d.getDate()).padStart(2, "0");
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const year = d.getFullYear();
+  const hr = String(d.getHours()).padStart(2, "0");
+  const min = String(d.getMinutes()).padStart(2, "0");
+  return `${day}-${month}-${year} ${hr}:${min}`;
+}
+
 export default function POSActionsBar() {
   const dispatch = useDispatch();
 
@@ -101,6 +124,11 @@ export default function POSActionsBar() {
 
   const cartItems = useSelector((s) => s.cart.items || []);
   const cartTotal = useSelector((s) => s.cart.total || 0);
+
+  const posOrdersList = useSelector((s) => s.orders?.posOrdersList || []);
+  const posOrdersListLoading = useSelector((s) => s.orders?.posOrdersListLoading || false);
+  const posOrderDetails = useSelector((s) => s.orders?.posOrderDetails || null);
+  const posOrderDetailsLoading = useSelector((s) => s.orders?.posOrderDetailsLoading || false);
 
   const [toast, setToast] = useState({
     open: false,
@@ -120,6 +148,13 @@ export default function POSActionsBar() {
   const [holdModalOpen, setHoldModalOpen] = useState(false);
   const [holdPhone, setHoldPhone] = useState("");
   const [holdError, setHoldError] = useState("");
+
+  const [ordersModalOpen, setOrdersModalOpen] = useState(false);
+  const [ordersView, setOrdersView] = useState("list"); // list | details
+  const [orderFilterMode, setOrderFilterMode] = useState("latest");
+  const [searchPhone, setSearchPhone] = useState("");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
 
   const showToast = useCallback((message, type = "info") => {
     setToast({ open: true, message, type });
@@ -242,6 +277,53 @@ export default function POSActionsBar() {
     showToast(`Cart placed on hold for ${holdPhone}.`, "success");
   }, [holdPhone, cartItems, cartTotal, dispatch, showToast]);
 
+  const openOrdersModal = useCallback(async () => {
+    setOrdersModalOpen(true);
+    setOrdersView("list");
+    setOrderFilterMode("latest");
+    try {
+      await dispatch(fetchPOSOrders({ mode: "latest" })).unwrap();
+    } catch (e) {
+      showToast(e?.message || "Failed to load orders", "error");
+    }
+  }, [dispatch, showToast]);
+
+  const loadOrders = useCallback(async (mode) => {
+    try {
+      setOrdersView("list");
+      setOrderFilterMode(mode);
+
+      if (mode === "latest") {
+        await dispatch(fetchPOSOrders({ mode: "latest" })).unwrap();
+      } else if (mode === "today") {
+        await dispatch(fetchPOSOrders({ mode: "today" })).unwrap();
+      } else if (mode === "phone") {
+        if (!/^\d{10}$/.test(searchPhone)) {
+          showToast("Enter valid 10-digit phone number.", "warning");
+          return;
+        }
+        await dispatch(fetchPOSOrders({ mode: "phone", phone: searchPhone })).unwrap();
+      } else if (mode === "custom") {
+        if (!fromDate || !toDate) {
+          showToast("Select from and to dates.", "warning");
+          return;
+        }
+        await dispatch(fetchPOSOrders({ mode: "custom", from: fromDate, to: toDate })).unwrap();
+      }
+    } catch (e) {
+      showToast(e?.message || "Failed to load orders", "error");
+    }
+  }, [dispatch, searchPhone, fromDate, toDate, showToast]);
+
+  const handleOpenOrderDetails = useCallback(async (id) => {
+    try {
+      await dispatch(fetchPOSOrderDetails(id)).unwrap();
+      setOrdersView("details");
+    } catch (e) {
+      showToast(e?.message || "Failed to load order details", "error");
+    }
+  }, [dispatch, showToast]);
+
   const baseBtn =
     "rounded-xl font-bold transition active:translate-y-[1px] whitespace-nowrap";
   const orangeBtn =
@@ -311,6 +393,199 @@ export default function POSActionsBar() {
         </div>
       </AppModal>
 
+      <AppModal
+        open={ordersModalOpen}
+        title={ordersView === "list" ? "Orders" : "Order Details"}
+        type="info"
+        onClose={() => {
+          setOrdersModalOpen(false);
+          setOrdersView("list");
+        }}
+        size="max-w-6xl"
+      >
+        {ordersView === "list" ? (
+          <div className="space-y-4">
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => loadOrders("latest")}
+                className={`h-10 px-4 rounded-xl text-sm font-semibold border ${
+                  orderFilterMode === "latest"
+                    ? "bg-indigo-600 text-white border-indigo-600"
+                    : "bg-white text-gray-700 border-gray-300"
+                }`}
+              >
+                Last 10 Orders
+              </button>
+
+              <button
+                onClick={() => loadOrders("today")}
+                className={`h-10 px-4 rounded-xl text-sm font-semibold border ${
+                  orderFilterMode === "today"
+                    ? "bg-indigo-600 text-white border-indigo-600"
+                    : "bg-white text-gray-700 border-gray-300"
+                }`}
+              >
+                Today Orders
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className="rounded-xl border p-3 bg-gray-50">
+                <div className="text-sm font-bold text-gray-700 mb-2">Search by Phone</div>
+                <div className="flex gap-2">
+                  <input
+                    type="tel"
+                    maxLength={10}
+                    value={searchPhone}
+                    onChange={(e) => setSearchPhone(e.target.value.replace(/\D/g, ""))}
+                    placeholder="10-digit phone"
+                    className="flex-1 h-10 rounded-lg border border-gray-300 px-3 text-sm"
+                  />
+                  <button
+                    onClick={() => loadOrders("phone")}
+                    className="h-10 px-4 rounded-lg bg-indigo-600 text-white text-sm font-semibold"
+                  >
+                    Search
+                  </button>
+                </div>
+              </div>
+
+              <div className="md:col-span-2 rounded-xl border p-3 bg-gray-50">
+                <div className="text-sm font-bold text-gray-700 mb-2">Search by Custom Dates</div>
+                <div className="flex flex-col md:flex-row gap-2">
+                  <input
+                    type="date"
+                    value={fromDate}
+                    onChange={(e) => setFromDate(e.target.value)}
+                    className="h-10 rounded-lg border border-gray-300 px-3 text-sm"
+                  />
+                  <input
+                    type="date"
+                    value={toDate}
+                    onChange={(e) => setToDate(e.target.value)}
+                    className="h-10 rounded-lg border border-gray-300 px-3 text-sm"
+                  />
+                  <button
+                    onClick={() => loadOrders("custom")}
+                    className="h-10 px-4 rounded-lg bg-indigo-600 text-white text-sm font-semibold"
+                  >
+                    Get Orders
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="overflow-auto rounded-xl border">
+              <table className="min-w-full text-sm">
+                <thead className="bg-slate-100">
+                  <tr>
+                    <th className="px-3 py-2 text-left">S.No</th>
+                    <th className="px-3 py-2 text-left">Date</th>
+                    <th className="px-3 py-2 text-left">Order ID</th>
+                    <th className="px-3 py-2 text-left">Customer Phone Number</th>
+                    <th className="px-3 py-2 text-right">Order Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {posOrdersListLoading ? (
+                    <tr>
+                      <td colSpan="5" className="px-3 py-6 text-center text-gray-500">
+                        Loading orders...
+                      </td>
+                    </tr>
+                  ) : posOrdersList.length === 0 ? (
+                    <tr>
+                      <td colSpan="5" className="px-3 py-6 text-center text-gray-500">
+                        No orders found.
+                      </td>
+                    </tr>
+                  ) : (
+                    posOrdersList.map((order, index) => (
+                      <tr
+                        key={order._id}
+                        onClick={() => handleOpenOrderDetails(order._id)}
+                        className="border-t hover:bg-yellow-50 cursor-pointer"
+                      >
+                        <td className="px-3 py-2">{index + 1}</td>
+                        <td className="px-3 py-2">{formatDateTime(order.createdAt)}</td>
+                        <td className="px-3 py-2">{order.orderId}</td>
+                        <td className="px-3 py-2">{order.phoneNo || "-"}</td>
+                        <td className="px-3 py-2 text-right">₹{Number(order.totalPrice || 0).toFixed(2)}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <button
+                onClick={() => setOrdersView("list")}
+                className="h-10 px-4 rounded-xl bg-gray-200 text-gray-800 text-sm font-semibold"
+              >
+                Back
+              </button>
+            </div>
+
+            {posOrderDetailsLoading ? (
+              <div className="py-10 text-center text-gray-500">Loading order details...</div>
+            ) : posOrderDetails ? (
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 rounded-xl border p-3 bg-slate-50">
+                  <div className="text-sm font-semibold">
+                    <span className="text-gray-500">Order ID:</span> {posOrderDetails.orderId}
+                  </div>
+                  <div className="text-sm font-semibold">
+                    <span className="text-gray-500">Phone Number:</span> {posOrderDetails.phoneNo || "-"}
+                  </div>
+                </div>
+
+                <div className="overflow-auto rounded-xl border">
+                  <table className="min-w-full text-sm">
+                    <thead className="bg-slate-100">
+                      <tr>
+                        <th className="px-3 py-2 text-left">S.No</th>
+                        <th className="px-3 py-2 text-left">Item</th>
+                        <th className="px-3 py-2 text-left">Weight</th>
+                        <th className="px-3 py-2 text-right">Qty</th>
+                        <th className="px-3 py-2 text-right">Price/oneqty</th>
+                        <th className="px-3 py-2 text-right">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(posOrderDetails.items || []).map((item) => (
+                        <tr key={item.sNo} className="border-t">
+                          <td className="px-3 py-2">{item.sNo}</td>
+                          <td className="px-3 py-2">{item.item}</td>
+                          <td className="px-3 py-2">{item.weight}</td>
+                          <td className="px-3 py-2 text-right">{item.qty}</td>
+                          <td className="px-3 py-2 text-right">₹{Number(item.pricePerQty || 0).toFixed(2)}</td>
+                          <td className="px-3 py-2 text-right">₹{Number(item.amount || 0).toFixed(2)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr className="border-t bg-yellow-50 font-bold">
+                        <td colSpan="5" className="px-3 py-3 text-right">
+                          Total Amount
+                        </td>
+                        <td className="px-3 py-3 text-right">
+                          ₹{Number(posOrderDetails.totalPrice || 0).toFixed(2)}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </>
+            ) : (
+              <div className="py-10 text-center text-gray-500">No details found.</div>
+            )}
+          </div>
+        )}
+      </AppModal>
+
       <div className="w-full h-full bg-white">
         {/* Mobile bottom bar */}
         <div className="md:hidden border-t bg-white px-2 py-2">
@@ -337,13 +612,6 @@ export default function POSActionsBar() {
                   ? "bg-indigo-600 hover:bg-indigo-700 border border-indigo-300"
                   : "bg-gray-400 border border-gray-300 cursor-not-allowed",
               ].join(" ")}
-              title={
-                !navigator.onLine
-                  ? "Offline – connect to publish"
-                  : queueCount
-                  ? "Publish queued orders"
-                  : "No queued orders"
-              }
             >
               {isPublishing ? "Publishing…" : "Publish"}
               {queueCount > 0 && (
@@ -369,6 +637,13 @@ export default function POSActionsBar() {
               ].join(" ")}
             >
               Clear Cart
+            </button>
+
+            <button
+              onClick={openOrdersModal}
+              className={[baseBtn, orangeBtn, mobileBtn].join(" ")}
+            >
+              Orders
             </button>
 
             <button className={[baseBtn, orangeBtn, mobileBtn].join(" ")}>
@@ -398,7 +673,6 @@ export default function POSActionsBar() {
 
         {/* Desktop action bar */}
         <div className="hidden md:flex h-full w-full flex-col bg-[#f9fafb]">
-          {/* Logo */}
           <div className="shrink-0 flex items-center justify-center px-2 py-3 border-b bg-white">
             <div className="p-[2px] rounded-full bg-[#FFD700]">
               <img
@@ -410,7 +684,6 @@ export default function POSActionsBar() {
             </div>
           </div>
 
-          {/* Actions */}
           <div className="flex-1 min-h-0 px-2 py-2 flex flex-col gap-1.5">
             <button
               onClick={handlePublish}
@@ -421,13 +694,6 @@ export default function POSActionsBar() {
                   ? "bg-slate-500 hover:bg-slate-600 border-slate-300"
                   : "bg-gray-400 border-gray-300 cursor-not-allowed",
               ].join(" ")}
-              title={
-                !navigator.onLine
-                  ? "Offline – connect to publish"
-                  : queueCount
-                  ? "Publish queued orders"
-                  : "No queued orders"
-              }
             >
               <div className="flex items-center justify-center gap-1">
                 <span>{isPublishing ? "Publishing…" : "Publish"}</span>
@@ -441,9 +707,7 @@ export default function POSActionsBar() {
 
             <button
               onClick={handleHold}
-              className={[baseBtn, orangeBtn, "h-9 text-xs", desktopBtn].join(
-                " "
-              )}
+              className={[baseBtn, orangeBtn, "h-9 text-xs", desktopBtn].join(" ")}
             >
               Hold
             </button>
@@ -460,17 +724,20 @@ export default function POSActionsBar() {
             </button>
 
             <button
-              className={[baseBtn, orangeBtn, "h-9 text-xs", desktopBtn].join(
-                " "
-              )}
+              onClick={openOrdersModal}
+              className={[baseBtn, orangeBtn, "h-9 text-xs", desktopBtn].join(" ")}
+            >
+              Orders
+            </button>
+
+            <button
+              className={[baseBtn, orangeBtn, "h-9 text-xs", desktopBtn].join(" ")}
             >
               Multi
             </button>
 
             <button
-              className={[baseBtn, orangeBtn, "h-9 text-xs", desktopBtn].join(
-                " "
-              )}
+              className={[baseBtn, orangeBtn, "h-9 text-xs", desktopBtn].join(" ")}
             >
               UPI
             </button>
@@ -480,7 +747,6 @@ export default function POSActionsBar() {
             </div>
           </div>
 
-          {/* Bottom user panel */}
           <div className="shrink-0 border-t bg-white px-2 py-3">
             <div className="text-center text-[15px] text-green-700 font-semibold truncate">
               Hi {name}
