@@ -3,25 +3,32 @@ import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import { updateProductStockOnly } from '../products/productSlice';
 import { enqueueOrder, peekOrdersQueue, setOrdersQueue } from '../../utils/offlineStorage';
 import { fetchCustomerByPhone, createCustomer } from '../customers/customerSlice'; 
+const generateMKOrderId = () => Number(`${Date.now()}${Math.floor(Math.random() * 90 + 10)}`);
 // -----------------------------
 // Save order offline (no network)
 // -----------------------------
 export const queueOrder = createAsyncThunk(
   'orders/queueOrder',
-  async ({ payload, token, cartItems, phone }, thunkAPI) => {
+  async ({ payload, token, cartItems, phone, customerMeta }, thunkAPI) => {
+    const mkOrderId = payload?.MK_order_id ?? generateMKOrderId();
+
     const localOrder = {
-      _localId: `OFF-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      _localId: `OFF-${mkOrderId}`,
       queuedAt: new Date().toISOString(),
-      payload,                   // what createOrder needs as "payload"
-      cartItems: cartItems || [],// snapshot for stock updates later
-      __token: token || null,    // optionally capture per-order token
-       phone: phone || null, 
+      payload: {
+        ...payload,
+        MK_order_id: mkOrderId,
+      },
+      cartItems: cartItems || [],
+      __token: token || null,
+      phone: phone || null,
+      customerMeta: customerMeta || null,
     };
+
     enqueueOrder(localOrder);
     return localOrder;
   }
 );
-
 // -----------------------------
 // Create order on server (yours)
 // -----------------------------
@@ -41,7 +48,6 @@ export const createOrder = createAsyncThunk(
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'Order creation failed');
 
-      // Update product stocks sequentially (as you had)
       for (const item of (cartItems || [])) {
         const newStock = item.stock;
         if (newStock >= 0) {
@@ -60,6 +66,7 @@ export const createOrder = createAsyncThunk(
           }
         }
       }
+
       return data;
     } catch (err) {
       return thunkAPI.rejectWithValue(err.message);
