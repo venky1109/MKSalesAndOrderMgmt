@@ -90,7 +90,7 @@ function useOfflineCatalog() {
   return { productsList: list, barcodeMap };
 }
 
-function SearchKeyboard({ visible, onKeyPress, onClose }) {
+const SearchKeyboard = forwardRef(({ visible, onKeyPress, onClose }, ref) => {
   const [isLandscape, setIsLandscape] = useState(false);
 
   useEffect(() => {
@@ -113,13 +113,16 @@ function SearchKeyboard({ visible, onKeyPress, onClose }) {
   ];
 
   const keyBaseClass =
-    "flex-1 min-w-0 rounded-lg border border-gray-300 bg-gray-50 font-bold text-slate-800 active:scale-95";
+    "flex-1 min-w-0 rounded-lg border border-gray-300 bg-gray-50 font-bold text-slate-800 active:scale-95 select-none";
   const portraitKeyClass = `${keyBaseClass} px-1 py-3 text-sm`;
   const landscapeKeyClass = `${keyBaseClass} px-1 py-2 text-[13px]`;
 
   if (isLandscape) {
     return (
-      <div className="absolute inset-x-0 bottom-0 z-50 border-t border-gray-300 bg-white shadow-2xl">
+      <div
+        ref={ref}
+        className="absolute inset-x-0 bottom-0 z-50 border-t border-gray-300 bg-white shadow-2xl"
+      >
         <div className="w-full max-w-full overflow-x-auto">
           <div className="min-w-0 p-2">
             <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -169,6 +172,7 @@ function SearchKeyboard({ visible, onKeyPress, onClose }) {
                     <button
                       key={key}
                       type="button"
+                      onMouseDown={(e) => e.preventDefault()}
                       onClick={() => onKeyPress(key)}
                       className={landscapeKeyClass}
                     >
@@ -185,7 +189,10 @@ function SearchKeyboard({ visible, onKeyPress, onClose }) {
   }
 
   return (
-    <div className="absolute inset-x-0 bottom-0 z-50 border-t border-gray-300 bg-white shadow-2xl">
+    <div
+      ref={ref}
+      className="absolute inset-x-0 bottom-0 z-50 border-t border-gray-300 bg-white shadow-2xl"
+    >
       <div className="w-full p-2 sm:p-3">
         <div className="mb-2 flex items-center justify-between gap-2">
           <div className="text-sm font-semibold text-slate-700">
@@ -194,6 +201,7 @@ function SearchKeyboard({ visible, onKeyPress, onClose }) {
 
           <button
             type="button"
+            onMouseDown={(e) => e.preventDefault()}
             onClick={onClose}
             className="rounded-lg bg-gray-200 px-3 py-2 text-sm font-semibold text-slate-800 active:scale-95"
           >
@@ -208,6 +216,7 @@ function SearchKeyboard({ visible, onKeyPress, onClose }) {
                 <button
                   key={key}
                   type="button"
+                  onMouseDown={(e) => e.preventDefault()}
                   onClick={() => onKeyPress(key)}
                   className={portraitKeyClass}
                 >
@@ -220,6 +229,7 @@ function SearchKeyboard({ visible, onKeyPress, onClose }) {
           <div className="flex w-full gap-1.5 pt-1">
             <button
               type="button"
+              onMouseDown={(e) => e.preventDefault()}
               onClick={() => onKeyPress("SPACE")}
               className="flex-[2] min-w-0 rounded-lg border border-gray-300 bg-gray-50 px-2 py-3 text-sm font-bold text-slate-800 active:scale-95"
             >
@@ -228,6 +238,7 @@ function SearchKeyboard({ visible, onKeyPress, onClose }) {
 
             <button
               type="button"
+              onMouseDown={(e) => e.preventDefault()}
               onClick={() => onKeyPress("BACKSPACE")}
               className="flex-1 min-w-0 rounded-lg border border-yellow-300 bg-yellow-50 px-2 py-3 text-sm font-bold text-yellow-800 active:scale-95"
             >
@@ -236,6 +247,7 @@ function SearchKeyboard({ visible, onKeyPress, onClose }) {
 
             <button
               type="button"
+              onMouseDown={(e) => e.preventDefault()}
               onClick={() => onKeyPress("CLEAR")}
               className="flex-1 min-w-0 rounded-lg border border-red-300 bg-red-50 px-2 py-3 text-sm font-bold text-red-700 active:scale-95"
             >
@@ -246,7 +258,7 @@ function SearchKeyboard({ visible, onKeyPress, onClose }) {
       </div>
     </div>
   );
-}
+});
 
 const ProductList = forwardRef((props, ref) => {
   const dispatch = useDispatch();
@@ -263,6 +275,7 @@ const ProductList = forwardRef((props, ref) => {
 
   const barcodeRef = useRef(null);
   const searchInputRef = useRef(null);
+  const keyboardRef = useRef(null);
   const [barcodeInput, setBarcodeInput] = useState("");
 
   const gridWrapRef = useRef(null);
@@ -318,6 +331,28 @@ const ProductList = forwardRef((props, ref) => {
       window.removeEventListener("resize", updateSize);
     };
   }, []);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (!showSearchKeyboard) return;
+
+      const clickedSearchInput = searchInputRef.current?.contains(e.target);
+      const clickedKeyboard = keyboardRef.current?.contains(e.target);
+
+      if (!clickedSearchInput && !clickedKeyboard) {
+        setShowSearchKeyboard(false);
+        setTimeout(() => barcodeRef.current?.focus(), 50);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("touchstart", handleClickOutside);
+
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("touchstart", handleClickOutside);
+    };
+  }, [showSearchKeyboard]);
 
   const handleClearFilters = useCallback(() => {
     setCategoryFilter("all");
@@ -407,16 +442,36 @@ const ProductList = forwardRef((props, ref) => {
 
   const handleSearchKeyPress = useCallback((key) => {
     setSearch((prev) => {
-      if (key === "BACKSPACE") return prev.slice(0, -1);
-      if (key === "SPACE") return prev + " ";
-      if (key === "CLEAR") return "";
-      return prev + key;
+      let next = prev;
+
+      if (key === "BACKSPACE") next = prev.slice(0, -1);
+      else if (key === "SPACE") next = prev + " ";
+      else if (key === "CLEAR") next = "";
+      else next = prev + key;
+
+      setTimeout(() => {
+        const el = searchInputRef.current;
+        if (el) {
+          el.focus();
+          el.setSelectionRange(next.length, next.length);
+        }
+      }, 0);
+
+      return next;
     });
   }, []);
 
   const openSearchKeyboard = useCallback(() => {
     setShowSearchKeyboard(true);
-    setTimeout(() => searchInputRef.current?.blur(), 0);
+
+    setTimeout(() => {
+      const el = searchInputRef.current;
+      if (el) {
+        el.focus();
+        const len = el.value.length;
+        el.setSelectionRange(len, len);
+      }
+    }, 0);
   }, []);
 
   const filteredProducts = useMemo(() => {
@@ -533,7 +588,11 @@ const ProductList = forwardRef((props, ref) => {
         <div className="mb-2 hidden items-center gap-2 md:flex">
           <select
             value={categoryFilter}
-            onChange={(e) => setCategoryFilter(e.target.value)}
+            onChange={(e) => {
+              setCategoryFilter(e.target.value);
+              setShowSearchKeyboard(false);
+              setTimeout(() => barcodeRef.current?.focus(), 50);
+            }}
             className="min-w-[130px] flex-1 rounded border bg-white px-2 py-2 text-sm"
           >
             <option value="all">All Categories</option>
@@ -546,7 +605,11 @@ const ProductList = forwardRef((props, ref) => {
 
           <select
             value={brandFilter}
-            onChange={(e) => setBrandFilter(e.target.value)}
+            onChange={(e) => {
+              setBrandFilter(e.target.value);
+              setShowSearchKeyboard(false);
+              setTimeout(() => barcodeRef.current?.focus(), 50);
+            }}
             className="min-w-[130px] flex-1 rounded border bg-white px-2 py-2 text-sm"
           >
             <option value="all">All Brands</option>
@@ -581,7 +644,7 @@ const ProductList = forwardRef((props, ref) => {
             onFocus={openSearchKeyboard}
             onClick={openSearchKeyboard}
             placeholder="🔍 Search product"
-            className="w-full rounded border bg-white px-3 py-2 text-sm"
+            className="w-full rounded border bg-white px-3 py-2 text-sm caret-slate-900"
           />
         </div>
 
@@ -618,7 +681,22 @@ const ProductList = forwardRef((props, ref) => {
             No matching products found.
           </div>
         ) : (
-          <div ref={gridWrapRef} className="h-full w-full overflow-hidden">
+          <div
+            ref={gridWrapRef}
+            className="h-full w-full overflow-hidden"
+            onMouseDown={() => {
+              if (showSearchKeyboard) {
+                setShowSearchKeyboard(false);
+                setTimeout(() => barcodeRef.current?.focus(), 50);
+              }
+            }}
+            onTouchStart={() => {
+              if (showSearchKeyboard) {
+                setShowSearchKeyboard(false);
+                setTimeout(() => barcodeRef.current?.focus(), 50);
+              }
+            }}
+          >
             {gridSize.width > 0 && gridSize.height > 0 ? (
               <Grid
                 columnCount={columnCount}
@@ -719,6 +797,7 @@ const ProductList = forwardRef((props, ref) => {
       </div>
 
       <SearchKeyboard
+        ref={keyboardRef}
         visible={showSearchKeyboard}
         onKeyPress={handleSearchKeyPress}
         onClose={() => {
