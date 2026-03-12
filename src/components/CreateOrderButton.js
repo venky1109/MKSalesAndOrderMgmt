@@ -37,6 +37,7 @@ function CreateOrderButton() {
 
   // WhatsApp bridge
   const waRef = useRef(null);
+  const posUserInfo = useSelector((s) => s.posUser.userInfo);
 
   useEffect(() => {
     if (cartItems.length === 0) setOrderCreated(false);
@@ -203,6 +204,8 @@ function CreateOrderButton() {
         financialId: item.financialId,
       })),
       totalPrice: total,
+       posUserName: posUserInfo?.username || '',
+  posLocation: posUserInfo?.location || '',
     };
 
     try {

@@ -37,7 +37,9 @@ function AppModal({
 
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/45 px-4">
-      <div className={`w-full ${size} rounded-2xl bg-white shadow-2xl overflow-hidden animate-[fadeIn_.15s_ease-out]`}>
+      <div
+        className={`w-full ${size} rounded-2xl bg-white shadow-2xl overflow-hidden animate-[fadeIn_.15s_ease-out]`}
+      >
         <div className={`${accent} px-4 py-3 flex items-center justify-between`}>
           <h3 className="text-white text-base font-bold">{title}</h3>
           <button onClick={onClose} className="text-white text-lg font-bold">
@@ -93,7 +95,9 @@ function Toast({ open, message, type = "info" }) {
 
   return (
     <div className="fixed top-4 right-4 z-[9999]">
-      <div className={`${tone} text-white px-4 py-3 rounded-xl shadow-xl text-sm font-medium max-w-sm`}>
+      <div
+        className={`${tone} text-white px-4 py-3 rounded-xl shadow-xl text-sm font-medium max-w-sm`}
+      >
         {message}
       </div>
     </div>
@@ -117,6 +121,8 @@ export default function POSActionsBar() {
   const posUserInfo = useSelector((s) => s.posUser.userInfo);
   const token = posUserInfo?.token;
   const name = posUserInfo?.username || "";
+  const role = posUserInfo?.role || "";
+  const location = posUserInfo?.location || "";
 
   const queueCount = useSelector((s) => s.orders?.queueCount ?? 0);
   const publishStatus = useSelector((s) => s.orders?.publishStatus || "idle");
@@ -126,9 +132,13 @@ export default function POSActionsBar() {
   const cartTotal = useSelector((s) => s.cart.total || 0);
 
   const posOrdersList = useSelector((s) => s.orders?.posOrdersList || []);
-  const posOrdersListLoading = useSelector((s) => s.orders?.posOrdersListLoading || false);
+  const posOrdersListLoading = useSelector(
+    (s) => s.orders?.posOrdersListLoading || false
+  );
   const posOrderDetails = useSelector((s) => s.orders?.posOrderDetails || null);
-  const posOrderDetailsLoading = useSelector((s) => s.orders?.posOrderDetailsLoading || false);
+  const posOrderDetailsLoading = useSelector(
+    (s) => s.orders?.posOrderDetailsLoading || false
+  );
 
   const [toast, setToast] = useState({
     open: false,
@@ -150,7 +160,7 @@ export default function POSActionsBar() {
   const [holdError, setHoldError] = useState("");
 
   const [ordersModalOpen, setOrdersModalOpen] = useState(false);
-  const [ordersView, setOrdersView] = useState("list"); // list | details
+  const [ordersView, setOrdersView] = useState("list");
   const [orderFilterMode, setOrderFilterMode] = useState("latest");
   const [searchPhone, setSearchPhone] = useState("");
   const [fromDate, setFromDate] = useState("");
@@ -240,11 +250,7 @@ export default function POSActionsBar() {
         res?.failed ? "warning" : "success"
       );
     } catch (e) {
-      showInfoModal(
-        "Publish Failed",
-        e?.message || String(e),
-        "error"
-      );
+      showInfoModal("Publish Failed", e?.message || String(e), "error");
     }
   };
 
@@ -288,41 +294,51 @@ export default function POSActionsBar() {
     }
   }, [dispatch, showToast]);
 
-  const loadOrders = useCallback(async (mode) => {
-    try {
-      setOrdersView("list");
-      setOrderFilterMode(mode);
+  const loadOrders = useCallback(
+    async (mode) => {
+      try {
+        setOrdersView("list");
+        setOrderFilterMode(mode);
 
-      if (mode === "latest") {
-        await dispatch(fetchPOSOrders({ mode: "latest" })).unwrap();
-      } else if (mode === "today") {
-        await dispatch(fetchPOSOrders({ mode: "today" })).unwrap();
-      } else if (mode === "phone") {
-        if (!/^\d{10}$/.test(searchPhone)) {
-          showToast("Enter valid 10-digit phone number.", "warning");
-          return;
+        if (mode === "latest") {
+          await dispatch(fetchPOSOrders({ mode: "latest" })).unwrap();
+        } else if (mode === "today") {
+          await dispatch(fetchPOSOrders({ mode: "today" })).unwrap();
+        } else if (mode === "phone") {
+          if (!/^\d{10}$/.test(searchPhone)) {
+            showToast("Enter valid 10-digit phone number.", "warning");
+            return;
+          }
+          await dispatch(
+            fetchPOSOrders({ mode: "phone", phone: searchPhone })
+          ).unwrap();
+        } else if (mode === "custom") {
+          if (!fromDate || !toDate) {
+            showToast("Select from and to dates.", "warning");
+            return;
+          }
+          await dispatch(
+            fetchPOSOrders({ mode: "custom", from: fromDate, to: toDate })
+          ).unwrap();
         }
-        await dispatch(fetchPOSOrders({ mode: "phone", phone: searchPhone })).unwrap();
-      } else if (mode === "custom") {
-        if (!fromDate || !toDate) {
-          showToast("Select from and to dates.", "warning");
-          return;
-        }
-        await dispatch(fetchPOSOrders({ mode: "custom", from: fromDate, to: toDate })).unwrap();
+      } catch (e) {
+        showToast(e?.message || "Failed to load orders", "error");
       }
-    } catch (e) {
-      showToast(e?.message || "Failed to load orders", "error");
-    }
-  }, [dispatch, searchPhone, fromDate, toDate, showToast]);
+    },
+    [dispatch, searchPhone, fromDate, toDate, showToast]
+  );
 
-  const handleOpenOrderDetails = useCallback(async (id) => {
-    try {
-      await dispatch(fetchPOSOrderDetails(id)).unwrap();
-      setOrdersView("details");
-    } catch (e) {
-      showToast(e?.message || "Failed to load order details", "error");
-    }
-  }, [dispatch, showToast]);
+  const handleOpenOrderDetails = useCallback(
+    async (id) => {
+      try {
+        await dispatch(fetchPOSOrderDetails(id)).unwrap();
+        setOrdersView("details");
+      } catch (e) {
+        showToast(e?.message || "Failed to load order details", "error");
+      }
+    },
+    [dispatch, showToast]
+  );
 
   const baseBtn =
     "rounded-xl font-bold transition active:translate-y-[1px] whitespace-nowrap";
@@ -330,11 +346,11 @@ export default function POSActionsBar() {
     "bg-[#ff8a00] text-white border border-[#FFD700] hover:bg-[#e57b00]";
   const mobileBtn = "h-10 px-3 text-xs shrink-0";
   const desktopBtn = "w-full h-11 text-sm";
-  // console.log(posOrdersList)
+
   const ordersTotalAmount = (posOrdersList || []).reduce(
-  (sum, order) => sum + Number(order.totalPrice || 0),
-  0
-);
+    (sum, order) => sum + Number(order.totalPrice || 0),
+    0
+  );
 
   return (
     <>
@@ -436,13 +452,17 @@ export default function POSActionsBar() {
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <div className="rounded-xl border p-3 bg-gray-50">
-                <div className="text-sm font-bold text-gray-700 mb-2">Search by Phone</div>
+                <div className="text-sm font-bold text-gray-700 mb-2">
+                  Search by Phone
+                </div>
                 <div className="flex gap-2">
                   <input
                     type="tel"
                     maxLength={10}
                     value={searchPhone}
-                    onChange={(e) => setSearchPhone(e.target.value.replace(/\D/g, ""))}
+                    onChange={(e) =>
+                      setSearchPhone(e.target.value.replace(/\D/g, ""))
+                    }
                     placeholder="10-digit phone"
                     className="flex-1 h-10 rounded-lg border border-gray-300 px-3 text-sm"
                   />
@@ -456,7 +476,9 @@ export default function POSActionsBar() {
               </div>
 
               <div className="md:col-span-2 rounded-xl border p-3 bg-gray-50">
-                <div className="text-sm font-bold text-gray-700 mb-2">Search by Custom Dates</div>
+                <div className="text-sm font-bold text-gray-700 mb-2">
+                  Search by Custom Dates
+                </div>
                 <div className="flex flex-col md:flex-row gap-2">
                   <input
                     type="date"
@@ -480,6 +502,20 @@ export default function POSActionsBar() {
               </div>
             </div>
 
+            <div className="rounded-xl border p-3 bg-slate-50">
+              <div className="flex flex-wrap gap-4 text-sm font-semibold text-gray-700">
+                <div>
+                  <span className="text-gray-500">Logged in as:</span> {name || "-"}
+                </div>
+                <div>
+                  <span className="text-gray-500">Role:</span> {role || "-"}
+                </div>
+                <div>
+                  <span className="text-gray-500">Location:</span> {location || "-"}
+                </div>
+              </div>
+            </div>
+
             <div className="overflow-auto rounded-xl border">
               <table className="min-w-full text-sm">
                 <thead className="bg-slate-100">
@@ -487,6 +523,9 @@ export default function POSActionsBar() {
                     <th className="px-3 py-2 text-left">S.No</th>
                     <th className="px-3 py-2 text-left">Date</th>
                     <th className="px-3 py-2 text-left">Order ID</th>
+                    <th className="px-3 py-2 text-left">Source</th>
+                    <th className="px-3 py-2 text-left">POS User</th>
+                    <th className="px-3 py-2 text-left">Location</th>
                     <th className="px-3 py-2 text-left">Customer Phone Number</th>
                     <th className="px-3 py-2 text-right">Order Amount</th>
                   </tr>
@@ -494,13 +533,13 @@ export default function POSActionsBar() {
                 <tbody>
                   {posOrdersListLoading ? (
                     <tr>
-                      <td colSpan="5" className="px-3 py-6 text-center text-gray-500">
+                      <td colSpan="8" className="px-3 py-6 text-center text-gray-500">
                         Loading orders...
                       </td>
                     </tr>
                   ) : posOrdersList.length === 0 ? (
                     <tr>
-                      <td colSpan="5" className="px-3 py-6 text-center text-gray-500">
+                      <td colSpan="8" className="px-3 py-6 text-center text-gray-500">
                         No orders found.
                       </td>
                     </tr>
@@ -513,23 +552,40 @@ export default function POSActionsBar() {
                       >
                         <td className="px-3 py-2">{index + 1}</td>
                         <td className="px-3 py-2">{formatDateTime(order.createdAt)}</td>
-                        <td className="px-3 py-2">{order._id}</td>
+                        <td className="px-3 py-2">
+                          {order.MK_order_id || order._id}
+                        </td>
+                        <td className="px-3 py-2">
+                          <span
+                            className={`inline-flex rounded-full px-2 py-1 text-xs font-bold ${
+                              order.source === "ONLINE"
+                                ? "bg-blue-100 text-blue-700"
+                                : "bg-orange-100 text-orange-700"
+                            }`}
+                          >
+                            {order.source || "-"}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2">{order.posUserName || "-"}</td>
+                        <td className="px-3 py-2">{order.posLocation || "-"}</td>
                         <td className="px-3 py-2">{order.phoneNo || "-"}</td>
-                        <td className="px-3 py-2 text-right">₹{Number(order.totalPrice || 0).toFixed(2)}</td>
+                        <td className="px-3 py-2 text-right">
+                          ₹{Number(order.totalPrice || 0).toFixed(2)}
+                        </td>
                       </tr>
                     ))
                   )}
                 </tbody>
                 <tfoot>
-  <tr className="border-t bg-yellow-100 font-bold">
-    <td colSpan="4" className="px-3 py-3 text-right">
-      Total Amount
-    </td>
-    <td className="px-3 py-3 text-right">
-      ₹{ordersTotalAmount.toFixed(2)}
-    </td>
-  </tr>
-</tfoot>
+                  <tr className="border-t bg-yellow-100 font-bold">
+                    <td colSpan="7" className="px-3 py-3 text-right">
+                      Total Amount
+                    </td>
+                    <td className="px-3 py-3 text-right">
+                      ₹{ordersTotalAmount.toFixed(2)}
+                    </td>
+                  </tr>
+                </tfoot>
               </table>
             </div>
           </div>
@@ -545,15 +601,40 @@ export default function POSActionsBar() {
             </div>
 
             {posOrderDetailsLoading ? (
-              <div className="py-10 text-center text-gray-500">Loading order details...</div>
+              <div className="py-10 text-center text-gray-500">
+                Loading order details...
+              </div>
             ) : posOrderDetails ? (
               <>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 rounded-xl border p-3 bg-slate-50">
                   <div className="text-sm font-semibold">
-                    <span className="text-gray-500">Order ID:</span> {posOrderDetails._id}
+                    <span className="text-gray-500">Order ID:</span>{" "}
+                    {posOrderDetails.MK_order_id || posOrderDetails._id}
                   </div>
+
                   <div className="text-sm font-semibold">
-                    <span className="text-gray-500">Phone Number:</span> {posOrderDetails.phoneNo || "-"}
+                    <span className="text-gray-500">Phone Number:</span>{" "}
+                    {posOrderDetails.phoneNo || "-"}
+                  </div>
+
+                  <div className="text-sm font-semibold">
+                    <span className="text-gray-500">Source:</span>{" "}
+                    {posOrderDetails.source || "-"}
+                  </div>
+
+                  <div className="text-sm font-semibold">
+                    <span className="text-gray-500">POS User:</span>{" "}
+                    {posOrderDetails.posUserName || "-"}
+                  </div>
+
+                  <div className="text-sm font-semibold">
+                    <span className="text-gray-500">Location:</span>{" "}
+                    {posOrderDetails.posLocation || "-"}
+                  </div>
+
+                  <div className="text-sm font-semibold">
+                    <span className="text-gray-500">Created At:</span>{" "}
+                    {formatDateTime(posOrderDetails.createdAt)}
                   </div>
                 </div>
 
@@ -576,8 +657,12 @@ export default function POSActionsBar() {
                           <td className="px-3 py-2">{item.item}</td>
                           <td className="px-3 py-2">{item.weight}</td>
                           <td className="px-3 py-2 text-right">{item.qty}</td>
-                          <td className="px-3 py-2 text-right">₹{Number(item.pricePerQty || 0).toFixed(2)}</td>
-                          <td className="px-3 py-2 text-right">₹{Number(item.amount || 0).toFixed(2)}</td>
+                          <td className="px-3 py-2 text-right">
+                            ₹{Number(item.pricePerQty || 0).toFixed(2)}
+                          </td>
+                          <td className="px-3 py-2 text-right">
+                            ₹{Number(item.amount || 0).toFixed(2)}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -602,7 +687,6 @@ export default function POSActionsBar() {
       </AppModal>
 
       <div className="w-full h-full bg-white">
-        {/* Mobile bottom bar */}
         <div className="md:hidden border-t bg-white px-2 py-2">
           <div className="flex items-center gap-2 overflow-x-auto no-scrollbar">
             <div className="shrink-0">
@@ -686,7 +770,6 @@ export default function POSActionsBar() {
           </div>
         </div>
 
-        {/* Desktop action bar */}
         <div className="hidden md:flex h-full w-full flex-col bg-[#f9fafb]">
           <div className="shrink-0 flex items-center justify-center px-2 py-3 border-b bg-white">
             <div className="p-[2px] rounded-full bg-[#FFD700]">
@@ -765,6 +848,9 @@ export default function POSActionsBar() {
           <div className="shrink-0 border-t bg-white px-2 py-3">
             <div className="text-center text-[15px] text-green-700 font-semibold truncate">
               Hi {name}
+            </div>
+            <div className="mt-1 text-center text-xs text-gray-600 truncate">
+              {role || "-"} {location ? `• ${location}` : ""}
             </div>
 
             <button
