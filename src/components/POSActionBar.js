@@ -11,7 +11,6 @@ import UpiPaymentModal from "../components/UpiPaymentModal";
 import { clearCart } from "../features/cart/cartSlice";
 import CreateOrderButton from "./CreateOrderButton";
 import logo from "../assests/ManaKiranaLogo1024x1024.png";
-import { initiateUpiPayment } from "../features/payment/paymentSlice";
 
 function AppModal({
   open,
@@ -160,11 +159,6 @@ export default function POSActionsBar() {
   const [holdModalOpen, setHoldModalOpen] = useState(false);
   const [holdPhone, setHoldPhone] = useState("");
   const [holdError, setHoldError] = useState("");
-
-  const [upiModalOpen, setUpiModalOpen] = useState(false);
-  const [upiMobile, setUpiMobile] = useState("");
-  const [upiError, setUpiError] = useState("");
-  const [upiLoading, setUpiLoading] = useState(false);
 
   const [ordersModalOpen, setOrdersModalOpen] = useState(false);
   const [ordersView, setOrdersView] = useState("list");
@@ -348,108 +342,6 @@ export default function POSActionsBar() {
     [dispatch, showToast]
   );
 
-  const handleOpenUpiModal = useCallback(() => {
-    if (cartItems.length === 0) {
-      showToast("Cart is empty.", "warning");
-      return;
-    }
-
-    setUpiMobile("");
-    setUpiError("");
-    setUpiModalOpen(true);
-  }, [cartItems.length, showToast]);
-
-  const handleCloseUpiModal = useCallback(() => {
-    if (upiLoading) return;
-    setUpiModalOpen(false);
-    setUpiMobile("");
-    setUpiError("");
-  }, [upiLoading]);
-
-const handleUpiPayment = useCallback(async () => {
-  try {
-    const mobile = String(upiMobile).trim();
-
-    if (!/^[6-9]\d{9}$/.test(mobile)) {
-      setUpiError("Please enter valid 10-digit mobile number.");
-      return;
-    }
-
-    if (!cartItems?.length) {
-      setUpiError("Cart is empty.");
-      return;
-    }
-
-    setUpiLoading(true);
-    setUpiError("");
-
-    const orderId = `POS_${Date.now()}`;
-
-    const normalizedCartItems = cartItems.map((item) => ({
-      productId: item.productId || item.product?._id || item.product,
-      brandId: item.brandId,
-      financialId: item.financialId,
-      quantity: item.quantity,
-      units: item.units,
-      qty: Number(item.qty),
-      image: item.image,
-    }));
-
-    const amount = Number(cartTotal || 0).toFixed(2);
-
-    const payload = {
-      amount,
-      customerId: mobile,
-      cartItems: normalizedCartItems,
-      order_id: orderId,
-    };
-
-    const result = await dispatch(initiateUpiPayment(payload));
-
-    if (!initiateUpiPayment.fulfilled.match(result)) {
-      setUpiLoading(false);
-      setUpiError(result.payload || "Failed to initiate UPI payment");
-      return;
-    }
-
-    const paymentResponse = result.payload;
-    const paymentData = paymentResponse?.data || paymentResponse;
-    const paymentLink = paymentData?.payment_links?.web;
-
-    if (!paymentLink) {
-      console.log("Full payment response:", paymentResponse);
-      setUpiLoading(false);
-      setUpiError("Payment link not received from gateway.");
-      return;
-    }
-
-    localStorage.setItem(
-      "pendingPosUpi",
-      JSON.stringify({
-        orderId,
-        amount,
-        cartItems: normalizedCartItems,
-        rawCartItems: cartItems,
-        customerId: mobile,
-        mobile,
-        createdAt: Date.now(),
-        paymentInitResponse: paymentResponse,
-      })
-    );
-
-    setUpiModalOpen(false);
-    setUpiMobile("");
-    setUpiError("");
-    setUpiLoading(false);
-
-    window.location.href = paymentLink;
-  } catch (error) {
-    console.error("UPI payment initiation error:", error);
-    setUpiLoading(false);
-    setUpiError("Unable to start UPI payment.");
-  }
-}, [upiMobile, cartItems, cartTotal, dispatch]);
-
   const baseBtn =
     "rounded-xl font-bold transition active:translate-y-[1px] whitespace-nowrap";
   const orangeBtn =
@@ -520,42 +412,6 @@ const handleUpiPayment = useCallback(async () => {
           />
           {holdError ? (
             <p className="text-sm font-medium text-red-600">{holdError}</p>
-          ) : null}
-        </div>
-      </AppModal>
-
-      <AppModal
-        open={upiModalOpen}
-        title="UPI Payment"
-        type="info"
-        onClose={handleCloseUpiModal}
-        onConfirm={handleUpiPayment}
-        confirmText={upiLoading ? "Processing..." : "Proceed"}
-        cancelText="Cancel"
-        showCancel={!upiLoading}
-      >
-        <div className="space-y-2">
-          <label className="block text-sm font-semibold text-gray-700">
-            Customer Mobile Number
-          </label>
-          <input
-            type="tel"
-            inputMode="numeric"
-            maxLength={10}
-            value={upiMobile}
-            onChange={(e) => {
-              const onlyDigits = e.target.value.replace(/\D/g, "").slice(0, 10);
-              setUpiMobile(onlyDigits);
-              if (upiError) setUpiError("");
-            }}
-            placeholder="Enter 10-digit mobile number"
-            className="w-full h-11 rounded-xl border border-gray-300 px-3 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200"
-          />
-          <div className="text-xs text-gray-500">
-            This mobile number will be used to initiate the UPI payment.
-          </div>
-          {upiError ? (
-            <p className="text-sm text-red-600 font-medium">{upiError}</p>
           ) : null}
         </div>
       </AppModal>
@@ -909,8 +765,9 @@ const handleUpiPayment = useCallback(async () => {
             </button>
 
             <button
+              type="button"
               className={[baseBtn, orangeBtn, mobileBtn].join(" ")}
-              onClick={handleOpenUpiModal}
+              onClick={() => setShowUpiModal(true)}
             >
               UPI
             </button>
@@ -999,7 +856,8 @@ const handleUpiPayment = useCallback(async () => {
             </button>
 
             <button
-              onClick={handleOpenUpiModal}
+              type="button"
+              onClick={() => setShowUpiModal(true)}
               className={[baseBtn, orangeBtn, "h-9 text-xs", desktopBtn].join(" ")}
             >
               UPI
