@@ -551,7 +551,7 @@ export default function POSActionsBar() {
                     </tr>
                   ) : (
                     posOrdersList.map((order, index) => {
-                      console.log("Order Row:", order);
+                      // console.log("Order Row:", order);
                       return (
                       <tr
   key={order._id}
