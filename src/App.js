@@ -12,6 +12,8 @@ import { hydrateFromCache, fetchAllProducts } from './features/products/productS
 // import { publishQueuedOrders } from './features/orders/orderSlice';
 import { useEffect } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
+import PaymentSuccessPage from './pages/PaymentSuccessPage';
+import PaymentFailurePage from './pages/PaymentFailurePage';
 
 function App() {
   function AppBootHydrator() {
@@ -81,6 +83,8 @@ function App() {
               <DeliveryPage />
             </ProtectedRoute>
           } />
+          <Route path="/payment/success" element={<PaymentSuccessPage />} />
+<Route path="/payment/failure" element={<PaymentFailurePage />} />
           {/* Catch-all fallback */}
           <Route path="*" element={<Navigate to="/login" />} />
         </Routes>

@@ -7,6 +7,7 @@ import {
   fetchPOSOrderDetails,
 } from "../features/orders/orderSlice";
 import { pingBackend } from "../utils/network";
+import UpiPaymentModal from "../components/UpiPaymentModal";
 import { clearCart } from "../features/cart/cartSlice";
 import CreateOrderButton from "./CreateOrderButton";
 import logo from "../assests/ManaKiranaLogo1024x1024.png";
@@ -38,29 +39,29 @@ function AppModal({
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/45 px-4">
       <div
-        className={`w-full ${size} rounded-2xl bg-white shadow-2xl overflow-hidden animate-[fadeIn_.15s_ease-out]`}
+        className={`w-full ${size} overflow-hidden rounded-2xl bg-white shadow-2xl animate-[fadeIn_.15s_ease-out]`}
       >
-        <div className={`${accent} px-4 py-3 flex items-center justify-between`}>
-          <h3 className="text-white text-base font-bold">{title}</h3>
-          <button onClick={onClose} className="text-white text-lg font-bold">
+        <div className={`${accent} flex items-center justify-between px-4 py-3`}>
+          <h3 className="text-base font-bold text-white">{title}</h3>
+          <button onClick={onClose} className="text-lg font-bold text-white">
             ×
           </button>
         </div>
 
-        <div className="px-4 py-4 max-h-[80vh] overflow-auto">
+        <div className="max-h-[80vh] overflow-auto px-4 py-4">
           {message ? (
-            <p className="text-sm text-gray-700 whitespace-pre-line">{message}</p>
+            <p className="whitespace-pre-line text-sm text-gray-700">{message}</p>
           ) : null}
 
           {children ? <div className="mt-3">{children}</div> : null}
         </div>
 
         {(onConfirm || showCancel) && (
-          <div className="flex justify-end gap-2 px-4 py-3 border-t bg-gray-50">
+          <div className="flex justify-end gap-2 border-t bg-gray-50 px-4 py-3">
             {showCancel && (
               <button
                 onClick={onClose}
-                className="h-10 px-4 rounded-xl border border-gray-300 bg-white text-gray-700 font-semibold hover:bg-gray-100 transition"
+                className="h-10 rounded-xl border border-gray-300 bg-white px-4 font-semibold text-gray-700 transition hover:bg-gray-100"
               >
                 {cancelText}
               </button>
@@ -69,7 +70,7 @@ function AppModal({
             {onConfirm && (
               <button
                 onClick={onConfirm}
-                className={`h-10 px-4 rounded-xl text-white font-semibold transition ${accent} hover:opacity-90`}
+                className={`h-10 rounded-xl px-4 font-semibold text-white transition hover:opacity-90 ${accent}`}
               >
                 {confirmText}
               </button>
@@ -94,9 +95,9 @@ function Toast({ open, message, type = "info" }) {
       : "bg-slate-800";
 
   return (
-    <div className="fixed top-4 right-4 z-[9999]">
+    <div className="fixed right-4 top-4 z-[9999]">
       <div
-        className={`${tone} text-white px-4 py-3 rounded-xl shadow-xl text-sm font-medium max-w-sm`}
+        className={`${tone} max-w-sm rounded-xl px-4 py-3 text-sm font-medium text-white shadow-xl`}
       >
         {message}
       </div>
@@ -165,6 +166,7 @@ export default function POSActionsBar() {
   const [searchPhone, setSearchPhone] = useState("");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
+  const [showUpiModal, setShowUpiModal] = useState(false);
 
   const showToast = useCallback((message, type = "info") => {
     setToast({ open: true, message, type });
@@ -406,10 +408,10 @@ export default function POSActionsBar() {
               if (holdError) setHoldError("");
             }}
             placeholder="Enter 10-digit phone number"
-            className="w-full h-11 rounded-xl border border-gray-300 px-3 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200"
+            className="h-11 w-full rounded-xl border border-gray-300 px-3 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200"
           />
           {holdError ? (
-            <p className="text-sm text-red-600 font-medium">{holdError}</p>
+            <p className="text-sm font-medium text-red-600">{holdError}</p>
           ) : null}
         </div>
       </AppModal>
@@ -429,10 +431,10 @@ export default function POSActionsBar() {
             <div className="flex flex-wrap gap-2">
               <button
                 onClick={() => loadOrders("latest")}
-                className={`h-10 px-4 rounded-xl text-sm font-semibold border ${
+                className={`h-10 rounded-xl border px-4 text-sm font-semibold ${
                   orderFilterMode === "latest"
-                    ? "bg-indigo-600 text-white border-indigo-600"
-                    : "bg-white text-gray-700 border-gray-300"
+                    ? "border-indigo-600 bg-indigo-600 text-white"
+                    : "border-gray-300 bg-white text-gray-700"
                 }`}
               >
                 Last 10 Orders
@@ -440,19 +442,19 @@ export default function POSActionsBar() {
 
               <button
                 onClick={() => loadOrders("today")}
-                className={`h-10 px-4 rounded-xl text-sm font-semibold border ${
+                className={`h-10 rounded-xl border px-4 text-sm font-semibold ${
                   orderFilterMode === "today"
-                    ? "bg-indigo-600 text-white border-indigo-600"
-                    : "bg-white text-gray-700 border-gray-300"
+                    ? "border-indigo-600 bg-indigo-600 text-white"
+                    : "border-gray-300 bg-white text-gray-700"
                 }`}
               >
                 Today Orders
               </button>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <div className="rounded-xl border p-3 bg-gray-50">
-                <div className="text-sm font-bold text-gray-700 mb-2">
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+              <div className="rounded-xl border bg-gray-50 p-3">
+                <div className="mb-2 text-sm font-bold text-gray-700">
                   Search by Phone
                 </div>
                 <div className="flex gap-2">
@@ -464,22 +466,22 @@ export default function POSActionsBar() {
                       setSearchPhone(e.target.value.replace(/\D/g, ""))
                     }
                     placeholder="10-digit phone"
-                    className="flex-1 h-10 rounded-lg border border-gray-300 px-3 text-sm"
+                    className="h-10 flex-1 rounded-lg border border-gray-300 px-3 text-sm"
                   />
                   <button
                     onClick={() => loadOrders("phone")}
-                    className="h-10 px-4 rounded-lg bg-indigo-600 text-white text-sm font-semibold"
+                    className="h-10 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white"
                   >
                     Search
                   </button>
                 </div>
               </div>
 
-              <div className="md:col-span-2 rounded-xl border p-3 bg-gray-50">
-                <div className="text-sm font-bold text-gray-700 mb-2">
+              <div className="rounded-xl border bg-gray-50 p-3 md:col-span-2">
+                <div className="mb-2 text-sm font-bold text-gray-700">
                   Search by Custom Dates
                 </div>
-                <div className="flex flex-col md:flex-row gap-2">
+                <div className="flex flex-col gap-2 md:flex-row">
                   <input
                     type="date"
                     value={fromDate}
@@ -494,7 +496,7 @@ export default function POSActionsBar() {
                   />
                   <button
                     onClick={() => loadOrders("custom")}
-                    className="h-10 px-4 rounded-lg bg-indigo-600 text-white text-sm font-semibold"
+                    className="h-10 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white"
                   >
                     Get Orders
                   </button>
@@ -502,7 +504,7 @@ export default function POSActionsBar() {
               </div>
             </div>
 
-            <div className="rounded-xl border p-3 bg-slate-50">
+            <div className="rounded-xl border bg-slate-50 p-3">
               <div className="flex flex-wrap gap-4 text-sm font-semibold text-gray-700">
                 <div>
                   <span className="text-gray-500">Logged in as:</span> {name || "-"}
@@ -548,7 +550,7 @@ export default function POSActionsBar() {
                       <tr
                         key={order._id}
                         onClick={() => handleOpenOrderDetails(order._id)}
-                        className="border-t hover:bg-yellow-50 cursor-pointer"
+                        className="cursor-pointer border-t hover:bg-yellow-50"
                       >
                         <td className="px-3 py-2">{index + 1}</td>
                         <td className="px-3 py-2">{formatDateTime(order.createdAt)}</td>
@@ -594,7 +596,7 @@ export default function POSActionsBar() {
             <div className="flex items-center justify-between">
               <button
                 onClick={() => setOrdersView("list")}
-                className="h-10 px-4 rounded-xl bg-gray-200 text-gray-800 text-sm font-semibold"
+                className="h-10 rounded-xl bg-gray-200 px-4 text-sm font-semibold text-gray-800"
               >
                 Back
               </button>
@@ -606,7 +608,7 @@ export default function POSActionsBar() {
               </div>
             ) : posOrderDetails ? (
               <>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 rounded-xl border p-3 bg-slate-50">
+                <div className="grid grid-cols-1 gap-3 rounded-xl border bg-slate-50 p-3 md:grid-cols-2">
                   <div className="text-sm font-semibold">
                     <span className="text-gray-500">Order ID:</span>{" "}
                     {posOrderDetails.MK_order_id || posOrderDetails._id}
@@ -686,11 +688,24 @@ export default function POSActionsBar() {
         )}
       </AppModal>
 
-      <div className="w-full h-full bg-white">
-        <div className="md:hidden border-t bg-white px-2 py-2">
-          <div className="flex items-center gap-2 overflow-x-auto no-scrollbar">
+      {showUpiModal && (
+        <UpiPaymentModal
+          onClose={() => setShowUpiModal(false)}
+          cartItems={cartItems}
+          customer={null}
+          totals={{
+            itemsPrice: Number(cartTotal || 0),
+            shippingPrice: 0,
+            totalPrice: Number(cartTotal || 0),
+          }}
+        />
+      )}
+
+      <div className="h-full w-full bg-white">
+        <div className="border-t bg-white px-2 py-2 md:hidden">
+          <div className="no-scrollbar flex items-center gap-2 overflow-x-auto">
             <div className="shrink-0">
-              <div className="p-[2px] rounded-full bg-[#FFD700]">
+              <div className="rounded-full bg-[#FFD700] p-[2px]">
                 <img
                   src={logo}
                   alt="ManaKirana"
@@ -706,15 +721,15 @@ export default function POSActionsBar() {
               className={[
                 baseBtn,
                 mobileBtn,
-                "text-white shrink-0",
+                "shrink-0 text-white",
                 queueCount && !isPublishing && navigator.onLine
-                  ? "bg-indigo-600 hover:bg-indigo-700 border border-indigo-300"
-                  : "bg-gray-400 border border-gray-300 cursor-not-allowed",
+                  ? "border border-indigo-300 bg-indigo-600 hover:bg-indigo-700"
+                  : "cursor-not-allowed border border-gray-300 bg-gray-400",
               ].join(" ")}
             >
               {isPublishing ? "Publishing…" : "Publish"}
               {queueCount > 0 && (
-                <span className="ml-1 inline-flex items-center justify-center text-[8px] bg-white text-indigo-700 rounded-full min-w-[20px] h-5 px-1">
+                <span className="ml-1 inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-white px-1 text-[8px] text-indigo-700">
                   {queueCount}
                 </span>
               )}
@@ -749,7 +764,11 @@ export default function POSActionsBar() {
               Multi
             </button>
 
-            <button className={[baseBtn, orangeBtn, mobileBtn].join(" ")}>
+            <button
+              type="button"
+              className={[baseBtn, orangeBtn, mobileBtn].join(" ")}
+              onClick={() => setShowUpiModal(true)}
+            >
               UPI
             </button>
 
@@ -757,46 +776,48 @@ export default function POSActionsBar() {
               <CreateOrderButton />
             </div>
 
-            <div className="shrink-0 text-xs text-gray-700 font-semibold px-2">
+            <div className="shrink-0 px-2 text-xs font-semibold text-gray-700">
               Hi {name}
             </div>
 
             <button
               onClick={handleLogout}
-              className="shrink-0 h-10 px-3 rounded-xl bg-red-600 text-white font-bold text-xs hover:bg-red-700"
+              className="shrink-0 h-10 rounded-xl bg-red-600 px-3 text-xs font-bold text-white hover:bg-red-700"
             >
               Logout
             </button>
           </div>
         </div>
 
-        <div className="hidden md:flex h-full w-full flex-col bg-[#f9fafb]">
-          <div className="shrink-0 flex items-center justify-center px-2 py-3 border-b bg-white">
-            <div className="p-[2px] rounded-full bg-[#FFD700]">
-              <img
-                src={logo}
-                alt="ManaKirana"
-                className="h-16 w-16 rounded-full object-cover ring-2 ring-[#FFD700]"
-                draggable="false"
-              />
+        <div className="hidden h-full w-full flex-col bg-[#f9fafb] md:flex">
+          <div className="shrink-0 border-b bg-white px-2 py-3">
+            <div className="flex items-center justify-center">
+              <div className="rounded-full bg-[#FFD700] p-[2px]">
+                <img
+                  src={logo}
+                  alt="ManaKirana"
+                  className="h-16 w-16 rounded-full object-cover ring-2 ring-[#FFD700]"
+                  draggable="false"
+                />
+              </div>
             </div>
           </div>
 
-          <div className="flex-1 min-h-0 px-2 py-2 flex flex-col gap-1.5">
+          <div className="flex min-h-0 flex-1 flex-col gap-1.5 px-2 py-2">
             <button
               onClick={handlePublish}
               disabled={isPublishing || !queueCount || !navigator.onLine}
               className={[
-                "w-full h-9 rounded-lg border font-semibold text-xs text-white transition",
+                "h-9 w-full rounded-lg border text-xs font-semibold text-white transition",
                 queueCount && !isPublishing && navigator.onLine
-                  ? "bg-slate-500 hover:bg-slate-600 border-slate-300"
-                  : "bg-gray-400 border-gray-300 cursor-not-allowed",
+                  ? "border-slate-300 bg-slate-500 hover:bg-slate-600"
+                  : "cursor-not-allowed border-gray-300 bg-gray-400",
               ].join(" ")}
             >
               <div className="flex items-center justify-center gap-1">
                 <span>{isPublishing ? "Publishing…" : "Publish"}</span>
                 {queueCount > 0 && (
-                  <span className="inline-flex items-center justify-center text-[7px] bg-white text-slate-700 rounded-full min-w-[16px] h-4 px-1">
+                  <span className="inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-white px-1 text-[7px] text-slate-700">
                     {queueCount}
                   </span>
                 )}
@@ -835,27 +856,29 @@ export default function POSActionsBar() {
             </button>
 
             <button
+              type="button"
+              onClick={() => setShowUpiModal(true)}
               className={[baseBtn, orangeBtn, "h-9 text-xs", desktopBtn].join(" ")}
             >
               UPI
             </button>
 
-            <div className="w-full [&>*]:w-full [&>*]:h-9 [&>*]:rounded-lg [&>*]:font-semibold [&>*]:text-xs">
+            <div className="w-full [&>*]:h-9 [&>*]:w-full [&>*]:rounded-lg [&>*]:text-xs [&>*]:font-semibold">
               <CreateOrderButton />
             </div>
           </div>
 
           <div className="shrink-0 border-t bg-white px-2 py-3">
-            <div className="text-center text-[15px] text-green-700 font-semibold truncate">
+            <div className="truncate text-center text-[15px] font-semibold text-green-700">
               Hi {name}
             </div>
-            <div className="mt-1 text-center text-xs text-gray-600 truncate">
+            <div className="mt-1 truncate text-center text-xs text-gray-600">
               {role || "-"} {location ? `• ${location}` : ""}
             </div>
 
             <button
               onClick={handleLogout}
-              className="mt-2 w-full h-10 rounded-xl bg-red-600 text-white font-bold text-sm hover:bg-red-700 transition"
+              className="mt-2 h-10 w-full rounded-xl bg-red-600 text-sm font-bold text-white transition hover:bg-red-700"
             >
               Logout
             </button>
