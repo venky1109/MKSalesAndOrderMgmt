@@ -4,7 +4,9 @@ import {
   clearPaymentState,
   initiateUpiPayment,
 } from '../features/payment/paymentSlice';
-import generateMKOrderId from '../utils/generateMKOrderId'
+import generateMKOrderId from '../utils/generateMKOrderId';
+import { fetchCustomerByPhone } from '../features/customers/customerSlice';
+
 
 const UpiPaymentModal = ({ onClose, cartItems = [], totals = {} }) => {
 
@@ -38,6 +40,7 @@ const UpiPaymentModal = ({ onClose, cartItems = [], totals = {} }) => {
   }, [dispatch]);
 
   const handleSubmit = async () => {
+
     if (cartItems.length === 0) {
       return;
     }
@@ -47,10 +50,17 @@ const UpiPaymentModal = ({ onClose, cartItems = [], totals = {} }) => {
     }
 
     const mkOrderId = generateMKOrderId();
+     const cust = await dispatch(
+      fetchCustomerByPhone({
+        phone: phoneNumber,
+        token
+      })
+    ).unwrap();
+    const customerId = cust?._id || null;
 
 const payload = {
   MK_order_id: mkOrderId,
-  user: posUserInfo?._id,
+  user: customerId,
   shippingAddress: {
     street: 'Gollavelli',
     city: 'Amalapuram',

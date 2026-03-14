@@ -167,6 +167,7 @@ export default function POSActionsBar() {
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [showUpiModal, setShowUpiModal] = useState(false);
+  
 
   const showToast = useCallback((message, type = "info") => {
     setToast({ open: true, message, type });
@@ -521,66 +522,97 @@ export default function POSActionsBar() {
             <div className="overflow-auto rounded-xl border">
               <table className="min-w-full text-sm">
                 <thead className="bg-slate-100">
-                  <tr>
-                    <th className="px-3 py-2 text-left">S.No</th>
-                    <th className="px-3 py-2 text-left">Date</th>
-                    <th className="px-3 py-2 text-left">Order ID</th>
-                    <th className="px-3 py-2 text-left">Source</th>
-                    <th className="px-3 py-2 text-left">POS User</th>
-                    <th className="px-3 py-2 text-left">Location</th>
-                    <th className="px-3 py-2 text-left">Customer Phone Number</th>
-                    <th className="px-3 py-2 text-right">Order Amount</th>
-                  </tr>
-                </thead>
+  <tr>
+    <th className="px-3 py-2 text-left">S.No</th>
+    <th className="px-3 py-2 text-left">Date</th>
+    <th className="px-3 py-2 text-left">Order ID</th>
+    <th className="px-3 py-2 text-left">Source</th>
+    <th className="px-3 py-2 text-left">POS User</th>
+    <th className="px-3 py-2 text-left">Location</th>
+    <th className="px-3 py-2 text-left">Customer Phone Number</th>
+    <th className="px-3 py-2 text-left">Paid</th>
+    <th className="px-3 py-2 text-left">Mode</th>
+    <th className="px-3 py-2 text-right">Order Amount</th>
+  </tr>
+</thead>
+
                 <tbody>
                   {posOrdersListLoading ? (
                     <tr>
-                      <td colSpan="8" className="px-3 py-6 text-center text-gray-500">
+                      <td colSpan="10" className="px-3 py-6 text-center text-gray-500">
                         Loading orders...
                       </td>
                     </tr>
                   ) : posOrdersList.length === 0 ? (
                     <tr>
-                      <td colSpan="8" className="px-3 py-6 text-center text-gray-500">
+                      <td colSpan="10" className="px-3 py-6 text-center text-gray-500">
                         No orders found.
                       </td>
                     </tr>
                   ) : (
-                    posOrdersList.map((order, index) => (
+                    posOrdersList.map((order, index) => {
+                      console.log("Order Row:", order);
+                      return (
                       <tr
-                        key={order._id}
-                        onClick={() => handleOpenOrderDetails(order._id)}
-                        className="cursor-pointer border-t hover:bg-yellow-50"
-                      >
-                        <td className="px-3 py-2">{index + 1}</td>
-                        <td className="px-3 py-2">{formatDateTime(order.createdAt)}</td>
-                        <td className="px-3 py-2">
-                          {order.MK_order_id || order._id}
-                        </td>
-                        <td className="px-3 py-2">
-                          <span
-                            className={`inline-flex rounded-full px-2 py-1 text-xs font-bold ${
-                              order.source === "ONLINE"
-                                ? "bg-blue-100 text-blue-700"
-                                : "bg-orange-100 text-orange-700"
-                            }`}
-                          >
-                            {order.source || "-"}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2">{order.posUserName || "-"}</td>
-                        <td className="px-3 py-2">{order.posLocation || "-"}</td>
-                        <td className="px-3 py-2">{order.phoneNo || "-"}</td>
-                        <td className="px-3 py-2 text-right">
-                          ₹{Number(order.totalPrice || 0).toFixed(2)}
-                        </td>
-                      </tr>
-                    ))
+  key={order._id}
+  onClick={() => handleOpenOrderDetails(order._id)}
+  className="cursor-pointer border-t hover:bg-yellow-50"
+>
+  <td className="px-3 py-2">{index + 1}</td>
+
+  <td className="px-3 py-2">{formatDateTime(order.createdAt)}</td>
+
+  <td className="px-3 py-2">
+    {order.MK_order_id || order._id}
+  </td>
+
+  <td className="px-3 py-2">
+    <span
+      className={`inline-flex rounded-full px-2 py-1 text-xs font-bold ${
+        order.source === "ONLINE"
+          ? "bg-blue-100 text-blue-700"
+          : "bg-orange-100 text-orange-700"
+      }`}
+    >
+      {order.source || "-"}
+    </span>
+  </td>
+
+  <td className="px-3 py-2">{order.posUserName || "-"}</td>
+
+  <td className="px-3 py-2">{order.posLocation || "-"}</td>
+
+  <td className="px-3 py-2">{order.phoneNo || "-"}</td>
+
+  {/* Paid Status */}
+  <td className="px-3 py-2">
+    <span
+      className={`inline-flex rounded-full px-2 py-1 text-xs font-bold ${
+        order.isPaid
+          ? "bg-green-100 text-green-700"
+          : "bg-yellow-100 text-yellow-700"
+      }`}
+    >
+      {order.isPaid ? "Paid" : "Unpaid"}
+    </span>
+  </td>
+
+  {/* Payment Mode */}
+  <td className="px-3 py-2">
+    {order.paymentMethod || "-"}
+  </td>
+
+  <td className="px-3 py-2 text-right">
+    ₹{Number(order.totalPrice || 0).toFixed(2)}
+  </td>
+</tr>
+
+                    )})
                   )}
                 </tbody>
                 <tfoot>
                   <tr className="border-t bg-yellow-100 font-bold">
-                    <td colSpan="7" className="px-3 py-3 text-right">
+                    <td colSpan="9" className="px-3 py-3 text-right">
                       Total Amount
                     </td>
                     <td className="px-3 py-3 text-right">
