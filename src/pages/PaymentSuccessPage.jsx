@@ -1,17 +1,20 @@
 import React from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { clearCart } from "../features/cart/cartSlice";
+import { useDispatch } from "react-redux";
 
 const PaymentSuccessModal = () => {
   const navigate = useNavigate();
   const [params] = useSearchParams();
-
+const dispatch = useDispatch();
   const orderId = params.get("orderId");
   const amount = params.get("amount");
   const method = params.get("method") || "UPI";
   const status = "SUCCESS";
 
   const handleOk = () => {
-    navigate("/pos"); // home / POS screen
+    dispatch(clearCart());
+    navigate("/"); // home / POS screen
   };
 
   return (
