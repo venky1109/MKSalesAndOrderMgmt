@@ -7,9 +7,7 @@ import {
 import generateMKOrderId from '../utils/generateMKOrderId';
 import { fetchCustomerByPhone } from '../features/customers/customerSlice';
 
-
 const UpiPaymentModal = ({ onClose, cartItems = [], totals = {} }) => {
-
   const dispatch = useDispatch();
 
   const token = useSelector((state) => state.posUser?.userInfo?.token);
@@ -40,62 +38,64 @@ const UpiPaymentModal = ({ onClose, cartItems = [], totals = {} }) => {
   }, [dispatch]);
 
   const handleSubmit = async () => {
+    if (cartItems.length === 0) return;
+    if (!/^\d{10}$/.test(phoneNumber)) return;
 
-    if (cartItems.length === 0) {
-      return;
+    try {
+      const mkOrderId = generateMKOrderId();
+
+      const cust = await dispatch(
+        fetchCustomerByPhone({
+          phone: phoneNumber,
+          token,
+        })
+      ).unwrap();
+
+      const customerId = cust?._id || null;
+
+      const mappedOrderItems = cartItems.map((item) => ({
+        name: item.item,
+        quantity: item.catalogQuantity,
+        units: item.units,
+        brand: item.brand,
+        qty: item.qty,
+        image: item.image || '',
+        price: item.dprice,
+        productId: item.id,
+        brandId: item.brandId,
+        financialId: item.financialId,
+      }));
+
+      const payload = {
+        MK_order_id: mkOrderId,
+        user: customerId,
+        shippingAddress: {
+          street: 'Gollavelli',
+          city: 'Amalapuram',
+          postalCode: '533222',
+          country: 'India',
+        },
+        paymentMethod: 'UPI',
+        orderItems: mappedOrderItems,
+        totalPrice: Number(totals?.totalPrice || 0),
+        phoneNo: phoneNumber,
+        posUserName: posUserInfo?.username || '',
+        posLocation: posUserInfo?.location || '',
+        source: 'POS',
+        isPaid: false,
+      };
+
+      await dispatch(
+        initiateUpiPayment({
+          payload,
+          token,
+          cartItems,
+          phoneNumber,
+        })
+      ).unwrap();
+    } catch (err) {
+      console.error('UPI submit failed:', err);
     }
-
-    if (!/^\d{10}$/.test(phoneNumber)) {
-      return;
-    }
-
-    const mkOrderId = generateMKOrderId();
-     const cust = await dispatch(
-      fetchCustomerByPhone({
-        phone: phoneNumber,
-        token
-      })
-    ).unwrap();
-    const customerId = cust?._id || null;
-
-const payload = {
-  MK_order_id: mkOrderId,
-  user: customerId,
-  shippingAddress: {
-    street: 'Gollavelli',
-    city: 'Amalapuram',
-    postalCode: '533222',
-    country: 'India',
-  },
-  paymentMethod: 'UPI',
-  orderItems: cartItems.map((item) => ({
-    name: item.item,
-    quantity: item.catalogQuantity,
-    units: item.units,
-    brand: item.brand,
-    qty: item.qty,
-    image: item.image || '',
-    price: item.dprice,
-    productId: item.id,
-    brandId: item.brandId,
-    financialId: item.financialId,
-  })),
-  totalPrice: Number(totals?.totalPrice || 0),
-  phoneNo: phoneNumber,
-  posUserName: posUserInfo?.username || '',
-  posLocation: posUserInfo?.location || '',
-  source: 'POS',
-  isPaid: false,
-};
-
-    dispatch(
-      initiateUpiPayment({
-        payload,
-        token,
-        cartItems,
-        phoneNumber,
-      })
-    );
   };
 
   const localPhoneError =
@@ -130,7 +130,9 @@ const payload = {
         <div className="space-y-4 px-5 py-5">
           <div className="rounded-xl border border-orange-100 bg-orange-50 p-4">
             <div className="flex items-center justify-between">
-              <span className="text-sm font-medium text-gray-700">Total Amount</span>
+              <span className="text-sm font-medium text-gray-700">
+                Total Amount
+              </span>
               <span className="text-2xl font-extrabold text-orange-600">
                 ₹{amount}
               </span>

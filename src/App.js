@@ -9,6 +9,7 @@ import PackingOrdersPage from './pages/PackingOrdersPage';
 import DispatchOrdersPage from './pages/DispatchOrdersPage';
 import DeliveryPage from './pages/DeliveryPage';
 import { hydrateFromCache, fetchAllProducts } from './features/products/productSlice';
+import PaymentInvoiceSharePage from './pages/PaymentInvoiceSharePage';
 // import { publishQueuedOrders } from './features/orders/orderSlice';
 import { useEffect } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
@@ -85,6 +86,7 @@ function App() {
           } />
           <Route path="/payment/success" element={<PaymentSuccessPage />} />
 <Route path="/payment/failure" element={<PaymentFailurePage />} />
+<Route path="/payment/invoice-share" element={<PaymentInvoiceSharePage />} />
           {/* Catch-all fallback */}
           <Route path="*" element={<Navigate to="/login" />} />
         </Routes>
