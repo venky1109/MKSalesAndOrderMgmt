@@ -33,43 +33,68 @@ export const queueOrder = createAsyncThunk(
 // Create order on server (yours)
 // -----------------------------
 export const createOrder = createAsyncThunk(
-  'orders/create',
+  "orders/create",
   async ({ payload, token, cartItems }, thunkAPI) => {
     try {
-      const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/orders/pos`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(payload),
-      });
+      const response = await fetch(
+        `${process.env.REACT_APP_API_BASE_URL}/orders/pos`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(payload),
+        }
+      );
 
       const data = await response.json();
-      if (!response.ok) throw new Error(data.message || 'Order creation failed');
 
-      for (const item of (cartItems || [])) {
+      if (!response.ok) {
+        throw new Error(data.message || "Order creation failed");
+      }
+
+      const stockErrors = [];
+
+      for (const item of cartItems || []) {
         const newStock = item.stock;
+
         if (newStock >= 0) {
           try {
-            await thunkAPI.dispatch(
-              updateProductStockOnly({
-                productID: item.id,
-                brandID: item.brandId,
-                financialID: item.financialId,
-                newQuantity: newStock,
-                token,
-              })
-            );
+            await thunkAPI
+              .dispatch(
+                updateProductStockOnly({
+                  productID: item.id,
+                  brandID: item.brandId,
+                  financialID: item.financialId,
+                  newQuantity: newStock,
+                  token,
+                })
+              )
+              .unwrap();
           } catch (err) {
-            console.warn('⚠️ Stock update failed for product:', item.id, err.message);
+            stockErrors.push({
+              productID: item.id,
+              brandID: item.brandId,
+              financialID: item.financialId,
+              error: err?.message || String(err),
+            });
+
+            console.warn(
+              "⚠️ Stock update failed for product:",
+              item.id,
+              err?.message || err
+            );
           }
         }
       }
 
-      return data;
+      return {
+        ...data,
+        stockErrors,
+      };
     } catch (err) {
-      return thunkAPI.rejectWithValue(err.message);
+      return thunkAPI.rejectWithValue(err?.message || "Order creation failed");
     }
   }
 );
