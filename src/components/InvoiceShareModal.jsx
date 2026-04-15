@@ -15,7 +15,6 @@ const InvoiceShareModal = ({
 
   const [invoiceImgUrl, setInvoiceImgUrl] = useState(null);
   const [pendingCapture, setPendingCapture] = useState(false);
-  const [printWidth, setPrintWidth] = useState(352);
 
   const money = (n) => `₹ ${(Number(n || 0)).toFixed(2)}`;
 
@@ -32,11 +31,11 @@ const InvoiceShareModal = ({
 
       try {
         await new Promise((r) => requestAnimationFrame(r));
-        await new Promise((r) => setTimeout(r, 40));
+        await new Promise((r) => setTimeout(r, 100));
 
         const canvas = await html2canvas(receiptRef.current, {
           scale: 2,
-          backgroundColor: "#fff",
+          backgroundColor: "#ffffff",
           useCORS: true,
           logging: false,
         });
@@ -54,69 +53,165 @@ const InvoiceShareModal = ({
     doCapture();
   }, [pendingCapture]);
 
-  const printImageAtWidth = (imgUrl, widthPx = 352) => {
-    if (!imgUrl) return;
+ const printReceiptImage = (imgUrl) => {
+  if (!imgUrl) return;
 
-    const iframe = document.createElement("iframe");
-    iframe.style.position = "fixed";
-    iframe.style.right = "0";
-    iframe.style.bottom = "0";
-    iframe.style.width = "0";
-    iframe.style.height = "0";
-    iframe.style.border = "0";
-    document.body.appendChild(iframe);
+  const iframe = document.createElement("iframe");
+  iframe.style.position = "fixed";
+  iframe.style.right = "0";
+  iframe.style.bottom = "0";
+  iframe.style.width = "0";
+  iframe.style.height = "0";
+  iframe.style.border = "0";
+  iframe.setAttribute("aria-hidden", "true");
+  document.body.appendChild(iframe);
 
-    const html = `
-      <html>
-        <head>
-          <meta charset="utf-8" />
-          <title>Print Invoice</title>
-          <style>
-            html, body { margin: 0; padding: 0; }
-            .wrap { width: ${widthPx}px; margin: 0 auto; }
-            img { width: ${widthPx}px; height: auto; display: block; image-rendering: -webkit-optimize-contrast; }
-            @media print {
-              @page { size: auto; margin: 0; }
-              html, body { margin: 0; padding: 0; }
-              .wrap { width: ${widthPx}px; }
-              img { width: ${widthPx}px; height: auto; display: block; }
+  const html = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8" />
+        <title>Print Invoice</title>
+        <style>
+          @page {
+            size: 58mm auto;
+            margin: 0;
+          }
+
+          html, body {
+            margin: 0 !important;
+            padding: 0 !important;
+            width: 58mm !important;
+            min-width: 58mm !important;
+            max-width: 58mm !important;
+            background: #fff;
+            overflow: hidden;
+          }
+
+          body {
+            display: block !important;
+          }
+
+          * {
+            box-sizing: border-box;
+          }
+
+          .page {
+            width: 58mm !important;
+            min-width: 58mm !important;
+            max-width: 58mm !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            position: relative !important;
+            top: 0 !important;
+            left: 0 !important;
+          }
+
+          .receipt-img {
+            display: block !important;
+            width: 58mm !important;
+            min-width: 58mm !important;
+            max-width: 58mm !important;
+            height: auto !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            border: 0 !important;
+            vertical-align: top !important;
+          }
+
+          @media print {
+            @page {
+              size: 58mm auto;
+              margin: 0;
             }
-          </style>
-        </head>
-        <body>
-          <div class="wrap">
-            <img id="receipt-img" src="${imgUrl}" alt="Invoice" />
-          </div>
-          <script>
-            (function() {
-              const img = document.getElementById('receipt-img');
-              function doPrint() {
-                try { window.focus(); window.print(); } catch(e) {}
-                setTimeout(() => { window.close && window.close(); }, 300);
-              }
-              if (img.complete) doPrint();
-              else { img.onload = doPrint; img.onerror = doPrint; }
-            })();
-          </script>
-        </body>
-      </html>
-    `;
 
-    const doc = iframe.contentDocument || iframe.contentWindow.document;
-    doc.open();
-    doc.write(html);
-    doc.close();
+            html, body {
+              margin: 0 !important;
+              padding: 0 !important;
+              width: 58mm !important;
+              min-width: 58mm !important;
+              max-width: 58mm !important;
+              background: #fff !important;
+              overflow: hidden !important;
+            }
 
-    setTimeout(() => {
-      try {
-        document.body.removeChild(iframe);
-      } catch {}
-    }, 5000);
-  };
+            body {
+              display: block !important;
+            }
+
+            .page {
+              width: 58mm !important;
+              min-width: 58mm !important;
+              max-width: 58mm !important;
+              margin: 0 !important;
+              padding: 0 !important;
+              position: relative !important;
+              top: 0 !important;
+              left: 0 !important;
+              break-inside: avoid !important;
+              page-break-inside: avoid !important;
+            }
+
+            .receipt-img {
+              display: block !important;
+              width: 58mm !important;
+              min-width: 58mm !important;
+              max-width: 58mm !important;
+              height: auto !important;
+              margin: 0 !important;
+              padding: 0 !important;
+              border: 0 !important;
+              vertical-align: top !important;
+              break-inside: avoid !important;
+              page-break-inside: avoid !important;
+            }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="page">
+          <img id="receipt-img" class="receipt-img" src="${imgUrl}" alt="Invoice" />
+        </div>
+
+        <script>
+          (function () {
+            const img = document.getElementById("receipt-img");
+
+            function doPrint() {
+              setTimeout(() => {
+                try {
+                  window.focus();
+                  window.print();
+                } catch (e) {}
+              }, 120);
+            }
+
+            if (img.complete) doPrint();
+            else {
+              img.onload = doPrint;
+              img.onerror = doPrint;
+            }
+          })();
+        </script>
+      </body>
+    </html>
+  `;
+
+  const doc = iframe.contentDocument || iframe.contentWindow.document;
+  doc.open();
+  doc.write(html);
+  doc.close();
+
+  setTimeout(() => {
+    try {
+      document.body.removeChild(iframe);
+    } catch {}
+  }, 10000);
+};
 
   const handleShareWhatsApp = () => {
     if (!waRef.current || !invoiceImgUrl) {
-      alert("❌ Invoice image not ready yet.");
+      alert("Invoice image not ready yet.");
       return;
     }
     waRef.current.sendImage(order, phone, invoiceImgUrl);
@@ -178,26 +273,23 @@ const InvoiceShareModal = ({
               <img
                 src={invoiceImgUrl}
                 alt="Invoice"
-                style={{ width: "100%", height: "auto", border: "1px solid #eee" }}
+                style={{
+                  width: "100%",
+                  height: "auto",
+                  border: "1px solid #eee",
+                }}
               />
             )}
 
-            <div style={{ marginTop: 12 }}>
-              <label style={{ fontSize: 12, opacity: 0.8 }}>Printer profile:&nbsp;</label>
-              <select
-                value={printWidth}
-                onChange={(e) => setPrintWidth(Number(e.target.value))}
-                style={{ padding: 6 }}
-              >
-                <option value={352}>58 mm SAFE (352 px)</option>
-                <option value={384}>58 mm Exact (384 px)</option>
-                <option value={576}>80 mm Receipt (576 px)</option>
-                <option value={812}>TSC TE244 4" Label (812 px)</option>
-              </select>
-            </div>
-
-            <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
-              <button onClick={() => printImageAtWidth(invoiceImgUrl, printWidth)} disabled={!invoiceImgUrl}>
+            <div
+              style={{
+                display: "flex",
+                gap: 8,
+                marginTop: 12,
+                flexWrap: "wrap",
+              }}
+            >
+              <button onClick={() => printReceiptImage(invoiceImgUrl)} disabled={!invoiceImgUrl}>
                 Print
               </button>
 
@@ -212,37 +304,40 @@ const InvoiceShareModal = ({
               <button onClick={onClose}>Close</button>
             </div>
 
-            <div style={{ fontSize: 12, marginTop: 8, opacity: 0.7 }}>
-              Tip: In browser print dialog set <b>Margins: None</b>, <b>Scale: 100</b>,
-              and disable headers & footers.
+            <div style={{ fontSize: 12, marginTop: 8, opacity: 0.75 }}>
+              Print settings: Margins = None, Scale = 100%, Headers/Footer = Off,
+              Paper size = 58mm thermal paper.
             </div>
           </div>
         </div>,
         document.body
       )}
 
-      <div
-        ref={receiptRef}
-        style={{
-          width: "56mm",
-          padding: "3mm 3mm 7mm",
-          background: "#fff",
-          color: "#000",
-          fontFamily: 'Menlo, Consolas, "Courier New", monospace',
-          fontSize: "14px",
-          lineHeight: 1.32,
-          letterSpacing: "0.1px",
-          position: "fixed",
-          left: -10000,
-          top: 0,
-          whiteSpace: "pre-wrap",
-          overflowWrap: "anywhere",
-          wordBreak: "break-word",
-        }}
-        aria-hidden="true"
-      >
-        <div style={{ textAlign: "center", marginBottom: "3mm" }}>
-          <div style={{ fontWeight: "bold" }}>
+     <div
+  ref={receiptRef}
+  style={{
+    width: "54mm",
+    maxWidth: "54mm",
+    minWidth: "54mm",
+    padding: "2mm 2mm 0.5mm 2mm",
+    margin: 0,
+    background: "#fff",
+    color: "#000",
+    fontFamily: 'Menlo, Consolas, "Courier New", monospace',
+    fontSize: "11px",
+    lineHeight: 1.35,
+    boxSizing: "border-box",
+    position: "fixed",
+    left: "-10000px",
+    top: "0",
+    whiteSpace: "normal",
+    overflowWrap: "break-word",
+    wordBreak: "break-word",
+  }}
+  aria-hidden="true"
+>
+        <div style={{ textAlign: "center", marginBottom: "2mm" }}>
+          <div style={{ fontWeight: "bold", fontSize: "12px" }}>
             {process.env.REACT_APP_SHOP_NAME || "MANAKIRANA"}
           </div>
           <div>{process.env.REACT_APP_SHOP_ADDRESS_LINE1 || "Gollavilli"}</div>
@@ -251,34 +346,49 @@ const InvoiceShareModal = ({
           )}
         </div>
 
-        <div style={{ borderTop: "1px dashed #000", margin: "1mm 0" }} />
+        <div style={{ borderTop: "1px dashed #000", margin: "1.5mm 0" }} />
         <div>Order ID: {orderId}</div>
         <div>Bill To: {phone || order.phone || "--"}</div>
-        <div>Date: {formattedDate} {formattedTime}</div>
+        <div>
+          Date: {formattedDate} {formattedTime}
+        </div>
         <div>Payment: {order.paymentMethod || "--"}</div>
-        <div style={{ borderTop: "1px dashed #000", margin: "1mm 0" }} />
+        <div style={{ borderTop: "1px dashed #000", margin: "1.5mm 0" }} />
 
         {items.map((it, idx) => {
-          const name = (it.item || it.name || "").replace(/\s*\([^)]*\)/g, "").trim();
+          const name = (it.item || it.name || "")
+            .replace(/\s*\([^)]*\)/g, "")
+            .trim();
           const price = Number(it.dprice || it.price || 0);
           const qty = Number(it.qty || 0);
           const lineTotal = qty * price;
 
           return (
-            <div key={idx} style={{ marginBottom: "2px" }}>
-              <div>{name}</div>
-              <div style={{ fontSize: "12px", display: "flex", justifyContent: "space-between" }}>
-                <span>
+            <div key={idx} style={{ marginBottom: "3px" }}>
+              <div style={{ fontWeight: 600 }}>{name}</div>
+
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: 8,
+                  fontSize: "10px",
+                }}
+              >
+                <div style={{ flex: 1, minWidth: 0 }}>
                   {qty} x {money(price)}{" "}
-                  {it.catalogQuantity || it.quantity ? `(${it.catalogQuantity || it.quantity} ${it.units || ""})` : ""}
-                </span>
-                <span>{money(lineTotal)}</span>
+                  {it.catalogQuantity || it.quantity
+                    ? `(${it.catalogQuantity || it.quantity} ${it.units || ""})`
+                    : ""}
+                </div>
+                <div style={{ whiteSpace: "nowrap" }}>{money(lineTotal)}</div>
               </div>
             </div>
           );
         })}
 
-        <div style={{ borderTop: "1px dashed #000", margin: "1mm 0" }} />
+        <div style={{ borderTop: "1px dashed #000", margin: "1.5mm 0" }} />
+
         <div style={{ display: "flex", justifyContent: "space-between" }}>
           <strong>Total Qty</strong>
           <strong>{Number(totalQty).toFixed(2)}</strong>
@@ -308,7 +418,9 @@ const InvoiceShareModal = ({
         )}
 
         <div style={{ borderTop: "1px dashed #000", margin: "1mm 0" }} />
-        <div style={{ textAlign: "center" }}>Thank you! Visit again</div>
+        <div style={{ textAlign: "center", marginBottom: "1mm", fontWeight: 600 }}>
+          Thank you! Visit again
+        </div>
       </div>
 
       <WhatsAppShare ref={waRef} />
