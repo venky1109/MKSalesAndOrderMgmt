@@ -272,6 +272,7 @@ const ProductList = forwardRef((props, ref) => {
   const [search, setSearch] = useState("");
   const [showSearchKeyboard, setShowSearchKeyboard] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(270);
+  const [useCustomSearchKeyboard, setUseCustomSearchKeyboard] = useState(false);
 
   const barcodeRef = useRef(null);
   const searchInputRef = useRef(null);
@@ -297,6 +298,22 @@ const ProductList = forwardRef((props, ref) => {
 
   useEffect(() => {
     barcodeRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    const updateKeyboardMode = () => {
+      const isTabletOrMobile = window.innerWidth < 1024;
+      setUseCustomSearchKeyboard(isTabletOrMobile);
+
+      if (!isTabletOrMobile) {
+        setShowSearchKeyboard(false);
+      }
+    };
+
+    updateKeyboardMode();
+    window.addEventListener("resize", updateKeyboardMode);
+
+    return () => window.removeEventListener("resize", updateKeyboardMode);
   }, []);
 
   useEffect(() => {
@@ -462,6 +479,8 @@ const ProductList = forwardRef((props, ref) => {
   }, []);
 
   const openSearchKeyboard = useCallback(() => {
+    if (!useCustomSearchKeyboard) return;
+
     setShowSearchKeyboard(true);
 
     setTimeout(() => {
@@ -472,7 +491,12 @@ const ProductList = forwardRef((props, ref) => {
         el.setSelectionRange(len, len);
       }
     }, 0);
-  }, []);
+  }, [useCustomSearchKeyboard]);
+
+  const handleDesktopSearchChange = useCallback((e) => {
+    if (useCustomSearchKeyboard) return;
+    setSearch(e.target.value);
+  }, [useCustomSearchKeyboard]);
 
   const filteredProducts = useMemo(() => {
     const s = safeLower(search);
@@ -562,7 +586,7 @@ const ProductList = forwardRef((props, ref) => {
   return (
     <div
       ref={ref}
-      className="relative h-full min-h-0 flex flex-col overflow-hidden bg-gray-50"
+      className="relative flex h-full min-h-0 flex-col overflow-hidden bg-gray-50"
     >
       <div className="shrink-0 border-b bg-white p-2 sm:p-3">
         <div className="mb-2">
@@ -623,12 +647,7 @@ const ProductList = forwardRef((props, ref) => {
           <button
             type="button"
             onClick={handleClearFilters}
-            className="
-              shrink-0 rounded bg-red-600 text-xs font-bold text-white transition hover:bg-red-700
-              px-2 py-1
-              lg:px-3 lg:py-2 lg:text-sm
-              xl:px-4 xl:py-2
-            "
+            className="shrink-0 rounded bg-red-600 px-2 py-1 text-xs font-bold text-white transition hover:bg-red-700 lg:px-3 lg:py-2 lg:text-sm xl:px-4 xl:py-2"
           >
             Clear
           </button>
@@ -639,10 +658,11 @@ const ProductList = forwardRef((props, ref) => {
             type="text"
             ref={searchInputRef}
             value={search}
-            readOnly
-            inputMode="none"
-            onFocus={openSearchKeyboard}
-            onClick={openSearchKeyboard}
+            readOnly={useCustomSearchKeyboard}
+            inputMode={useCustomSearchKeyboard ? "none" : "text"}
+            onChange={handleDesktopSearchChange}
+            onFocus={useCustomSearchKeyboard ? openSearchKeyboard : undefined}
+            onClick={useCustomSearchKeyboard ? openSearchKeyboard : undefined}
             placeholder="🔍 Search product"
             className="w-full rounded border bg-white px-3 py-2 text-sm caret-slate-900"
           />
@@ -652,10 +672,7 @@ const ProductList = forwardRef((props, ref) => {
           <button
             type="button"
             onClick={handleClearFilters}
-            className="
-              w-full rounded bg-red-600 px-3 py-2 text-sm font-bold text-white transition hover:bg-red-700
-              sm:px-4 sm:py-2.5 sm:text-base
-            "
+            className="w-full rounded bg-red-600 px-3 py-2 text-sm font-bold text-white transition hover:bg-red-700 sm:px-4 sm:py-2.5 sm:text-base"
           >
             Clear
           </button>
@@ -665,7 +682,10 @@ const ProductList = forwardRef((props, ref) => {
       <div
         className="flex-1 min-h-0 overflow-hidden"
         style={{
-          paddingBottom: showSearchKeyboard ? `${keyboardHeight}px` : 0,
+          paddingBottom:
+            showSearchKeyboard && useCustomSearchKeyboard
+              ? `${keyboardHeight}px`
+              : 0,
         }}
       >
         {loading ? (
@@ -798,7 +818,7 @@ const ProductList = forwardRef((props, ref) => {
 
       <SearchKeyboard
         ref={keyboardRef}
-        visible={showSearchKeyboard}
+        visible={showSearchKeyboard && useCustomSearchKeyboard}
         onKeyPress={handleSearchKeyPress}
         onClose={() => {
           setShowSearchKeyboard(false);
