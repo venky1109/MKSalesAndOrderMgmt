@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { logout } from "../features/auth/posUserSlice";
 import {
@@ -25,6 +25,35 @@ function AppModal({
   children,
   size = "max-w-md",
 }) {
+  const modalRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const timer = setTimeout(() => {
+      const focusable = modalRef.current?.querySelectorAll(
+        'input, button, select, textarea, [tabindex]:not([tabindex="-1"])'
+      );
+
+      const focusableEls = Array.from(focusable || []).filter(
+        (el) => !el.disabled
+      );
+
+      if (focusableEls.length > 0) {
+        const preferredInput = focusableEls.find(
+          (el) =>
+            el.tagName?.toLowerCase() === "input" ||
+            el.tagName?.toLowerCase() === "textarea" ||
+            el.tagName?.toLowerCase() === "select"
+        );
+
+        (preferredInput || focusableEls[0]).focus();
+      }
+    }, 0);
+
+    return () => clearTimeout(timer);
+  }, [open]);
+
   if (!open) return null;
 
   const accent =
@@ -36,10 +65,58 @@ function AppModal({
       ? "bg-orange-500"
       : "bg-yellow-600";
 
+  const handleKeyDown = (e) => {
+    const focusable = modalRef.current?.querySelectorAll(
+      'input, button, select, textarea, [tabindex]:not([tabindex="-1"])'
+    );
+
+    const focusableEls = Array.from(focusable || []).filter(
+      (el) => !el.disabled
+    );
+
+    if (e.key === "Tab" && focusableEls.length > 0) {
+      const firstEl = focusableEls[0];
+      const lastEl = focusableEls[focusableEls.length - 1];
+
+      if (e.shiftKey) {
+        if (document.activeElement === firstEl) {
+          e.preventDefault();
+          lastEl.focus();
+        }
+      } else {
+        if (document.activeElement === lastEl) {
+          e.preventDefault();
+          firstEl.focus();
+        }
+      }
+    }
+
+    if (e.key === "Enter") {
+      const tag = document.activeElement?.tagName?.toLowerCase();
+      if (tag === "textarea") return;
+
+      e.preventDefault();
+
+      if (onConfirm) {
+        onConfirm();
+      } else if (onClose) {
+        onClose();
+      }
+    }
+
+    if (e.key === "Escape") {
+      e.preventDefault();
+      onClose?.();
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/45 px-4">
       <div
-        className={`w-full ${size} overflow-hidden rounded-2xl bg-white shadow-2xl animate-[fadeIn_.15s_ease-out]`}
+        ref={modalRef}
+        tabIndex={-1}
+        onKeyDown={handleKeyDown}
+        className={`w-full ${size} overflow-hidden rounded-2xl bg-white shadow-2xl animate-[fadeIn_.15s_ease-out] outline-none`}
       >
         <div className={`${accent} flex items-center justify-between px-4 py-3`}>
           <h3 className="text-base font-bold text-white">{title}</h3>
@@ -167,7 +244,6 @@ export default function POSActionsBar() {
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [showUpiModal, setShowUpiModal] = useState(false);
-  
 
   const showToast = useCallback((message, type = "info") => {
     setToast({ open: true, message, type });
@@ -189,11 +265,11 @@ export default function POSActionsBar() {
     setInfoModal((prev) => ({ ...prev, open: false }));
   }, []);
 
-  const handleLogout = () => {
+  const handleLogout = useCallback(() => {
     dispatch(logout());
     localStorage.removeItem("posUserInfo");
     window.location.href = "/login";
-  };
+  }, [dispatch]);
 
   const handleClearCart = useCallback(() => {
     if (cartItems.length === 0) {
@@ -211,7 +287,7 @@ export default function POSActionsBar() {
     showToast("Cart cleared successfully.", "success");
   }, [dispatch, showToast]);
 
-  const handlePublish = async () => {
+  const handlePublish = useCallback(async () => {
     if (!navigator.onLine) {
       showInfoModal(
         "No Network",
@@ -255,7 +331,7 @@ export default function POSActionsBar() {
     } catch (e) {
       showInfoModal("Publish Failed", e?.message || String(e), "error");
     }
-  };
+  }, [dispatch, queueCount, showInfoModal, showToast, token]);
 
   const handleHold = useCallback(() => {
     if (cartItems.length === 0) {
@@ -343,6 +419,73 @@ export default function POSActionsBar() {
     [dispatch, showToast]
   );
 
+  const handleMulti = useCallback(() => {
+    showToast("Multi action clicked.", "info");
+  }, [showToast]);
+
+  const handleCreateOrderShortcut = useCallback(() => {
+    const createBtn =
+      document.querySelector("[data-shortcut='create-order'] button") ||
+      document.querySelector("[data-shortcut='create-order']") ||
+      document.querySelector("[data-create-order]");
+
+    if (createBtn) {
+      createBtn.click();
+    } else {
+      showToast("Create Order button not found.", "warning");
+    }
+  }, [showToast]);
+
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (!e.altKey) return;
+      if (e.repeat) return;
+
+      const key = e.key.toLowerCase();
+
+      if (key === "p") {
+        e.preventDefault();
+        if (!isPublishing && queueCount && navigator.onLine) {
+          handlePublish();
+        }
+      } else if (key === "h") {
+        e.preventDefault();
+        handleHold();
+      } else if (key === "c") {
+        e.preventDefault();
+        handleClearCart();
+      } else if (key === "o") {
+        e.preventDefault();
+        openOrdersModal();
+      } else if (key === "m") {
+        e.preventDefault();
+        handleMulti();
+      } else if (key === "u") {
+        e.preventDefault();
+        setShowUpiModal(true);
+      } else if (key === "n") {
+        e.preventDefault();
+        handleCreateOrderShortcut();
+      } else if (key === "l") {
+        e.preventDefault();
+        handleLogout();
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [
+    isPublishing,
+    queueCount,
+    handlePublish,
+    handleHold,
+    handleClearCart,
+    openOrdersModal,
+    handleMulti,
+    handleCreateOrderShortcut,
+    handleLogout,
+  ]);
+
   const baseBtn =
     "rounded-xl font-bold transition active:translate-y-[1px] whitespace-nowrap";
   const orangeBtn =
@@ -399,6 +542,7 @@ export default function POSActionsBar() {
             Customer Phone Number
           </label>
           <input
+            autoFocus
             type="tel"
             inputMode="numeric"
             maxLength={10}
@@ -522,19 +666,19 @@ export default function POSActionsBar() {
             <div className="overflow-auto rounded-xl border">
               <table className="min-w-full text-sm">
                 <thead className="bg-slate-100">
-  <tr>
-    <th className="px-3 py-2 text-left">S.No</th>
-    <th className="px-3 py-2 text-left">Date</th>
-    <th className="px-3 py-2 text-left">Order ID</th>
-    <th className="px-3 py-2 text-left">Source</th>
-    <th className="px-3 py-2 text-left">POS User</th>
-    <th className="px-3 py-2 text-left">Location</th>
-    <th className="px-3 py-2 text-left">Customer Phone Number</th>
-    <th className="px-3 py-2 text-left">Paid</th>
-    <th className="px-3 py-2 text-left">Mode</th>
-    <th className="px-3 py-2 text-right">Order Amount</th>
-  </tr>
-</thead>
+                  <tr>
+                    <th className="px-3 py-2 text-left">S.No</th>
+                    <th className="px-3 py-2 text-left">Date</th>
+                    <th className="px-3 py-2 text-left">Order ID</th>
+                    <th className="px-3 py-2 text-left">Source</th>
+                    <th className="px-3 py-2 text-left">POS User</th>
+                    <th className="px-3 py-2 text-left">Location</th>
+                    <th className="px-3 py-2 text-left">Customer Phone Number</th>
+                    <th className="px-3 py-2 text-left">Paid</th>
+                    <th className="px-3 py-2 text-left">Mode</th>
+                    <th className="px-3 py-2 text-right">Order Amount</th>
+                  </tr>
+                </thead>
 
                 <tbody>
                   {posOrdersListLoading ? (
@@ -551,63 +695,49 @@ export default function POSActionsBar() {
                     </tr>
                   ) : (
                     posOrdersList.map((order, index) => {
-                      // console.log("Order Row:", order);
                       return (
-                      <tr
-  key={order._id}
-  onClick={() => handleOpenOrderDetails(order._id)}
-  className="cursor-pointer border-t hover:bg-yellow-50"
->
-  <td className="px-3 py-2">{index + 1}</td>
-
-  <td className="px-3 py-2">{formatDateTime(order.createdAt)}</td>
-
-  <td className="px-3 py-2">
-    {order.MK_order_id || order._id}
-  </td>
-
-  <td className="px-3 py-2">
-    <span
-      className={`inline-flex rounded-full px-2 py-1 text-xs font-bold ${
-        order.source === "ONLINE"
-          ? "bg-blue-100 text-blue-700"
-          : "bg-orange-100 text-orange-700"
-      }`}
-    >
-      {order.source || "-"}
-    </span>
-  </td>
-
-  <td className="px-3 py-2">{order.posUserName || "-"}</td>
-
-  <td className="px-3 py-2">{order.posLocation || "-"}</td>
-
-  <td className="px-3 py-2">{order.phoneNo || "-"}</td>
-
-  {/* Paid Status */}
-  <td className="px-3 py-2">
-    <span
-      className={`inline-flex rounded-full px-2 py-1 text-xs font-bold ${
-        order.isPaid
-          ? "bg-green-100 text-green-700"
-          : "bg-yellow-100 text-yellow-700"
-      }`}
-    >
-      {order.isPaid ? "Paid" : "Unpaid"}
-    </span>
-  </td>
-
-  {/* Payment Mode */}
-  <td className="px-3 py-2">
-    {order.paymentMethod || "-"}
-  </td>
-
-  <td className="px-3 py-2 text-right">
-    ₹{Number(order.totalPrice || 0).toFixed(2)}
-  </td>
-</tr>
-
-                    )})
+                        <tr
+                          key={order._id}
+                          onClick={() => handleOpenOrderDetails(order._id)}
+                          className="cursor-pointer border-t hover:bg-yellow-50"
+                        >
+                          <td className="px-3 py-2">{index + 1}</td>
+                          <td className="px-3 py-2">{formatDateTime(order.createdAt)}</td>
+                          <td className="px-3 py-2">
+                            {order.MK_order_id || order._id}
+                          </td>
+                          <td className="px-3 py-2">
+                            <span
+                              className={`inline-flex rounded-full px-2 py-1 text-xs font-bold ${
+                                order.source === "ONLINE"
+                                  ? "bg-blue-100 text-blue-700"
+                                  : "bg-orange-100 text-orange-700"
+                              }`}
+                            >
+                              {order.source || "-"}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2">{order.posUserName || "-"}</td>
+                          <td className="px-3 py-2">{order.posLocation || "-"}</td>
+                          <td className="px-3 py-2">{order.phoneNo || "-"}</td>
+                          <td className="px-3 py-2">
+                            <span
+                              className={`inline-flex rounded-full px-2 py-1 text-xs font-bold ${
+                                order.isPaid
+                                  ? "bg-green-100 text-green-700"
+                                  : "bg-yellow-100 text-yellow-700"
+                              }`}
+                            >
+                              {order.isPaid ? "Paid" : "Unpaid"}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2">{order.paymentMethod || "-"}</td>
+                          <td className="px-3 py-2 text-right">
+                            ₹{Number(order.totalPrice || 0).toFixed(2)}
+                          </td>
+                        </tr>
+                      );
+                    })
                   )}
                 </tbody>
                 <tfoot>
@@ -645,27 +775,22 @@ export default function POSActionsBar() {
                     <span className="text-gray-500">Order ID:</span>{" "}
                     {posOrderDetails.MK_order_id || posOrderDetails._id}
                   </div>
-
                   <div className="text-sm font-semibold">
                     <span className="text-gray-500">Phone Number:</span>{" "}
                     {posOrderDetails.phoneNo || "-"}
                   </div>
-
                   <div className="text-sm font-semibold">
                     <span className="text-gray-500">Source:</span>{" "}
                     {posOrderDetails.source || "-"}
                   </div>
-
                   <div className="text-sm font-semibold">
                     <span className="text-gray-500">POS User:</span>{" "}
                     {posOrderDetails.posUserName || "-"}
                   </div>
-
                   <div className="text-sm font-semibold">
                     <span className="text-gray-500">Location:</span>{" "}
                     {posOrderDetails.posLocation || "-"}
                   </div>
-
                   <div className="text-sm font-semibold">
                     <span className="text-gray-500">Created At:</span>{" "}
                     {formatDateTime(posOrderDetails.createdAt)}
@@ -758,8 +883,9 @@ export default function POSActionsBar() {
                   ? "border border-indigo-300 bg-indigo-600 hover:bg-indigo-700"
                   : "cursor-not-allowed border border-gray-300 bg-gray-400",
               ].join(" ")}
+              title="Shortcut: P"
             >
-              {isPublishing ? "Publishing…" : "Publish"}
+              {isPublishing ? "Publishing…" : "Publish (P)"}
               {queueCount > 0 && (
                 <span className="ml-1 inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-white px-1 text-[8px] text-indigo-700">
                   {queueCount}
@@ -770,6 +896,7 @@ export default function POSActionsBar() {
             <button
               onClick={handleHold}
               className={[baseBtn, orangeBtn, mobileBtn].join(" ")}
+              title="Shortcut: H"
             >
               Hold
             </button>
@@ -781,18 +908,24 @@ export default function POSActionsBar() {
                 mobileBtn,
                 "bg-red-600 text-white border border-red-300 hover:bg-red-700",
               ].join(" ")}
+              title="Shortcut: C"
             >
-              Clear Cart
+              Clear
             </button>
 
             <button
               onClick={openOrdersModal}
               className={[baseBtn, orangeBtn, mobileBtn].join(" ")}
+              title="Shortcut: O"
             >
               Orders
             </button>
 
-            <button className={[baseBtn, orangeBtn, mobileBtn].join(" ")}>
+            <button
+              onClick={handleMulti}
+              className={[baseBtn, orangeBtn, mobileBtn].join(" ")}
+              title="Shortcut: M"
+            >
               Multi
             </button>
 
@@ -800,11 +933,16 @@ export default function POSActionsBar() {
               type="button"
               className={[baseBtn, orangeBtn, mobileBtn].join(" ")}
               onClick={() => setShowUpiModal(true)}
+              title="Shortcut: U"
             >
               UPI
             </button>
 
-            <div className="shrink-0 h-10 [&>*]:h-full [&>*]:rounded-xl [&>*]:px-3 [&>*]:text-xs [&>*]:font-bold">
+            <div
+              className="shrink-0 h-10 [&>*]:h-full [&>*]:rounded-xl [&>*]:px-3 [&>*]:text-xs [&>*]:font-bold"
+              data-shortcut="create-order"
+              title="Shortcut: N"
+            >
               <CreateOrderButton />
             </div>
 
@@ -815,8 +953,9 @@ export default function POSActionsBar() {
             <button
               onClick={handleLogout}
               className="shrink-0 h-10 rounded-xl bg-red-600 px-3 text-xs font-bold text-white hover:bg-red-700"
+              title="Shortcut: L"
             >
-              Logout
+              Logout (L)
             </button>
           </div>
         </div>
@@ -845,6 +984,7 @@ export default function POSActionsBar() {
                   ? "border-slate-300 bg-slate-500 hover:bg-slate-600"
                   : "cursor-not-allowed border-gray-300 bg-gray-400",
               ].join(" ")}
+              title="Shortcut: Alt + P"
             >
               <div className="flex items-center justify-center gap-1">
                 <span>{isPublishing ? "Publishing…" : "Publish"}</span>
@@ -859,6 +999,7 @@ export default function POSActionsBar() {
             <button
               onClick={handleHold}
               className={[baseBtn, orangeBtn, "h-9 text-xs", desktopBtn].join(" ")}
+              title="Shortcut: Alt + H"
             >
               Hold
             </button>
@@ -870,6 +1011,7 @@ export default function POSActionsBar() {
                 desktopBtn,
                 "h-9 text-xs bg-red-600 text-white border border-red-300 hover:bg-red-700",
               ].join(" ")}
+              title="Shortcut: Alt + C"
             >
               Clear Cart
             </button>
@@ -877,12 +1019,15 @@ export default function POSActionsBar() {
             <button
               onClick={openOrdersModal}
               className={[baseBtn, orangeBtn, "h-9 text-xs", desktopBtn].join(" ")}
+              title="Shortcut: Alt + O"
             >
               Orders
             </button>
 
             <button
+              onClick={handleMulti}
               className={[baseBtn, orangeBtn, "h-9 text-xs", desktopBtn].join(" ")}
+              title="Shortcut: Alt + M"
             >
               Multi
             </button>
@@ -891,11 +1036,16 @@ export default function POSActionsBar() {
               type="button"
               onClick={() => setShowUpiModal(true)}
               className={[baseBtn, orangeBtn, "h-9 text-xs", desktopBtn].join(" ")}
+              title="Shortcut: Alt + U"
             >
               UPI
             </button>
 
-            <div className="w-full [&>*]:h-9 [&>*]:w-full [&>*]:rounded-lg [&>*]:text-xs [&>*]:font-semibold">
+            <div
+              className="w-full [&>*]:h-9 [&>*]:w-full [&>*]:rounded-lg [&>*]:text-xs [&>*]:font-semibold"
+              data-shortcut="create-order"
+              title="Shortcut: Alt + N"
+            >
               <CreateOrderButton />
             </div>
           </div>
@@ -911,6 +1061,7 @@ export default function POSActionsBar() {
             <button
               onClick={handleLogout}
               className="mt-2 h-10 w-full rounded-xl bg-red-600 text-sm font-bold text-white transition hover:bg-red-700"
+              title="Shortcut: L"
             >
               Logout
             </button>
