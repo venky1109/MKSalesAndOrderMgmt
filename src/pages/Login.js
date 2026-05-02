@@ -35,7 +35,10 @@ function Login() {
 
       if (['CASHIER', 'ONLINE_CASHIER', 'HYBRID_CASHIER','ADMIN'].includes(role)) {
         navigate('/pos');
-      } else if (role === 'PACKING_AGENT') {
+      } else if (role === 'STOCKMANAGER') {
+        navigate('/inventory');
+      }
+      else if (role === 'PACKING_AGENT') {
         navigate('/packing');
       } else if (role === 'DISPATCH_AGENT') {
         navigate('/dispatch');

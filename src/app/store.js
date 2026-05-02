@@ -7,7 +7,8 @@ import orderReducer from '../features/orders/orderSlice';
 import orderItemsReducer from '../features/orderItems/orderItemSlice';
 import paymentReducer from '../features/payment/paymentSlice';
 import productFiltersReducer from '../features/products/productFiltersSlice';
-
+import stockManagerInventoryReducer from '../features/inventory/stockManagerInventorySlice'
+import catalogCrudReducer from '../features/inventory/catalogCrudSlice';
 const stateMutationLogger = store => next => action => {
   const result = next(action);
   const state = store.getState();
@@ -29,6 +30,8 @@ export const store = configureStore({
     productFilters: productFiltersReducer,
     orderItems: orderItemsReducer,
     payment: paymentReducer,
+    stockManagerInventory: stockManagerInventoryReducer,
+    catalogCrud:catalogCrudReducer,
   },
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware().concat(stateMutationLogger),

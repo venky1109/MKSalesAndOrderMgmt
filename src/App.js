@@ -15,6 +15,9 @@ import { useEffect } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import PaymentSuccessPage from './pages/PaymentSuccessPage';
 import PaymentFailurePage from './pages/PaymentFailurePage';
+import StockManagerInventoryPage from './pages/StockManagerInventoryPage';
+import CreatePurchaseOrderPage  from './pages/CreatePurchaseOrderPage';
+import StockManagerCatalogPage from './pages/StockManagerCatalogPage';
 
 function App() {
   function AppBootHydrator() {
@@ -84,6 +87,24 @@ function App() {
               <DeliveryPage />
             </ProtectedRoute>
           } />
+          <Route
+  path="/stock-manager/catalog"
+  element={
+     <ProtectedRoute role={["ADMIN","STOCKMANAGER"]}>
+      <StockManagerCatalogPage />
+    </ProtectedRoute>
+  }
+/>
+          <Route path="/inventory" element={
+
+              <ProtectedRoute role={["ADMIN","STOCKMANAGER"]}>
+              <StockManagerInventoryPage />
+            </ProtectedRoute>
+          } />
+          <Route
+  path="/stock-manager/purchase-orders/create"
+  element={<CreatePurchaseOrderPage />}
+/>
           <Route path="/payment/success" element={<PaymentSuccessPage />} />
 <Route path="/payment/failure" element={<PaymentFailurePage />} />
 <Route path="/payment/invoice-share" element={<PaymentInvoiceSharePage />} />
