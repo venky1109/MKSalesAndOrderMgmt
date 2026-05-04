@@ -11,6 +11,7 @@ import UpiPaymentModal from "../components/UpiPaymentModal";
 import { clearCart } from "../features/cart/cartSlice";
 import CreateOrderButton from "./CreateOrderButton";
 import logo from "../assests/ManaKiranaLogo1024x1024.png";
+import InvoiceShareModal from "./InvoiceShareModal";
 
 function AppModal({
   open,
@@ -127,7 +128,9 @@ function AppModal({
 
         <div className="max-h-[80vh] overflow-auto px-4 py-4">
           {message ? (
-            <p className="whitespace-pre-line text-sm text-gray-700">{message}</p>
+            <p className="whitespace-pre-line text-sm text-gray-700">
+              {message}
+            </p>
           ) : null}
 
           {children ? <div className="mt-3">{children}</div> : null}
@@ -243,7 +246,9 @@ export default function POSActionsBar() {
   const [searchPhone, setSearchPhone] = useState("");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
+
   const [showUpiModal, setShowUpiModal] = useState(false);
+  const [invoiceOpen, setInvoiceOpen] = useState(false);
 
   const showToast = useCallback((message, type = "info") => {
     setToast({ open: true, message, type });
@@ -388,6 +393,7 @@ export default function POSActionsBar() {
             showToast("Enter valid 10-digit phone number.", "warning");
             return;
           }
+
           await dispatch(
             fetchPOSOrders({ mode: "phone", phone: searchPhone })
           ).unwrap();
@@ -396,6 +402,7 @@ export default function POSActionsBar() {
             showToast("Select from and to dates.", "warning");
             return;
           }
+
           await dispatch(
             fetchPOSOrders({ mode: "custom", from: fromDate, to: toDate })
           ).unwrap();
@@ -568,6 +575,7 @@ export default function POSActionsBar() {
         onClose={() => {
           setOrdersModalOpen(false);
           setOrdersView("list");
+          setInvoiceOpen(false);
         }}
         size="max-w-6xl"
       >
@@ -652,13 +660,15 @@ export default function POSActionsBar() {
             <div className="rounded-xl border bg-slate-50 p-3">
               <div className="flex flex-wrap gap-4 text-sm font-semibold text-gray-700">
                 <div>
-                  <span className="text-gray-500">Logged in as:</span> {name || "-"}
+                  <span className="text-gray-500">Logged in as:</span>{" "}
+                  {name || "-"}
                 </div>
                 <div>
                   <span className="text-gray-500">Role:</span> {role || "-"}
                 </div>
                 <div>
-                  <span className="text-gray-500">Location:</span> {location || "-"}
+                  <span className="text-gray-500">Location:</span>{" "}
+                  {location || "-"}
                 </div>
               </div>
             </div>
@@ -673,7 +683,9 @@ export default function POSActionsBar() {
                     <th className="px-3 py-2 text-left">Source</th>
                     <th className="px-3 py-2 text-left">POS User</th>
                     <th className="px-3 py-2 text-left">Location</th>
-                    <th className="px-3 py-2 text-left">Customer Phone Number</th>
+                    <th className="px-3 py-2 text-left">
+                      Customer Phone Number
+                    </th>
                     <th className="px-3 py-2 text-left">Paid</th>
                     <th className="px-3 py-2 text-left">Mode</th>
                     <th className="px-3 py-2 text-right">Order Amount</th>
@@ -683,63 +695,72 @@ export default function POSActionsBar() {
                 <tbody>
                   {posOrdersListLoading ? (
                     <tr>
-                      <td colSpan="10" className="px-3 py-6 text-center text-gray-500">
+                      <td
+                        colSpan="10"
+                        className="px-3 py-6 text-center text-gray-500"
+                      >
                         Loading orders...
                       </td>
                     </tr>
                   ) : posOrdersList.length === 0 ? (
                     <tr>
-                      <td colSpan="10" className="px-3 py-6 text-center text-gray-500">
+                      <td
+                        colSpan="10"
+                        className="px-3 py-6 text-center text-gray-500"
+                      >
                         No orders found.
                       </td>
                     </tr>
                   ) : (
-                    posOrdersList.map((order, index) => {
-                      return (
-                        <tr
-                          key={order._id}
-                          onClick={() => handleOpenOrderDetails(order._id)}
-                          className="cursor-pointer border-t hover:bg-yellow-50"
-                        >
-                          <td className="px-3 py-2">{index + 1}</td>
-                          <td className="px-3 py-2">{formatDateTime(order.createdAt)}</td>
-                          <td className="px-3 py-2">
-                            {order.MK_order_id || order._id}
-                          </td>
-                          <td className="px-3 py-2">
-                            <span
-                              className={`inline-flex rounded-full px-2 py-1 text-xs font-bold ${
-                                order.source === "ONLINE"
-                                  ? "bg-blue-100 text-blue-700"
-                                  : "bg-orange-100 text-orange-700"
-                              }`}
-                            >
-                              {order.source || "-"}
-                            </span>
-                          </td>
-                          <td className="px-3 py-2">{order.posUserName || "-"}</td>
-                          <td className="px-3 py-2">{order.posLocation || "-"}</td>
-                          <td className="px-3 py-2">{order.phoneNo || "-"}</td>
-                          <td className="px-3 py-2">
-                            <span
-                              className={`inline-flex rounded-full px-2 py-1 text-xs font-bold ${
-                                order.isPaid
-                                  ? "bg-green-100 text-green-700"
-                                  : "bg-yellow-100 text-yellow-700"
-                              }`}
-                            >
-                              {order.isPaid ? "Paid" : "Unpaid"}
-                            </span>
-                          </td>
-                          <td className="px-3 py-2">{order.paymentMethod || "-"}</td>
-                          <td className="px-3 py-2 text-right">
-                            ₹{Number(order.totalPrice || 0).toFixed(2)}
-                          </td>
-                        </tr>
-                      );
-                    })
+                    posOrdersList.map((order, index) => (
+                      <tr
+                        key={order._id}
+                        onClick={() => handleOpenOrderDetails(order._id)}
+                        className="cursor-pointer border-t hover:bg-yellow-50"
+                      >
+                        <td className="px-3 py-2">{index + 1}</td>
+                        <td className="px-3 py-2">
+                          {formatDateTime(order.createdAt)}
+                        </td>
+                        <td className="px-3 py-2">
+                          {order.MK_order_id || order._id}
+                        </td>
+                        <td className="px-3 py-2">
+                          <span
+                            className={`inline-flex rounded-full px-2 py-1 text-xs font-bold ${
+                              order.source === "ONLINE"
+                                ? "bg-blue-100 text-blue-700"
+                                : "bg-orange-100 text-orange-700"
+                            }`}
+                          >
+                            {order.source || "-"}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2">{order.posUserName || "-"}</td>
+                        <td className="px-3 py-2">{order.posLocation || "-"}</td>
+                        <td className="px-3 py-2">{order.phoneNo || "-"}</td>
+                        <td className="px-3 py-2">
+                          <span
+                            className={`inline-flex rounded-full px-2 py-1 text-xs font-bold ${
+                              order.isPaid
+                                ? "bg-green-100 text-green-700"
+                                : "bg-yellow-100 text-yellow-700"
+                            }`}
+                          >
+                            {order.isPaid ? "Paid" : "Unpaid"}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2">
+                          {order.paymentMethod || "-"}
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          ₹{Number(order.totalPrice || 0).toFixed(2)}
+                        </td>
+                      </tr>
+                    ))
                   )}
                 </tbody>
+
                 <tfoot>
                   <tr className="border-t bg-yellow-100 font-bold">
                     <td colSpan="9" className="px-3 py-3 text-right">
@@ -757,7 +778,10 @@ export default function POSActionsBar() {
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <button
-                onClick={() => setOrdersView("list")}
+                onClick={() => {
+                  setInvoiceOpen(false);
+                  setOrdersView("list");
+                }}
                 className="h-10 rounded-xl bg-gray-200 px-4 text-sm font-semibold text-gray-800"
               >
                 Back
@@ -770,6 +794,16 @@ export default function POSActionsBar() {
               </div>
             ) : posOrderDetails ? (
               <>
+                <div className="mb-3 flex flex-wrap gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setInvoiceOpen(true)}
+                    className="rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700"
+                  >
+                    Share WhatsApp / Print
+                  </button>
+                </div>
+
                 <div className="grid grid-cols-1 gap-3 rounded-xl border bg-slate-50 p-3 md:grid-cols-2">
                   <div className="text-sm font-semibold">
                     <span className="text-gray-500">Order ID:</span>{" "}
@@ -809,13 +843,16 @@ export default function POSActionsBar() {
                         <th className="px-3 py-2 text-right">Amount</th>
                       </tr>
                     </thead>
+
                     <tbody>
-                      {(posOrderDetails.items || []).map((item) => (
-                        <tr key={item.sNo} className="border-t">
-                          <td className="px-3 py-2">{item.sNo}</td>
-                          <td className="px-3 py-2">{item.item}</td>
-                          <td className="px-3 py-2">{item.weight}</td>
-                          <td className="px-3 py-2 text-right">{item.qty}</td>
+                      {(posOrderDetails.items || []).map((item, index) => (
+                        <tr key={item.sNo || index} className="border-t">
+                          <td className="px-3 py-2">{item.sNo || index + 1}</td>
+                          <td className="px-3 py-2">{item.item || "-"}</td>
+                          <td className="px-3 py-2">{item.weight || "-"}</td>
+                          <td className="px-3 py-2 text-right">
+                            {item.qty || 0}
+                          </td>
                           <td className="px-3 py-2 text-right">
                             ₹{Number(item.pricePerQty || 0).toFixed(2)}
                           </td>
@@ -825,6 +862,7 @@ export default function POSActionsBar() {
                         </tr>
                       ))}
                     </tbody>
+
                     <tfoot>
                       <tr className="border-t bg-yellow-50 font-bold">
                         <td colSpan="5" className="px-3 py-3 text-right">
@@ -839,11 +877,28 @@ export default function POSActionsBar() {
                 </div>
               </>
             ) : (
-              <div className="py-10 text-center text-gray-500">No details found.</div>
+              <div className="py-10 text-center text-gray-500">
+                No details found.
+              </div>
             )}
           </div>
         )}
       </AppModal>
+
+      <InvoiceShareModal
+        open={invoiceOpen}
+        onClose={() => setInvoiceOpen(false)}
+        order={{
+          ...(posOrderDetails || {}),
+          items: posOrderDetails?.items || [],
+          total: posOrderDetails?.totalPrice || 0,
+          totalPrice: posOrderDetails?.totalPrice || 0,
+          phone: posOrderDetails?.phoneNo || "",
+          paymentMethod: posOrderDetails?.paymentMethod || "-",
+        }}
+        phone={posOrderDetails?.phoneNo || ""}
+        title="POS Order Invoice"
+      />
 
       {showUpiModal && (
         <UpiPaymentModal
@@ -998,7 +1053,9 @@ export default function POSActionsBar() {
 
             <button
               onClick={handleHold}
-              className={[baseBtn, orangeBtn, "h-9 text-xs", desktopBtn].join(" ")}
+              className={[baseBtn, orangeBtn, "h-9 text-xs", desktopBtn].join(
+                " "
+              )}
               title="Shortcut: Alt + H"
             >
               Hold
@@ -1018,7 +1075,9 @@ export default function POSActionsBar() {
 
             <button
               onClick={openOrdersModal}
-              className={[baseBtn, orangeBtn, "h-9 text-xs", desktopBtn].join(" ")}
+              className={[baseBtn, orangeBtn, "h-9 text-xs", desktopBtn].join(
+                " "
+              )}
               title="Shortcut: Alt + O"
             >
               Orders
@@ -1026,7 +1085,9 @@ export default function POSActionsBar() {
 
             <button
               onClick={handleMulti}
-              className={[baseBtn, orangeBtn, "h-9 text-xs", desktopBtn].join(" ")}
+              className={[baseBtn, orangeBtn, "h-9 text-xs", desktopBtn].join(
+                " "
+              )}
               title="Shortcut: Alt + M"
             >
               Multi
@@ -1035,7 +1096,9 @@ export default function POSActionsBar() {
             <button
               type="button"
               onClick={() => setShowUpiModal(true)}
-              className={[baseBtn, orangeBtn, "h-9 text-xs", desktopBtn].join(" ")}
+              className={[baseBtn, orangeBtn, "h-9 text-xs", desktopBtn].join(
+                " "
+              )}
               title="Shortcut: Alt + U"
             >
               UPI

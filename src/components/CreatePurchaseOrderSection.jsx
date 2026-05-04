@@ -334,7 +334,7 @@ const CreatePurchaseOrderSection = ({
   const grandTotal = items.reduce(
     (sum, item) =>
       sum +
-      Number(item.qty || 0) *
+      // Number(item.qty || 0) *
         Number(item.no_of_units || 1) *
         Number(item.expected_unit_price || 0),
     0
@@ -558,21 +558,24 @@ const CreatePurchaseOrderSection = ({
         </section>
 
         <div className="overflow-x-auto">
-          <table className="min-w-full text-sm border">
-            <thead className="bg-gray-100">
-              <tr>
-                <th className="p-2 text-left">Supplier</th>
-                <th className="p-2 text-left">Product</th>
-                <th className="p-2 text-left">Category</th>
-                <th className="p-2 text-left">Brand</th>
-                <th className="p-2 text-left">Unit</th>
-                <th className="p-2 text-right">Qty</th>
-                <th className="p-2 text-right">No. Units</th>
-                <th className="p-2 text-right">Expected Price</th>
-                <th className="p-2 text-right">Total</th>
-                <th className="p-2">Remove</th>
-              </tr>
-            </thead>
+         <table className="min-w-full text-sm border table-fixed">
+           <thead className="bg-gray-100">
+  <tr>
+    <th className="p-2 text-left w-[140px]">Supplier</th>
+    <th className="p-2 text-left w-[220px]">Product</th>
+    <th className="p-2 text-left w-[140px]">Category</th>
+    <th className="p-2 text-left w-[140px]">Brand</th>
+
+    <th className="p-2 text-right w-[100px]">Qty</th>
+    <th className="p-2 text-left w-[100px]">Unit</th>
+
+    <th className="p-2 text-right w-[120px]">No. Units</th>
+    <th className="p-2 text-right w-[140px]">Expected Price</th>
+
+    <th className="p-2 text-right w-[140px]">Total</th>
+    <th className="p-2 w-[100px] text-center">Remove</th>
+  </tr>
+</thead>
 
             <tbody>
               {items.length === 0 && (
@@ -602,47 +605,44 @@ const CreatePurchaseOrderSection = ({
 
                   <td className="p-2">{item.category_name || '-'}</td>
                   <td className="p-2">{item.brand_name || '-'}</td>
+                  <td className="p-2">
+  <input
+    type="number"
+    value={item.qty}
+    readOnly
+    className="border rounded px-2 py-1 w-full text-right bg-gray-100"
+  />
+</td>
                   <td className="p-2">{item.unit_name || '-'}</td>
 
-                  <td className="p-2">
-                    <input
-                      type="number"
-                      value={item.qty}
-                      readOnly
-                      className="border rounded px-2 py-1 w-24 text-right bg-gray-100 cursor-not-allowed"
-                    />
-                  </td>
+                 
 
-                  <td className="p-2">
-                    <input
-                      type="number"
-                      min="1"
-                      step="1"
-                      value={item.no_of_units}
-                      onChange={(e) =>
-                        updateRow(index, 'no_of_units', e.target.value)
-                      }
-                      className="border rounded px-2 py-1 w-24 text-right"
-                    />
-                  </td>
+                <td className="p-2">
+  <input
+    type="number"
+    value={item.no_of_units}
+    onChange={(e) =>
+      updateRow(index, 'no_of_units', e.target.value)
+    }
+    className="border rounded px-2 py-1 w-full text-right"
+  />
+</td>
 
-                  <td className="p-2">
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={item.expected_unit_price}
-                      onChange={(e) =>
-                        updateRow(index, 'expected_unit_price', e.target.value)
-                      }
-                      className="border rounded px-2 py-1 w-28 text-right"
-                    />
-                  </td>
+                 <td className="p-2">
+  <input
+    type="number"
+    value={item.expected_unit_price}
+    onChange={(e) =>
+      updateRow(index, 'expected_unit_price', e.target.value)
+    }
+    className="border rounded px-2 py-1 w-full text-right"
+  />
+</td>
 
                   <td className="p-2 text-right font-semibold">
                     ₹
                     {(
-                      Number(item.qty || 0) *
+                      // Number(item.qty || 0) *
                       Number(item.no_of_units || 1) *
                       Number(item.expected_unit_price || 0)
                     ).toFixed(2)}

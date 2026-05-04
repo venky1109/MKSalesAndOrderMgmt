@@ -38,7 +38,17 @@ const STATUS_STYLES = {
   },
 };
 
-const PurchaseOrdersStatusSections = ({ purchaseOrders = [] }) => {
+const getBrandName = (p) =>
+  p?.brand_name_english ||
+  p?.brand_name_englishh ||
+  p?.brand_name_telugu ||
+  p?.brand_name ||
+  '';
+
+const PurchaseOrdersStatusSections = ({
+  purchaseOrders = [],
+  productBarcodes = [],
+}) => {
   const dispatch = useDispatch();
 
   const [openOrderId, setOpenOrderId] = useState(null);
@@ -81,6 +91,20 @@ const PurchaseOrdersStatusSections = ({ purchaseOrders = [] }) => {
       .map((code) => normalizeBarcode(code))
       .filter(Boolean);
 
+  const getProductBarcodeId = (item) => {
+    if (item.product_barcode_id) return item.product_barcode_id;
+
+    const matched = productBarcodes.find(
+      (p) =>
+        String(p.product_id) === String(item.product_id) &&
+        String(p.brand_id) === String(item.brand_id) &&
+        String(p.category_id) === String(item.category_id) &&
+        String(p.unit_id) === String(item.unit_id)
+    );
+
+    return matched?.id || '';
+  };
+
   const getDisplayItems = (po) => {
     if (Array.isArray(po.items) && po.items.length > 0) return po.items;
 
@@ -120,7 +144,9 @@ const PurchaseOrdersStatusSections = ({ purchaseOrders = [] }) => {
     setEditingId(po.id);
     setForm({
       status: po.status || 'draft',
-      expected_date: po.expected_date ? String(po.expected_date).slice(0, 10) : '',
+      expected_date: po.expected_date
+        ? String(po.expected_date).slice(0, 10)
+        : '',
       arrived_date: po.arrived_date ? String(po.arrived_date).slice(0, 10) : '',
       remarks: po.remarks || '',
     });
@@ -155,6 +181,10 @@ const PurchaseOrdersStatusSections = ({ purchaseOrders = [] }) => {
     setEditedItems(
       getDisplayItems(po).map((item) => ({
         ...item,
+        product_barcode_id:
+          item.product_barcode_id ||
+          item.product_barcode_id_fk ||
+          getProductBarcodeId(item),
         product_id: Number(item.product_id),
         category_id: Number(item.category_id),
         brand_id: Number(item.brand_id),
@@ -180,15 +210,68 @@ const PurchaseOrdersStatusSections = ({ purchaseOrders = [] }) => {
     setEditedItems(copy);
   };
 
+  const updateEditedProduct = (index, barcodeRowId) => {
+    const selected = productBarcodes.find(
+      (p) => String(p.id) === String(barcodeRowId)
+    );
+
+    if (!selected) return;
+
+    const copy = [...editedItems];
+
+    copy[index] = {
+      ...copy[index],
+      product_barcode_id: selected.id,
+
+      product_id: Number(selected.product_id),
+      product_name:
+        selected.product_name_eng ||
+        selected.product_name_tel ||
+        selected.product_code ||
+        '',
+
+      product_code: selected.product_code || '',
+      mk_barcode: selected.mk_barcode || '',
+      barcode: selected.barcode || '',
+
+      category_id: Number(selected.category_id),
+      category_name:
+        selected.category_name_english || selected.category_name || '-',
+
+      brand_id: Number(selected.brand_id),
+      brand_name: getBrandName(selected) || '-',
+
+      unit_id: Number(selected.unit_id),
+      unit_name: selected.unit_name || selected.unit_short_code || '-',
+      unit_short_code: selected.unit_short_code || '',
+
+      qty: Number(selected.quantity || 1),
+    };
+
+    setEditedItems(copy);
+  };
+
+  const removeEditedItem = (index) => {
+    setEditedItems((prev) => prev.filter((_, i) => i !== index));
+  };
+
   const saveItems = async (po) => {
+    if (editedItems.length === 0) {
+      alert('At least one product is required in purchase order.');
+      return;
+    }
+
     await dispatch(
       updatePurchaseOrderItems({
         id: po.id,
         items: editedItems.map((item) => ({
+          id: item.id,
+
           product_id: Number(item.product_id),
           category_id: Number(item.category_id),
           brand_id: Number(item.brand_id),
           unit_id: Number(item.unit_id),
+
           qty: Number(item.qty),
           no_of_units: Number(item.no_of_units || 1),
           expected_unit_price: Number(item.expected_unit_price || 0),
@@ -333,7 +416,9 @@ const PurchaseOrdersStatusSections = ({ purchaseOrders = [] }) => {
                 {status} Orders ({grouped[status].length})
               </h2>
 
-              <span className={`px-3 py-1 rounded-full text-xs font-semibold ${style.badge}`}>
+              <span
+                className={`px-3 py-1 rounded-full text-xs font-semibold ${style.badge}`}
+              >
                 {status.toUpperCase()}
               </span>
             </div>
@@ -360,7 +445,10 @@ const PurchaseOrdersStatusSections = ({ purchaseOrders = [] }) => {
                 <tbody>
                   {grouped[status].length === 0 && (
                     <tr>
-                      <td colSpan="12" className="p-4 text-center text-gray-500">
+                      <td
+                        colSpan="12"
+                        className="p-4 text-center text-gray-500"
+                      >
                         No {status} orders
                       </td>
                     </tr>
@@ -389,7 +477,8 @@ const PurchaseOrdersStatusSections = ({ purchaseOrders = [] }) => {
                               {po.supplier_name || po.supplier_id}
                             </div>
                             <div className="text-xs text-gray-500">
-                              {po.supplier_code || '-'} | {po.supplier_phone || '-'}
+                              {po.supplier_code || '-'} |{' '}
+                              {po.supplier_phone || '-'}
                             </div>
                           </td>
 
@@ -412,7 +501,10 @@ const PurchaseOrdersStatusSections = ({ purchaseOrders = [] }) => {
                                 type="date"
                                 value={form.expected_date}
                                 onChange={(e) =>
-                                  setForm({ ...form, expected_date: e.target.value })
+                                  setForm({
+                                    ...form,
+                                    expected_date: e.target.value,
+                                  })
                                 }
                                 className="border rounded px-2 py-1"
                               />
@@ -429,7 +521,10 @@ const PurchaseOrdersStatusSections = ({ purchaseOrders = [] }) => {
                                 type="date"
                                 value={form.arrived_date}
                                 onChange={(e) =>
-                                  setForm({ ...form, arrived_date: e.target.value })
+                                  setForm({
+                                    ...form,
+                                    arrived_date: e.target.value,
+                                  })
                                 }
                                 className="border rounded px-2 py-1"
                               />
@@ -524,7 +619,8 @@ const PurchaseOrdersStatusSections = ({ purchaseOrders = [] }) => {
                           </td>
 
                           <td className="p-2 text-center">
-                            {String(po.status || '').toLowerCase() === 'received' ? (
+                            {String(po.status || '').toLowerCase() ===
+                            'received' ? (
                               <button
                                 type="button"
                                 onClick={() => startVerify(po)}
@@ -540,7 +636,9 @@ const PurchaseOrdersStatusSections = ({ purchaseOrders = [] }) => {
                           <td className="p-2 text-center">
                             <button
                               type="button"
-                              onClick={() => setOpenOrderId(isOpen ? null : po.id)}
+                              onClick={() =>
+                                setOpenOrderId(isOpen ? null : po.id)
+                              }
                               className="text-blue-700 underline"
                             >
                               {isOpen ? 'Hide' : 'View'}
@@ -560,7 +658,9 @@ const PurchaseOrdersStatusSections = ({ purchaseOrders = [] }) => {
                                   <input
                                     autoFocus
                                     value={scanBarcode}
-                                    onChange={(e) => setScanBarcode(e.target.value)}
+                                    onChange={(e) =>
+                                      setScanBarcode(e.target.value)
+                                    }
                                     onKeyDown={(e) => {
                                       if (e.key === 'Enter') {
                                         confirmItemByBarcode(scanBarcode);
@@ -585,36 +685,65 @@ const PurchaseOrdersStatusSections = ({ purchaseOrders = [] }) => {
                                   <div className="mt-2 text-sm font-semibold">
                                     Confirmed:{' '}
                                     <span className="text-green-700">
-                                      {verifyItems.filter((i) => i.is_verified).length}
+                                      {
+                                        verifyItems.filter((i) => i.is_verified)
+                                          .length
+                                      }
                                     </span>{' '}
                                     / {verifyItems.length}
                                   </div>
                                 </div>
                               )}
 
-                              <table className="min-w-full text-sm border bg-white">
+                              <table className="min-w-full text-sm border bg-white table-fixed">
                                 <thead className="bg-gray-100">
                                   <tr>
                                     {isVerifying && (
-                                      <th className="p-2 text-center">Confirmed</th>
+                                      <th className="p-2 text-center w-[90px]">
+                                        Confirmed
+                                      </th>
                                     )}
-                                    <th className="p-2 text-left">Product</th>
-                                    <th className="p-2 text-left">Category</th>
-                                    <th className="p-2 text-left">Brand</th>
-                                    <th className="p-2 text-left">Unit</th>
-                                    <th className="p-2 text-right">Qty</th>
-                                    <th className="p-2 text-right">No. Units</th>
-                                    <th className="p-2 text-right">Expected Price</th>
-                                    <th className="p-2 text-right">Actual Price</th>
-                                    <th className="p-2 text-right">Total</th>
+                                    <th className="p-2 text-left w-[300px]">
+                                      Product
+                                    </th>
+                                    <th className="p-2 text-left w-[150px]">
+                                      Category
+                                    </th>
+                                    <th className="p-2 text-left w-[140px]">
+                                      Brand
+                                    </th>
+                                    <th className="p-2 text-left w-[90px]">
+                                      Unit
+                                    </th>
+                                    <th className="p-2 text-right w-[100px]">
+                                      Qty
+                                    </th>
+                                    <th className="p-2 text-right w-[120px]">
+                                      No. Units
+                                    </th>
+                                    <th className="p-2 text-right w-[150px]">
+                                      Expected Price
+                                    </th>
+                                    <th className="p-2 text-right w-[140px]">
+                                      Actual Price
+                                    </th>
+                                    <th className="p-2 text-right w-[130px]">
+                                      Total
+                                    </th>
+                                    {isEditingItems && (
+                                      <th className="p-2 text-center w-[100px]">
+                                        Remove
+                                      </th>
+                                    )}
                                   </tr>
                                 </thead>
 
                                 <tbody>
                                   {activeItems.map((item, index) => {
-                                    const effectivePrice = getEffectivePrice(item);
+                                    const effectivePrice =
+                                      getEffectivePrice(item);
                                     const total =
-                                      Number(item.qty || 0) *
+                                      // Number(item.qty || 0) *
                                       Number(item.no_of_units || 1) *
                                       effectivePrice;
 
@@ -625,6 +754,9 @@ const PurchaseOrdersStatusSections = ({ purchaseOrders = [] }) => {
                                         ? 'bg-red-50'
                                         : '';
 
+                                    const selectedProductBarcodeId =
+                                      getProductBarcodeId(item);
+
                                     return (
                                       <tr
                                         key={item.id || index}
@@ -633,36 +765,85 @@ const PurchaseOrdersStatusSections = ({ purchaseOrders = [] }) => {
                                         }}
                                         tabIndex={-1}
                                         onClick={() =>
-                                          isVerifying && toggleVerifyItem(index)
+                                          isVerifying &&
+                                          toggleVerifyItem(index)
                                         }
-                                        className={`border-t cursor-pointer ${verifiedClass}`}
+                                        className={`border-t ${
+                                          isVerifying ? 'cursor-pointer' : ''
+                                        } ${verifiedClass}`}
                                       >
                                         {isVerifying && (
                                           <td className="p-2 text-center">
                                             <input
                                               type="checkbox"
-                                              checked={Boolean(item.is_verified)}
-                                              onChange={() => toggleVerifyItem(index)}
-                                              onClick={(e) => e.stopPropagation()}
+                                              checked={Boolean(
+                                                item.is_verified
+                                              )}
+                                              onChange={() =>
+                                                toggleVerifyItem(index)
+                                              }
+                                              onClick={(e) =>
+                                                e.stopPropagation()
+                                              }
                                             />
                                           </td>
                                         )}
 
                                         <td className="p-2">
-                                          <div className="font-medium">
-                                            {item.product_name || item.product_id}
-                                          </div>
-                                          <div className="text-xs text-gray-500">
-                                            Code: {item.product_code || '-'}
-                                          </div>
-                                          <div className="text-xs text-gray-500">
-                                            MK:{' '}
-                                            {normalizeBarcode(item.mk_barcode) || '-'}
-                                          </div>
-                                          <div className="text-xs text-gray-500">
-                                            Vendor:{' '}
-                                            {normalizeBarcode(item.barcode) || '-'}
-                                          </div>
+                                          {isEditingItems ? (
+                                            <select
+                                              value={selectedProductBarcodeId}
+                                              onChange={(e) =>
+                                                updateEditedProduct(
+                                                  index,
+                                                  e.target.value
+                                                )
+                                              }
+                                              className="border rounded px-2 py-1 w-full"
+                                            >
+                                              {selectedProductBarcodeId ===
+                                                '' && (
+                                                <option value="" disabled>
+                                                  {item.product_name ||
+                                                    'Product not matched'}
+                                                </option>
+                                              )}
+
+                                              {productBarcodes.map((p) => (
+                                                <option key={p.id} value={p.id}>
+                                                  {p.product_name_eng ||
+                                                    p.product_name_tel ||
+                                                    p.product_code}{' '}
+                                                  {/* | Code:{' '}
+                                                  {p.product_code || '-'} | MK:{' '}
+                                                  {p.mk_barcode || '-'} */}
+                                                </option>
+                                              ))}
+                                            </select>
+                                          ) : (
+                                            <>
+                                              <div className="font-medium">
+                                                {item.product_name ||
+                                                  item.product_id}
+                                              </div>
+                                              <div className="text-xs text-gray-500">
+                                                Code:{' '}
+                                                {item.product_code || '-'}
+                                              </div>
+                                              <div className="text-xs text-gray-500">
+                                                MK:{' '}
+                                                {normalizeBarcode(
+                                                  item.mk_barcode
+                                                ) || '-'}
+                                              </div>
+                                              <div className="text-xs text-gray-500">
+                                                Vendor:{' '}
+                                                {normalizeBarcode(
+                                                  item.barcode
+                                                ) || '-'}
+                                              </div>
+                                            </>
+                                          )}
                                         </td>
 
                                         <td className="p-2">
@@ -672,7 +853,9 @@ const PurchaseOrdersStatusSections = ({ purchaseOrders = [] }) => {
                                         </td>
 
                                         <td className="p-2">
-                                          {item.brand_name || item.brand_id || '-'}
+                                          {item.brand_name ||
+                                            item.brand_id ||
+                                            '-'}
                                         </td>
 
                                         <td className="p-2">
@@ -683,18 +866,70 @@ const PurchaseOrdersStatusSections = ({ purchaseOrders = [] }) => {
                                         </td>
 
                                         <td className="p-2 text-right">
-                                          {Number(item.qty || 0).toFixed(3)}
+                                          {isEditingItems ? (
+                                            <input
+                                              type="number"
+                                              min="0.001"
+                                              step="0.001"
+                                              value={item.qty}
+                                              onChange={(e) =>
+                                                updateEditedItem(
+                                                  index,
+                                                  'qty',
+                                                  e.target.value
+                                                )
+                                              }
+                                              className="border rounded px-2 py-1 w-full text-right"
+                                            />
+                                          ) : (
+                                            Number(item.qty || 0).toFixed(3)
+                                          )}
                                         </td>
 
                                         <td className="p-2 text-right">
-                                          {Number(item.no_of_units || 1).toFixed(0)}
+                                          {isEditingItems ? (
+                                            <input
+                                              type="number"
+                                              min="1"
+                                              step="1"
+                                              value={item.no_of_units}
+                                              onChange={(e) =>
+                                                updateEditedItem(
+                                                  index,
+                                                  'no_of_units',
+                                                  e.target.value
+                                                )
+                                              }
+                                              className="border rounded px-2 py-1 w-full text-right"
+                                            />
+                                          ) : (
+                                            Number(
+                                              item.no_of_units || 1
+                                            ).toFixed(0)
+                                          )}
                                         </td>
 
                                         <td className="p-2 text-right">
-                                          ₹
-                                          {Number(
-                                            item.expected_unit_price || 0
-                                          ).toFixed(2)}
+                                          {isEditingItems ? (
+                                            <input
+                                              type="number"
+                                              min="0"
+                                              step="0.01"
+                                              value={item.expected_unit_price}
+                                              onChange={(e) =>
+                                                updateEditedItem(
+                                                  index,
+                                                  'expected_unit_price',
+                                                  e.target.value
+                                                )
+                                              }
+                                              className="border rounded px-2 py-1 w-full text-right"
+                                            />
+                                          ) : (
+                                            `₹${Number(
+                                              item.expected_unit_price || 0
+                                            ).toFixed(2)}`
+                                          )}
                                         </td>
 
                                         <td className="p-2 text-right">
@@ -711,11 +946,14 @@ const PurchaseOrdersStatusSections = ({ purchaseOrders = [] }) => {
                                                   e.target.value
                                                 )
                                               }
-                                              onClick={(e) => e.stopPropagation()}
-                                              className="border rounded px-2 py-1 w-28 text-right"
+                                              onClick={(e) =>
+                                                e.stopPropagation()
+                                              }
+                                              className="border rounded px-2 py-1 w-full text-right"
                                             />
                                           ) : item.actual_unit_price !== null &&
-                                            item.actual_unit_price !== undefined ? (
+                                            item.actual_unit_price !==
+                                              undefined ? (
                                             `₹${Number(
                                               item.actual_unit_price
                                             ).toFixed(2)}`
@@ -727,6 +965,20 @@ const PurchaseOrdersStatusSections = ({ purchaseOrders = [] }) => {
                                         <td className="p-2 text-right font-semibold">
                                           ₹{total.toFixed(2)}
                                         </td>
+
+                                        {isEditingItems && (
+                                          <td className="p-2 text-center">
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                removeEditedItem(index)
+                                              }
+                                              className="text-red-600 hover:underline"
+                                            >
+                                              Remove
+                                            </button>
+                                          </td>
+                                        )}
                                       </tr>
                                     );
                                   })}

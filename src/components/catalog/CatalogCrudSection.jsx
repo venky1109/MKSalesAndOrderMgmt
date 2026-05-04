@@ -19,6 +19,32 @@ const formatDate = (value) => {
   return new Date(value).toLocaleString();
 };
 
+const entityCodeConfig = {
+  products: { field: 'product_code', prefix: 'MKP' },
+  warehouses: { field: 'warehouse_code', prefix: 'MKW' },
+  brands: { field: 'brand_code', prefix: 'MKB' },
+  categories: { field: 'category_code', prefix: 'MKC' },
+  outlets: { field: 'unit_code', prefix: 'MKO' },
+  Stakeholders: { field: 'unit_code', prefix: 'MKS' },
+  units: { field: 'unit_code', prefix: 'MKU' },
+  employees: { field: 'emp_code', prefix: 'MKE' },
+};
+
+const getNextReadableCode = (rows = [], codeField, prefix) => {
+  let max = 0;
+
+  rows.forEach((row) => {
+    const code = String(row?.[codeField] || '').trim();
+
+    if (code.startsWith(prefix)) {
+      const num = parseInt(code.replace(prefix, ''), 10);
+      if (!Number.isNaN(num)) max = Math.max(max, num);
+    }
+  });
+
+  return `${prefix}${String(max + 1).padStart(3, '0')}`;
+};
+
 const makeMkBarcode = ({
   product_id,
   brand_id,
@@ -47,9 +73,28 @@ const CatalogCrudSection = ({
 }) => {
   const dispatch = useDispatch();
 
-  const { data = {}, loading } = useSelector((state) => state.catalogCrud || {});
+  const { data = {}, loading } = useSelector(
+    (state) => state.catalogCrud || {}
+  );
 
-  const [form, setForm] = useState(() => emptyFromFields(fields));
+  const rows = data[entity] || [];
+  const codeConfig = entityCodeConfig[entity];
+
+  const getInitialForm = () => {
+    const empty = emptyFromFields(fields);
+
+    if (codeConfig) {
+      empty[codeConfig.field] = getNextReadableCode(
+        rows,
+        codeConfig.field,
+        codeConfig.prefix
+      );
+    }
+
+    return empty;
+  };
+
+  const [form, setForm] = useState(() => getInitialForm());
   const [editingId, setEditingId] = useState(null);
   const [search, setSearch] = useState('');
   const [sortConfig, setSortConfig] = useState({
@@ -62,7 +107,7 @@ const CatalogCrudSection = ({
   }, [dispatch, entity]);
 
   useEffect(() => {
-    setForm(emptyFromFields(fields));
+    setForm(getInitialForm());
     setEditingId(null);
     setSearch('');
     setSortConfig({
@@ -70,6 +115,19 @@ const CatalogCrudSection = ({
       direction: 'asc',
     });
   }, [fields, entity, idKey]);
+
+  useEffect(() => {
+    if (!codeConfig || editingId) return;
+
+    setForm((prev) => ({
+      ...prev,
+      [codeConfig.field]: getNextReadableCode(
+        rows,
+        codeConfig.field,
+        codeConfig.prefix
+      ),
+    }));
+  }, [rows.length, entity, editingId]);
 
   const handleChange = (name, value) => {
     setForm((prev) => {
@@ -89,7 +147,7 @@ const CatalogCrudSection = ({
   };
 
   const resetForm = () => {
-    setForm(emptyFromFields(fields));
+    setForm(getInitialForm());
     setEditingId(null);
   };
 
@@ -97,8 +155,9 @@ const CatalogCrudSection = ({
     const payload = {};
 
     fields.forEach((field) => {
-      if (!field.readOnly && field.name !== 'id') {
-        payload[field.name] = form[field.name] === '' ? null : form[field.name];
+      if (field.name !== 'id') {
+        payload[field.name] =
+          form[field.name] === '' ? null : form[field.name];
       }
     });
 
@@ -209,7 +268,6 @@ const CatalogCrudSection = ({
   });
 
   const filteredRows = useMemo(() => {
-    const rows = data[entity] || [];
     const q = search.toLowerCase();
 
     return rows.filter((row) =>
@@ -217,7 +275,7 @@ const CatalogCrudSection = ({
         String(value ?? '').toLowerCase().includes(q)
       )
     );
-  }, [data, entity, search]);
+  }, [rows, search]);
 
   const handleSort = (key) => {
     setSortConfig((prev) => {
@@ -241,9 +299,9 @@ const CatalogCrudSection = ({
   };
 
   const sortedRows = useMemo(() => {
-    const rows = [...filteredRows];
+    const list = [...filteredRows];
 
-    rows.sort((a, b) => {
+    list.sort((a, b) => {
       const field = visibleTableFields.find(
         (item) => item.name === sortConfig.key
       );
@@ -274,7 +332,9 @@ const CatalogCrudSection = ({
         sortConfig.key === 'created_at' ||
         sortConfig.key === 'updated_at'
       ) {
-        result = (Number.isNaN(aDate) ? 0 : aDate) - (Number.isNaN(bDate) ? 0 : bDate);
+        result =
+          (Number.isNaN(aDate) ? 0 : aDate) -
+          (Number.isNaN(bDate) ? 0 : bDate);
       } else if (!Number.isNaN(aNum) && !Number.isNaN(bNum)) {
         result = aNum - bNum;
       } else {
@@ -287,7 +347,7 @@ const CatalogCrudSection = ({
       return sortConfig.direction === 'asc' ? result : -result;
     });
 
-    return rows;
+    return list;
   }, [filteredRows, sortConfig, idKey, visibleTableFields]);
 
   return (
@@ -312,51 +372,67 @@ const CatalogCrudSection = ({
         onSubmit={handleSubmit}
         className="grid grid-cols-1 md:grid-cols-4 gap-3"
       >
-        {fields.map((field) => (
-          <div key={field.name}>
-            <label className="block text-xs font-medium text-gray-600 mb-1">
-              {field.label}
-            </label>
+        {fields.map((field) => {
+          const isAutoCodeField =
+            codeConfig && field.name === codeConfig.field;
 
-            {field.type === 'select' ? (
-              <select
-                value={form[field.name] ?? ''}
-                onChange={(e) => handleChange(field.name, e.target.value)}
-                required={field.required}
-                disabled={field.readOnly}
-                className="border rounded-lg px-3 py-2 text-sm w-full"
-              >
-                <option value="">Select {field.label}</option>
+          return (
+            <div key={field.name}>
+              <label className="block text-xs font-medium text-gray-600 mb-1">
+                {field.label}
+              </label>
 
-                {(catalogOptions[field.optionsKey] || []).map((item) => (
-                  <option key={item[field.valueKey]} value={item[field.valueKey]}>
-                    {getOptionLabel(field, item)}
-                  </option>
-                ))}
-              </select>
-            ) : field.type === 'checkbox' ? (
-              <input
-                type="checkbox"
-                checked={Boolean(form[field.name])}
-                onChange={(e) => handleChange(field.name, e.target.checked)}
-                disabled={field.readOnly}
-                className="mt-3"
-              />
-            ) : (
-              <input
-                type={field.type || 'text'}
-                value={form[field.name] ?? ''}
-                onChange={(e) => handleChange(field.name, e.target.value)}
-                required={field.required}
-                disabled={field.readOnly}
-                className={`border rounded-lg px-3 py-2 text-sm w-full ${
-                  field.readOnly ? 'bg-gray-100 text-gray-600' : ''
-                }`}
-                placeholder={field.label}
-              />
-            )}
-          </div>
-        ))}
+              {field.type === 'select' ? (
+                <select
+                  value={form[field.name] ?? ''}
+                  onChange={(e) => handleChange(field.name, e.target.value)}
+                  required={field.required}
+                  disabled={field.readOnly || isAutoCodeField}
+                  className="border rounded-lg px-3 py-2 text-sm w-full"
+                >
+                  <option value="">Select {field.label}</option>
+
+                  {(catalogOptions[field.optionsKey] || []).map((item) => (
+                    <option
+                      key={item[field.valueKey]}
+                      value={item[field.valueKey]}
+                    >
+                      {getOptionLabel(field, item)}
+                    </option>
+                  ))}
+                </select>
+              ) : field.type === 'checkbox' ? (
+                <input
+                  type="checkbox"
+                  checked={Boolean(form[field.name])}
+                  onChange={(e) => handleChange(field.name, e.target.checked)}
+                  disabled={field.readOnly || isAutoCodeField}
+                  className="mt-3"
+                />
+              ) : (
+                <input
+                  type={field.type || 'text'}
+                  value={form[field.name] ?? ''}
+                  onChange={(e) => handleChange(field.name, e.target.value)}
+                  required={field.required}
+                  readOnly={field.readOnly || isAutoCodeField}
+                  className={`border rounded-lg px-3 py-2 text-sm w-full ${
+                    field.readOnly || isAutoCodeField
+                      ? 'bg-gray-100 text-gray-700 font-semibold'
+                      : ''
+                  }`}
+                  placeholder={field.label}
+                />
+              )}
+
+              {isAutoCodeField && !editingId && (
+                <p className="text-[11px] text-green-600 mt-1">
+                  Auto generated next code
+                </p>
+              )}
+            </div>
+          );
+        })}
 
         {entity === 'product-barcodes' && (
           <div className="flex items-end">
@@ -426,7 +502,14 @@ const CatalogCrudSection = ({
                 <td className="px-3 py-2 border-b">{row[idKey]}</td>
 
                 {visibleTableFields.map((field) => (
-                  <td key={field.name} className="px-3 py-2 border-b">
+                  <td
+                    key={field.name}
+                    className={`px-3 py-2 border-b ${
+                      codeConfig?.field === field.name
+                        ? 'font-semibold text-blue-700'
+                        : ''
+                    }`}
+                  >
                     {String(getCellValue(row, field))}
                   </td>
                 ))}

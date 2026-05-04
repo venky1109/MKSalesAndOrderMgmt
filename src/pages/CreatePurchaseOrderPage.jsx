@@ -14,7 +14,9 @@ import {
   fetchPurchaseOrders,
   fetchCategories,
   fetchCatalogBarcodes,
+  
 } from '../features/inventory/stockManagerInventorySlice';
+
 
 const CreatePurchaseOrderPage = () => {
   const dispatch = useDispatch();
@@ -86,7 +88,11 @@ const CreatePurchaseOrderPage = () => {
             warehouses={warehouses}
           />
 
-          <PurchaseOrdersStatusSections purchaseOrders={purchaseOrders} />
+          {/* <PurchaseOrdersStatusSections purchaseOrders={purchaseOrders} /> */}
+          <PurchaseOrdersStatusSections
+  purchaseOrders={purchaseOrders}
+  productBarcodes={catalogBarcodes}
+/>
         </section>
       </main>
     </StockManagerLayout>
