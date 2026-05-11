@@ -65,9 +65,20 @@ const StockManagerLayout = ({ children }) => {
   Purchase Orders
   </div>
 </NavLink>
-            <div className="flex items-center gap-2 font-medium text-gray-700">
-              <Truck size={18} /> Dispatch
-            </div>
+            <NavLink
+  to="/inventory/dispatch"
+ className={({ isActive }) =>
+              `block px-4 py-2 rounded-lg text-sm font-medium ${
+                isActive
+                  ? 'bg-blue-100 text-blue-700'
+                  : 'text-gray-600 hover:bg-gray-100'
+              }`
+  }
+>
+  <div className="flex items-center gap-2 font-medium text-gray-700"> <Truck size={18} />
+  Dispatch</div>
+ 
+</NavLink>
             <div className="flex items-center gap-2 font-medium text-gray-700">
               <RefreshCcw size={18} /> Transactions
             </div>

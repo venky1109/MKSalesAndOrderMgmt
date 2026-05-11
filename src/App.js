@@ -18,6 +18,7 @@ import PaymentFailurePage from './pages/PaymentFailurePage';
 import StockManagerInventoryPage from './pages/StockManagerInventoryPage';
 import CreatePurchaseOrderPage  from './pages/CreatePurchaseOrderPage';
 import StockManagerCatalogPage from './pages/StockManagerCatalogPage';
+import DispatchPage from "./pages/DispatchPage";
 
 function App() {
   function AppBootHydrator() {
@@ -108,6 +109,7 @@ function App() {
           <Route path="/payment/success" element={<PaymentSuccessPage />} />
 <Route path="/payment/failure" element={<PaymentFailurePage />} />
 <Route path="/payment/invoice-share" element={<PaymentInvoiceSharePage />} />
+<Route path="/inventory/dispatch" element={<DispatchPage />} />
           {/* Catch-all fallback */}
           <Route path="*" element={<Navigate to="/login" />} />
         </Routes>

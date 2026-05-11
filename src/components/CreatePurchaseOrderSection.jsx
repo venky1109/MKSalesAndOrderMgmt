@@ -8,8 +8,11 @@ import {
 
 const searchText = (value) => String(value || '').toLowerCase();
 
-const getBrandName = (b) =>
-  b?.brand_name_english || b?.brand_name_englishh || b?.brand_name_telugu || '';
+const getBrandName = (item) =>
+  item?.brand_name_english ||
+  item?.brand_name_englishh ||
+  item?.brand_name_telugu ||
+  '';
 
 const SuggestInput = ({
   label,
@@ -20,13 +23,14 @@ const SuggestInput = ({
   onSelect,
   renderItem,
   readOnly = false,
+  dropdownClassName = '',
 }) => {
   const [open, setOpen] = useState(false);
 
   return (
     <div className="relative">
       {label && (
-        <label className="block text-xs font-semibold mb-1 text-gray-700">
+        <label className="mb-1 block text-xs font-semibold text-gray-700">
           {label}
         </label>
       )}
@@ -35,19 +39,24 @@ const SuggestInput = ({
         value={value}
         readOnly={readOnly}
         onFocus={() => !readOnly && setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
         onChange={(e) => {
           if (readOnly) return;
           onChange(e.target.value);
           setOpen(true);
         }}
         placeholder={placeholder}
-        className={`border rounded-lg px-3 py-2 w-full ${
-          readOnly ? 'bg-gray-100 cursor-not-allowed' : ''
+        className={`h-11 w-full rounded-lg border px-3 py-2 text-sm ${
+          readOnly ? 'cursor-not-allowed bg-gray-100' : 'bg-white'
         }`}
       />
 
       {!readOnly && open && suggestions.length > 0 && (
-        <div className="absolute z-40 bg-white border rounded-lg shadow w-full mt-1 max-h-64 overflow-auto">
+        <div
+          className={`absolute z-50 mt-1 max-h-80 overflow-auto rounded-xl border bg-white shadow-xl ${
+            dropdownClassName || 'w-full'
+          }`}
+        >
           {suggestions.map((item, index) => (
             <button
               key={`${item.id || index}-${item.mk_barcode || item.barcode || ''}`}
@@ -57,13 +66,68 @@ const SuggestInput = ({
                 onSelect(item);
                 setOpen(false);
               }}
-              className="block w-full text-left px-3 py-2 hover:bg-gray-100"
+              className="block w-full border-b px-3 py-3 text-left hover:bg-yellow-50"
             >
               {renderItem(item)}
             </button>
           ))}
         </div>
       )}
+    </div>
+  );
+};
+
+const ProductSuggestionItem = ({ product }) => {
+  const productName =
+    product.product_name_eng ||
+    product.product_name_tel ||
+    product.product_code ||
+    '-';
+
+  const brandName = getBrandName(product) || '-';
+  const categoryName =
+    product.category_name_english || product.category_name_telugu || '-';
+
+  const unitName = product.unit_short_code || product.unit_name || '';
+  const quantity = Number(product.quantity || product.qty || 0);
+
+  return (
+    <div className="flex items-start justify-between gap-3">
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-bold text-gray-900">
+          {productName}
+        </div>
+
+        <div className="mt-1 text-xs text-gray-600">
+          <span className="font-semibold text-gray-800">MK Barcode:</span>{' '}
+          {product.mk_barcode || '-'}
+        </div>
+
+        <div className="text-xs text-gray-600">
+          <span className="font-semibold text-gray-800">Vendor Barcode:</span>{' '}
+          {product.barcode || '-'}
+        </div>
+
+        <div className="text-xs text-gray-600">
+          <span className="font-semibold text-gray-800">Brand:</span>{' '}
+          {brandName}
+        </div>
+
+        <div className="text-xs text-gray-600">
+          <span className="font-semibold text-gray-800">Category:</span>{' '}
+          {categoryName}
+        </div>
+      </div>
+
+      <div className="shrink-0 rounded-lg bg-green-50 px-3 py-2 text-right">
+        <div className="text-[11px] font-semibold text-green-700">Qty</div>
+        <div className="text-base font-bold text-green-900">
+          {quantity.toFixed(2)}
+        </div>
+        <div className="text-[11px] font-bold text-green-700">
+          {unitName || '-'}
+        </div>
+      </div>
     </div>
   );
 };
@@ -84,20 +148,9 @@ const CreatePurchaseOrderSection = ({
   const [supplierSearch, setSupplierSearch] = useState('');
   const [selectedSupplier, setSelectedSupplier] = useState(null);
 
-  const [productId, setProductId] = useState('');
   const [productSearch, setProductSearch] = useState('');
-  const [selectedProduct, setSelectedProduct] = useState(null);
+  const [selectedBarcodeRow, setSelectedBarcodeRow] = useState(null);
 
-  const [categoryId, setCategoryId] = useState('');
-  const [categorySearch, setCategorySearch] = useState('');
-
-  const [brandId, setBrandId] = useState('');
-  const [brandSearch, setBrandSearch] = useState('');
-
-  const [unitId, setUnitId] = useState('');
-  const [unitSearch, setUnitSearch] = useState('');
-
-  const [qty, setQty] = useState(1);
   const [noOfUnits, setNoOfUnits] = useState(1);
   const [expectedUnitPrice, setExpectedUnitPrice] = useState(0);
 
@@ -152,41 +205,35 @@ const CreatePurchaseOrderSection = ({
           searchText(p.barcode).includes(value) ||
           searchText(brandName).includes(value) ||
           searchText(p.category_name_english).includes(value) ||
+          searchText(p.category_name_telugu).includes(value) ||
           searchText(p.unit_name).includes(value) ||
           searchText(p.unit_short_code).includes(value)
         );
       })
-      .slice(0, 20);
+      .slice(0, 25);
   }, [productBarcodes, productSearch]);
 
   const selectWarehouse = (warehouse) => {
     setWarehouseId(warehouse.id);
-    setWarehouseSearch(warehouse.warehouse_name || warehouse.warehouse_code || '');
+    setWarehouseSearch(
+      warehouse.warehouse_name || warehouse.warehouse_code || ''
+    );
   };
 
   const selectSupplier = (supplier) => {
     setSupplierId(supplier.id);
     setSelectedSupplier(supplier);
-    setSupplierSearch(supplier.stakeholder_name || supplier.stackholder_code || '');
+    setSupplierSearch(
+      supplier.stakeholder_name || supplier.stackholder_code || ''
+    );
   };
 
-  const clearBarcodeDependentFields = () => {
-    setProductId('');
-    setSelectedProduct(null);
-    setCategoryId('');
-    setCategorySearch('');
-    setBrandId('');
-    setBrandSearch('');
-    setUnitId('');
-    setUnitSearch('');
-    setQty(1);
+  const clearSelectedProduct = () => {
+    setSelectedBarcodeRow(null);
   };
 
-  const selectProduct = (barcodeRow) => {
-    const brandName = getBrandName(barcodeRow);
-
-    setProductId(barcodeRow.product_id || '');
-    setSelectedProduct(barcodeRow);
+  const selectProductBarcode = (barcodeRow) => {
+    setSelectedBarcodeRow(barcodeRow);
 
     setProductSearch(
       barcodeRow.product_name_eng ||
@@ -196,82 +243,91 @@ const CreatePurchaseOrderSection = ({
         barcodeRow.barcode ||
         ''
     );
-
-    setCategoryId(barcodeRow.category_id || '');
-    setCategorySearch(barcodeRow.category_name_english || '');
-
-    setBrandId(barcodeRow.brand_id || '');
-    setBrandSearch(brandName);
-
-    setUnitId(barcodeRow.unit_id || '');
-    setUnitSearch(barcodeRow.unit_name || barcodeRow.unit_short_code || '');
-
-    setQty(Number(barcodeRow.quantity || 1));
   };
 
   const clearItemInputs = () => {
     setSupplierId('');
     setSupplierSearch('');
     setSelectedSupplier(null);
-    setProductId('');
+
     setProductSearch('');
-    setSelectedProduct(null);
-    setCategoryId('');
-    setCategorySearch('');
-    setBrandId('');
-    setBrandSearch('');
-    setUnitId('');
-    setUnitSearch('');
-    setQty(1);
+    setSelectedBarcodeRow(null);
+
     setNoOfUnits(1);
     setExpectedUnitPrice(0);
   };
 
   const addItem = () => {
-    if (
-      !supplierId ||
-      !productId ||
-      !categoryId ||
-      !brandId ||
-      !unitId ||
-      !qty ||
-      !noOfUnits
-    ) {
-      alert(
-        'Supplier, product barcode, category, brand, unit, quantity and no. of units are required'
-      );
+    if (!supplierId || !selectedBarcodeRow) {
+      alert('Supplier and product barcode are required');
       return;
     }
 
-    const brandName = getBrandName(selectedProduct);
+    if (!selectedBarcodeRow.product_id) {
+      alert('Selected barcode row does not have product_id');
+      return;
+    }
 
-    setItems([
-      ...items,
+    if (!selectedBarcodeRow.brand_id) {
+      alert('Selected barcode row does not have brand_id');
+      return;
+    }
+
+    if (!selectedBarcodeRow.category_id) {
+      alert('Selected barcode row does not have category_id');
+      return;
+    }
+
+    if (!selectedBarcodeRow.unit_id) {
+      alert('Selected barcode row does not have unit_id');
+      return;
+    }
+
+    const brandName = getBrandName(selectedBarcodeRow);
+    const categoryName =
+      selectedBarcodeRow.category_name_english ||
+      selectedBarcodeRow.category_name_telugu ||
+      '';
+
+    const unitName =
+      selectedBarcodeRow.unit_short_code || selectedBarcodeRow.unit_name || '';
+
+    const productName =
+      selectedBarcodeRow.product_name_eng ||
+      selectedBarcodeRow.product_name_tel ||
+      selectedBarcodeRow.product_code ||
+      '';
+
+    setItems((prev) => [
+      ...prev,
       {
         supplier_id: Number(supplierId),
         supplier_name:
-          selectedSupplier?.stakeholder_name || selectedSupplier?.stackholder_code,
+          selectedSupplier?.stakeholder_name ||
+          selectedSupplier?.stackholder_code ||
+          '',
 
-        product_id: Number(productId),
-        product_name:
-          selectedProduct?.product_name_eng ||
-          selectedProduct?.product_name_tel ||
-          selectedProduct?.product_code,
-        product_code: selectedProduct?.product_code,
+        product_barcode_id: selectedBarcodeRow.id
+          ? Number(selectedBarcodeRow.id)
+          : null,
 
-        mk_barcode: selectedProduct?.mk_barcode || '',
-        barcode: selectedProduct?.barcode || '',
+        product_id: Number(selectedBarcodeRow.product_id),
+        product_name: productName,
+        product_code: selectedBarcodeRow.product_code || '',
 
-        category_id: Number(categoryId),
-        category_name: categorySearch,
+        mk_barcode: selectedBarcodeRow.mk_barcode || '',
+        barcode: selectedBarcodeRow.barcode || '',
 
-        brand_id: Number(brandId),
+        category_id: Number(selectedBarcodeRow.category_id),
+        category_name: categoryName,
+
+        brand_id: Number(selectedBarcodeRow.brand_id),
         brand_name: brandName,
 
-        unit_id: Number(unitId),
-        unit_name: unitSearch,
+        unit_id: Number(selectedBarcodeRow.unit_id),
+        unit_name: unitName,
 
-        qty: Number(qty),
+        qty: Number(selectedBarcodeRow.quantity || selectedBarcodeRow.qty || 1),
         no_of_units: Number(noOfUnits || 1),
         expected_unit_price: Number(expectedUnitPrice || 0),
         actual_unit_price: null,
@@ -282,16 +338,18 @@ const CreatePurchaseOrderSection = ({
   };
 
   const updateRow = (index, field, value) => {
-    const copy = [...items];
-    copy[index] = {
-      ...copy[index],
-      [field]: value,
-    };
-    setItems(copy);
+    setItems((prev) => {
+      const copy = [...prev];
+      copy[index] = {
+        ...copy[index],
+        [field]: value,
+      };
+      return copy;
+    });
   };
 
   const removeItem = (index) => {
-    setItems(items.filter((_, i) => i !== index));
+    setItems((prev) => prev.filter((_, i) => i !== index));
   };
 
   const groupedBySupplier = useMemo(() => {
@@ -313,6 +371,9 @@ const CreatePurchaseOrderSection = ({
         category_id: Number(item.category_id),
         brand_id: Number(item.brand_id),
         unit_id: Number(item.unit_id),
+
+        product_barcode_id: item.product_barcode_id,
+
         qty: Number(item.qty),
         no_of_units: Number(item.no_of_units || 1),
         expected_unit_price: Number(item.expected_unit_price || 0),
@@ -334,9 +395,7 @@ const CreatePurchaseOrderSection = ({
   const grandTotal = items.reduce(
     (sum, item) =>
       sum +
-      // Number(item.qty || 0) *
-        Number(item.no_of_units || 1) *
-        Number(item.expected_unit_price || 0),
+      Number(item.no_of_units || 1) * Number(item.expected_unit_price || 0),
     0
   );
 
@@ -371,12 +430,31 @@ const CreatePurchaseOrderSection = ({
     setItems([]);
   };
 
+  const selectedProductName =
+    selectedBarcodeRow?.product_name_eng ||
+    selectedBarcodeRow?.product_name_tel ||
+    selectedBarcodeRow?.product_code ||
+    '';
+
+  const selectedBrandName = getBrandName(selectedBarcodeRow);
+  const selectedCategoryName =
+    selectedBarcodeRow?.category_name_english ||
+    selectedBarcodeRow?.category_name_telugu ||
+    '';
+
+  const selectedUnitName =
+    selectedBarcodeRow?.unit_short_code || selectedBarcodeRow?.unit_name || '';
+
+  const selectedQty = Number(
+    selectedBarcodeRow?.quantity || selectedBarcodeRow?.qty || 0
+  );
+
   return (
-    <section className="bg-white rounded-xl border shadow-sm p-4">
-      <h2 className="font-bold text-lg mb-4">Create Purchase Orders</h2>
+    <section className="rounded-xl border bg-white p-4 shadow-sm">
+      <h2 className="mb-4 text-lg font-bold">Create Purchase Orders</h2>
 
       <form onSubmit={submitHandler} className="space-y-5">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
           <SuggestInput
             label="Warehouse"
             value={warehouseSearch}
@@ -398,127 +476,139 @@ const CreatePurchaseOrderSection = ({
           />
 
           <div>
-            <label className="block text-xs font-semibold mb-1">
+            <label className="mb-1 block text-xs font-semibold">
               Expected Date
             </label>
             <input
               type="date"
               value={expectedDate}
               onChange={(e) => setExpectedDate(e.target.value)}
-              className="border rounded-lg px-3 py-2 w-full"
+              className="h-11 w-full rounded-lg border px-3 py-2"
             />
           </div>
 
           <div className="md:col-span-2">
-            <label className="block text-xs font-semibold mb-1">Remarks</label>
+            <label className="mb-1 block text-xs font-semibold">Remarks</label>
             <input
               value={remarks}
               onChange={(e) => setRemarks(e.target.value)}
               placeholder="Purchase remarks"
-              className="border rounded-lg px-3 py-2 w-full"
+              className="h-11 w-full rounded-lg border px-3 py-2"
             />
           </div>
         </div>
 
-        <section className="border rounded-xl p-4 bg-gray-50">
-          <h3 className="font-semibold mb-3">Add Item</h3>
+        <section className="rounded-xl border bg-gray-50 p-4">
+          <h3 className="mb-3 font-semibold">Add Item</h3>
 
-          <div className="grid grid-cols-1 md:grid-cols-9 gap-3">
-            <SuggestInput
-              label="Supplier"
-              value={supplierSearch}
-              onChange={(value) => {
-                setSupplierSearch(value);
-                setSupplierId('');
-                setSelectedSupplier(null);
-              }}
-              placeholder="Search supplier"
-              suggestions={supplierSuggestions}
-              onSelect={selectSupplier}
-              renderItem={(s) => (
-                <>
-                  <div className="font-medium">{s.stakeholder_name}</div>
-                  <div className="text-xs text-gray-500">
-                    {s.stackholder_code} | {s.phone || '-'}
-                  </div>
-                </>
-              )}
-            />
-
-            <SuggestInput
-              label="Product"
-              value={productSearch}
-              onChange={(value) => {
-                setProductSearch(value);
-                clearBarcodeDependentFields();
-              }}
-              placeholder="Search product / barcode"
-              suggestions={productSuggestions}
-              onSelect={selectProduct}
-              renderItem={(p) => (
-                <>
-                  <div className="font-medium">
-                    {p.product_name_eng || p.product_name_tel || p.product_code}
-                  </div>
-                  <div className="text-xs text-gray-500">
-                    MK: {p.mk_barcode || '-'} | Vendor: {p.barcode || '-'}
-                  </div>
-                  <div className="text-xs text-gray-500">
-                    {getBrandName(p) || '-'} | {p.category_name_english || '-'} |{' '}
-                    {p.unit_name || p.unit_short_code || '-'} | Qty:{' '}
-                    {p.quantity || 1}
-                  </div>
-                </>
-              )}
-            />
-
-            <SuggestInput
-              label="Category"
-              value={categorySearch}
-              onChange={() => {}}
-              placeholder="Auto from barcode"
-              suggestions={[]}
-              onSelect={() => {}}
-              renderItem={() => null}
-              readOnly
-            />
-
-            <SuggestInput
-              label="Brand"
-              value={brandSearch}
-              onChange={() => {}}
-              placeholder="Auto from barcode"
-              suggestions={[]}
-              onSelect={() => {}}
-              renderItem={() => null}
-              readOnly
-            />
-
-            <SuggestInput
-              label="Unit"
-              value={unitSearch}
-              onChange={() => {}}
-              placeholder="Auto from barcode"
-              suggestions={[]}
-              onSelect={() => {}}
-              renderItem={() => null}
-              readOnly
-            />
-
-            <div>
-              <label className="block text-xs font-semibold mb-1">Qty</label>
-              <input
-                type="number"
-                min="0.001"
-                step="0.001"
-                value={qty}
-                readOnly
-                className="border rounded-lg px-3 py-2 w-full text-right bg-gray-100 cursor-not-allowed"
+          <div className="grid grid-cols-12 gap-3">
+            <div className="col-span-12 md:col-span-2">
+              <SuggestInput
+                label="Supplier"
+                value={supplierSearch}
+                onChange={(value) => {
+                  setSupplierSearch(value);
+                  setSupplierId('');
+                  setSelectedSupplier(null);
+                }}
+                placeholder="Search supplier"
+                suggestions={supplierSuggestions}
+                onSelect={selectSupplier}
+                renderItem={(s) => (
+                  <>
+                    <div className="font-medium">{s.stakeholder_name}</div>
+                    <div className="text-xs text-gray-500">
+                      {s.stackholder_code} | {s.phone || '-'}
+                    </div>
+                  </>
+                )}
               />
             </div>
 
-            <div>
-              <label className="block text-xs font-semibold mb-1">
+            <div className="col-span-12 md:col-span-4">
+              <SuggestInput
+                label="Product / Barcode"
+                value={productSearch}
+                onChange={(value) => {
+                  setProductSearch(value);
+                  clearSelectedProduct();
+                }}
+                placeholder="Search product / MK barcode / vendor barcode"
+                suggestions={productSuggestions}
+                onSelect={selectProductBarcode}
+                dropdownClassName="w-full min-w-[560px]"
+                renderItem={(p) => <ProductSuggestionItem product={p} />}
+              />
+            </div>
+
+            <div className="col-span-6 md:col-span-2">
+              <label className="mb-1 block text-xs font-semibold">
+                Category
+              </label>
+              <input
+                value={selectedCategoryName}
+                readOnly
+                placeholder="Auto"
+                className="h-11 w-full cursor-not-allowed rounded-lg border bg-gray-100 px-3 py-2 text-sm"
+              />
+            </div>
+
+            <div className="col-span-6 md:col-span-2">
+              <label className="mb-1 block text-xs font-semibold">Brand</label>
+              <input
+                value={selectedBrandName}
+                readOnly
+                placeholder="Auto"
+                className="h-11 w-full cursor-not-allowed rounded-lg border bg-gray-100 px-3 py-2 text-sm"
+              />
+            </div>
+
+            <div className="col-span-6 md:col-span-1">
+              <label className="mb-1 block text-xs font-semibold">Unit</label>
+              <input
+                value={selectedUnitName}
+                readOnly
+                placeholder="Auto"
+                className="h-11 w-full cursor-not-allowed rounded-lg border bg-gray-100 px-3 py-2 text-sm"
+              />
+            </div>
+
+            <div className="col-span-6 md:col-span-1">
+              <label className="mb-1 block text-xs font-semibold">Qty</label>
+              <input
+                type="number"
+                value={selectedQty || ''}
+                readOnly
+                placeholder="Auto"
+                className="h-11 w-full cursor-not-allowed rounded-lg border bg-gray-100 px-2 py-2 text-right text-sm"
+              />
+            </div>
+
+            {selectedBarcodeRow && (
+              <div className="col-span-12 rounded-lg border bg-white p-3 text-xs text-gray-700">
+                <div className="grid grid-cols-1 gap-2 md:grid-cols-4">
+                  <div>
+                    <span className="font-semibold">Product:</span>{' '}
+                    {selectedProductName || '-'}
+                  </div>
+                  <div>
+                    <span className="font-semibold">MK Barcode:</span>{' '}
+                    {selectedBarcodeRow.mk_barcode || '-'}
+                  </div>
+                  <div>
+                    <span className="font-semibold">Vendor Barcode:</span>{' '}
+                    {selectedBarcodeRow.barcode || '-'}
+                  </div>
+                  <div>
+                    <span className="font-semibold">Product Code:</span>{' '}
+                    {selectedBarcodeRow.product_code || '-'}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="col-span-6 md:col-span-2">
+              <label className="mb-1 block text-xs font-semibold">
                 No. Units
               </label>
               <input
@@ -527,13 +617,13 @@ const CreatePurchaseOrderSection = ({
                 step="1"
                 value={noOfUnits}
                 onChange={(e) => setNoOfUnits(e.target.value)}
-                className="border rounded-lg px-3 py-2 w-full text-right"
+                className="h-11 w-full rounded-lg border px-3 py-2 text-right"
               />
             </div>
 
-            <div>
-              <label className="block text-xs font-semibold mb-1">
-                Expected Price
+            <div className="col-span-6 md:col-span-2">
+              <label className="mb-1 block text-xs font-semibold">
+                Expected Price / Unit
               </label>
               <input
                 type="number"
@@ -541,15 +631,15 @@ const CreatePurchaseOrderSection = ({
                 step="0.01"
                 value={expectedUnitPrice}
                 onChange={(e) => setExpectedUnitPrice(e.target.value)}
-                className="border rounded-lg px-3 py-2 w-full text-right"
+                className="h-11 w-full rounded-lg border px-3 py-2 text-right"
               />
             </div>
 
-            <div className="flex items-end">
+            <div className="col-span-12 flex items-end md:col-span-2">
               <button
                 type="button"
                 onClick={addItem}
-                className="bg-blue-700 text-white px-4 py-2 rounded-lg w-full"
+                className="h-11 w-full rounded-lg bg-blue-700 px-4 py-2 font-semibold text-white hover:bg-blue-800"
               >
                 Add
               </button>
@@ -558,24 +648,23 @@ const CreatePurchaseOrderSection = ({
         </section>
 
         <div className="overflow-x-auto">
-         <table className="min-w-full text-sm border table-fixed">
-           <thead className="bg-gray-100">
-  <tr>
-    <th className="p-2 text-left w-[140px]">Supplier</th>
-    <th className="p-2 text-left w-[220px]">Product</th>
-    <th className="p-2 text-left w-[140px]">Category</th>
-    <th className="p-2 text-left w-[140px]">Brand</th>
-
-    <th className="p-2 text-right w-[100px]">Qty</th>
-    <th className="p-2 text-left w-[100px]">Unit</th>
-
-    <th className="p-2 text-right w-[120px]">No. Units</th>
-    <th className="p-2 text-right w-[140px]">Expected Price</th>
-
-    <th className="p-2 text-right w-[140px]">Total</th>
-    <th className="p-2 w-[100px] text-center">Remove</th>
-  </tr>
-</thead>
+          <table className="min-w-full table-fixed border text-sm">
+            <thead className="bg-gray-100">
+              <tr>
+                <th className="w-[140px] p-2 text-left">Supplier</th>
+                <th className="w-[280px] p-2 text-left">Product</th>
+                <th className="w-[140px] p-2 text-left">Category</th>
+                <th className="w-[140px] p-2 text-left">Brand</th>
+                <th className="w-[90px] p-2 text-right">Qty</th>
+                <th className="w-[100px] p-2 text-left">Unit</th>
+                <th className="w-[120px] p-2 text-right">No. Units</th>
+                <th className="w-[160px] p-2 text-right">
+                  Expected Price / Unit
+                </th>
+                <th className="w-[140px] p-2 text-right">Total</th>
+                <th className="w-[100px] p-2 text-center">Remove</th>
+              </tr>
+            </thead>
 
             <tbody>
               {items.length === 0 && (
@@ -588,61 +677,67 @@ const CreatePurchaseOrderSection = ({
 
               {items.map((item, index) => (
                 <tr
-                  key={`${item.supplier_id}-${item.product_id}-${item.category_id}-${item.brand_id}-${item.unit_id}-${index}`}
+                  key={`${item.supplier_id}-${item.product_id}-${item.product_barcode_id}-${index}`}
                   className="border-t"
                 >
-                  <td className="p-2">{item.supplier_name}</td>
+                  <td className="p-2">{item.supplier_name || '-'}</td>
 
                   <td className="p-2">
-                    <div className="font-medium">{item.product_name}</div>
+                    <div className="font-medium">{item.product_name || '-'}</div>
                     <div className="text-xs text-gray-500">
                       Code: {item.product_code || '-'}
                     </div>
                     <div className="text-xs text-gray-500">
-                      MK: {item.mk_barcode || '-'} | Vendor: {item.barcode || '-'}
+                      MK: {item.mk_barcode || '-'}
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      Vendor: {item.barcode || '-'}
                     </div>
                   </td>
 
                   <td className="p-2">{item.category_name || '-'}</td>
                   <td className="p-2">{item.brand_name || '-'}</td>
+
                   <td className="p-2">
-  <input
-    type="number"
-    value={item.qty}
-    readOnly
-    className="border rounded px-2 py-1 w-full text-right bg-gray-100"
-  />
-</td>
+                    <input
+                      type="number"
+                      value={item.qty}
+                      readOnly
+                      className="w-full rounded border bg-gray-100 px-2 py-1 text-right"
+                    />
+                  </td>
+
                   <td className="p-2">{item.unit_name || '-'}</td>
 
-                 
+                  <td className="p-2">
+                    <input
+                      type="number"
+                      min="1"
+                      step="1"
+                      value={item.no_of_units}
+                      onChange={(e) =>
+                        updateRow(index, 'no_of_units', e.target.value)
+                      }
+                      className="w-full rounded border px-2 py-1 text-right"
+                    />
+                  </td>
 
-                <td className="p-2">
-  <input
-    type="number"
-    value={item.no_of_units}
-    onChange={(e) =>
-      updateRow(index, 'no_of_units', e.target.value)
-    }
-    className="border rounded px-2 py-1 w-full text-right"
-  />
-</td>
-
-                 <td className="p-2">
-  <input
-    type="number"
-    value={item.expected_unit_price}
-    onChange={(e) =>
-      updateRow(index, 'expected_unit_price', e.target.value)
-    }
-    className="border rounded px-2 py-1 w-full text-right"
-  />
-</td>
+                  <td className="p-2">
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={item.expected_unit_price}
+                      onChange={(e) =>
+                        updateRow(index, 'expected_unit_price', e.target.value)
+                      }
+                      className="w-full rounded border px-2 py-1 text-right"
+                    />
+                  </td>
 
                   <td className="p-2 text-right font-semibold">
                     ₹
                     {(
-                      // Number(item.qty || 0) *
                       Number(item.no_of_units || 1) *
                       Number(item.expected_unit_price || 0)
                     ).toFixed(2)}
@@ -676,7 +771,7 @@ const CreatePurchaseOrderSection = ({
         <div className="flex justify-end">
           <button
             type="submit"
-            className="bg-green-700 text-white px-5 py-2 rounded-lg"
+            className="rounded-lg bg-green-700 px-5 py-2 text-white hover:bg-green-800"
           >
             Create Purchase Orders
           </button>

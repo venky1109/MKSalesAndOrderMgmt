@@ -6,7 +6,13 @@ import {
   updatePurchaseOrderItems,
   verifyReceivedPurchaseOrder,
   fetchPurchaseOrders,
+  fetchInventoryProducts,
+  fetchStockTransactions,
 } from '../features/inventory/stockManagerInventorySlice';
+
+import { receiveVerifiedPurchaseToInventory } from '../features/inventory/inventoryMovementSlice';
+
+import VerifyItemInventoryModal from './VerifyItemInventoryModal';
 
 const STATUSES = ['draft', 'sent', 'intransit', 'received', 'verified'];
 
@@ -38,6 +44,13 @@ const STATUS_STYLES = {
   },
 };
 
+const makeBatchId = () => {
+  const d = new Date();
+  const ymd = d.toISOString().slice(0, 10).replaceAll('-', '');
+  const time = String(d.getTime()).slice(-5);
+  return Number(`${ymd}${time}`);
+};
+
 const getBrandName = (p) =>
   p?.brand_name_english ||
   p?.brand_name_englishh ||
@@ -62,7 +75,16 @@ const PurchaseOrdersStatusSections = ({
   const [verifyRemarks, setVerifyRemarks] = useState('');
   const [scanBarcode, setScanBarcode] = useState('');
 
+  const [itemVerifyModal, setItemVerifyModal] = useState({
+    open: false,
+    index: null,
+    item: null,
+  });
+
   const rowRefs = useRef({});
+
+  const normalizeBarcode = (value) =>
+    String(value || '').trim().replace(/\s+/g, '');
 
   const grouped = STATUSES.reduce((acc, status) => {
     acc[status] = purchaseOrders.filter(
@@ -72,64 +94,104 @@ const PurchaseOrdersStatusSections = ({
   }, {});
 
   const canEditStatus = (status) =>
-    ['draft', 'sent', 'intransit'].includes(String(status || '').toLowerCase());
+    ['draft', 'sent', 'intransit'].includes(
+      String(status || '').toLowerCase()
+    );
 
   const canEditItems = (status) =>
     String(status || '').toLowerCase() === 'draft';
 
-  const normalizeBarcode = (value) =>
-    String(value || '').trim().replace(/\s+/g, '');
-
   const getItemBarcodes = (item) =>
     [
-      item.mk_barcode,
-      item.barcode,
-      item.product_barcode,
-      item.vendor_barcode,
-      item.supplier_barcode,
+      item?.mk_barcode,
+      item?.barcode,
+      item?.product_barcode,
+      item?.vendor_barcode,
+      item?.supplier_barcode,
     ]
       .map((code) => normalizeBarcode(code))
       .filter(Boolean);
 
   const getProductBarcodeId = (item) => {
-    if (item.product_barcode_id) return item.product_barcode_id;
+    if (item?.product_barcode_id) return item.product_barcode_id;
+    if (item?.product_barcode_id_fk) return item.product_barcode_id_fk;
+    if (item?.barcode_id) return item.barcode_id;
 
-    const matched = productBarcodes.find(
+    const itemMk = normalizeBarcode(item?.mk_barcode);
+    const itemBarcode = normalizeBarcode(item?.barcode);
+
+    const matchedByBarcode = productBarcodes.find((p) => {
+      const pMk = normalizeBarcode(p.mk_barcode);
+      const pBarcode = normalizeBarcode(p.barcode);
+
+      return (
+        (itemMk && pMk && itemMk === pMk) ||
+        (itemBarcode && pBarcode && itemBarcode === pBarcode)
+      );
+    });
+
+    if (matchedByBarcode?.id) return matchedByBarcode.id;
+
+    const matchedByIds = productBarcodes.find(
       (p) =>
-        String(p.product_id) === String(item.product_id) &&
-        String(p.brand_id) === String(item.brand_id) &&
-        String(p.category_id) === String(item.category_id) &&
-        String(p.unit_id) === String(item.unit_id)
+        String(p.product_id) === String(item?.product_id) &&
+        String(p.brand_id) === String(item?.brand_id) &&
+        String(p.category_id) === String(item?.category_id) &&
+        String(p.unit_id) === String(item?.unit_id)
     );
 
-    return matched?.id || '';
+    return matchedByIds?.id || '';
   };
 
   const getDisplayItems = (po) => {
-    if (Array.isArray(po.items) && po.items.length > 0) return po.items;
+    if (Array.isArray(po.items) && po.items.length > 0) {
+      return po.items.map((item) => ({
+        ...item,
+        product_barcode_id:
+          item.product_barcode_id ||
+          item.product_barcode_id_fk ||
+          item.barcode_id ||
+          getProductBarcodeId(item),
+      }));
+    }
 
     if (Array.isArray(po.bill_details?.items)) {
-      return po.bill_details.items.map((item, index) => ({
-        id: item.id || `bill-${index}`,
-        product_id: item.product_id,
-        product_name: item.product_name || `Product ${item.product_id}`,
-        product_code: item.product_code || '-',
-        mk_barcode: item.mk_barcode || '',
-        barcode: item.barcode || '',
-        category_id: item.category_id,
-        category_name: item.category_name || '-',
-        brand_id: item.brand_id,
-        brand_name: item.brand_name || '-',
-        unit_id: item.unit_id,
-        unit_name: item.unit_name || '-',
-        unit_short_code: item.unit_short_code || '',
-        qty: item.qty,
-        no_of_units: item.no_of_units || 1,
-        expected_unit_price:
-          item.expected_unit_price || item.unit_price || item.price || 0,
-        actual_unit_price: item.actual_unit_price ?? null,
-        is_verified: Boolean(item.is_verified),
-      }));
+      return po.bill_details.items.map((item, index) => {
+        const row = {
+          id: item.id || `bill-${index}`,
+          product_barcode_id:
+            item.product_barcode_id ||
+            item.product_barcode_id_fk ||
+            item.barcode_id ||
+            '',
+          product_id: item.product_id,
+          product_name: item.product_name || `Product ${item.product_id}`,
+          product_code: item.product_code || '-',
+          mk_barcode: item.mk_barcode || '',
+          barcode: item.barcode || '',
+          category_id: item.category_id,
+          category_name: item.category_name || '-',
+          brand_id: item.brand_id,
+          brand_name: item.brand_name || '-',
+          unit_id: item.unit_id,
+          unit_name: item.unit_name || '-',
+          unit_short_code: item.unit_short_code || '',
+          qty: item.qty,
+          no_of_units: item.no_of_units || 1,
+          expected_unit_price:
+            item.expected_unit_price || item.unit_price || item.price || 0,
+          actual_unit_price: item.actual_unit_price ?? null,
+          is_verified: Boolean(item.is_verified),
+          exp_date: item.exp_date || '',
+          mfg_date: item.mfg_date || '',
+          sku_id: item.sku_id || '',
+          inventory_remarks: item.inventory_remarks || '',
+        };
+
+        row.product_barcode_id = row.product_barcode_id || getProductBarcodeId(row);
+
+        return row;
+      });
     }
 
     return [];
@@ -139,6 +201,270 @@ const PurchaseOrdersStatusSections = ({
     item.actual_unit_price !== null && item.actual_unit_price !== undefined
       ? Number(item.actual_unit_price)
       : Number(item.expected_unit_price || 0);
+
+  const getPoTotal = (po) => {
+    const items = getDisplayItems(po);
+
+    return items.reduce((sum, item) => {
+      return (
+        sum +
+        Number(item.no_of_units || 1) *
+          Number(item.expected_unit_price || item.unit_price || item.price || 0)
+      );
+    }, 0);
+  };
+
+  const addVerifyProduct = () => {
+    const first = productBarcodes[0];
+
+    if (!first) {
+      alert('No catalog products available to add.');
+      return;
+    }
+
+    setVerifyItems((prev) => [
+      ...prev,
+      {
+        id: `new-${Date.now()}`,
+        is_new: true,
+        product_barcode_id: first.id,
+        product_id: Number(first.product_id),
+        product_name:
+          first.product_name_eng ||
+          first.product_name_tel ||
+          first.product_code ||
+          '',
+        product_code: first.product_code || '',
+        mk_barcode: first.mk_barcode || '',
+        barcode: first.barcode || '',
+        category_id: Number(first.category_id),
+        category_name:
+          first.category_name_english || first.category_name || '-',
+        brand_id: Number(first.brand_id),
+        brand_name: getBrandName(first) || '-',
+        unit_id: Number(first.unit_id),
+        unit_name: first.unit_name || first.unit_short_code || '-',
+        unit_short_code: first.unit_short_code || '',
+        qty: Number(first.quantity || 1),
+        no_of_units: 1,
+        expected_unit_price: 0,
+        actual_unit_price: 0,
+        exp_date: '',
+        mfg_date: '',
+        sku_id: '',
+        inventory_remarks: 'Added during verification',
+        is_verified: false,
+      },
+    ]);
+  };
+
+  const removeVerifyProduct = (index) => {
+    const ok = window.confirm('Remove this product from verification?');
+    if (!ok) return;
+
+    setVerifyItems((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const updateVerifyProduct = (index, barcodeRowId) => {
+    const selected = productBarcodes.find(
+      (p) => String(p.id) === String(barcodeRowId)
+    );
+
+    if (!selected) return;
+
+    setVerifyItems((prev) =>
+      prev.map((item, i) =>
+        i === index
+          ? {
+              ...item,
+              product_barcode_id: selected.id,
+              product_id: Number(selected.product_id),
+              product_name:
+                selected.product_name_eng ||
+                selected.product_name_tel ||
+                selected.product_code ||
+                '',
+              product_code: selected.product_code || '',
+              mk_barcode: selected.mk_barcode || '',
+              barcode: selected.barcode || '',
+              category_id: Number(selected.category_id),
+              category_name:
+                selected.category_name_english || selected.category_name || '-',
+              brand_id: Number(selected.brand_id),
+              brand_name: getBrandName(selected) || '-',
+              unit_id: Number(selected.unit_id),
+              unit_name: selected.unit_name || selected.unit_short_code || '-',
+              unit_short_code: selected.unit_short_code || '',
+              qty: Number(selected.quantity || 1),
+            }
+          : item
+      )
+    );
+  };
+
+  const buildPurchaseOrderText = (po) => {
+    const items = getDisplayItems(po);
+
+    let text = `*MANAKIRANA PURCHASE ORDER*\n\n`;
+    text += `PO No: ${po.po_number || po.id}\n`;
+    text += `Status: ${po.status || '-'}\n`;
+    text += `Supplier: ${po.supplier_name || po.supplier_id || '-'}\n`;
+    text += `Supplier Phone: ${po.supplier_phone || '-'}\n`;
+    text += `Warehouse: ${po.warehouse_name || po.warehouse_id || '-'}\n`;
+    text += `Expected Date: ${
+      po.expected_date ? String(po.expected_date).slice(0, 10) : '-'
+    }\n`;
+    text += `Remarks: ${po.remarks || '-'}\n\n`;
+    text += `*Items*\n`;
+
+    items.forEach((item, index) => {
+      text += `${index + 1}. ${item.product_name || item.product_id}\n`;
+      text += `   Code: ${item.product_code || '-'}\n`;
+      text += `   MK Barcode: ${normalizeBarcode(item.mk_barcode) || '-'}\n`;
+      text += `   Brand: ${item.brand_name || '-'}\n`;
+      text += `   Category: ${item.category_name || '-'}\n`;
+      text += `   Qty: ${Number(item.qty || 0).toFixed(3)} ${
+        item.unit_short_code || item.unit_name || ''
+      }\n`;
+      text += `   No. Units: ${Number(item.no_of_units || 1).toFixed(0)}\n\n`;
+    });
+
+    text += `Please supply the above items.`;
+
+    return text;
+  };
+
+  const sharePurchaseOrderWhatsApp = (po) => {
+    const message = encodeURIComponent(buildPurchaseOrderText(po));
+    const phone = String(po.supplier_phone || '').replace(/\D/g, '');
+    const url = phone
+      ? `https://wa.me/91${phone.slice(-10)}?text=${message}`
+      : `https://wa.me/?text=${message}`;
+
+    window.open(url, '_blank');
+  };
+
+  const printPurchaseOrder = (po) => {
+    const items = getDisplayItems(po);
+    const printWindow = window.open('', '_blank', 'width=900,height=700');
+
+    if (!printWindow) {
+      alert('Please allow popup to print purchase order.');
+      return;
+    }
+
+    const rows = items
+      .map(
+        (item, index) => `
+          <tr>
+            <td>${index + 1}</td>
+            <td>
+              <strong>${item.product_name || item.product_id || '-'}</strong><br/>
+              <small>Code: ${item.product_code || '-'}</small><br/>
+              <small>MK: ${normalizeBarcode(item.mk_barcode) || '-'}</small>
+            </td>
+            <td>${item.category_name || '-'}</td>
+            <td>${item.brand_name || '-'}</td>
+            <td>${item.unit_name || item.unit_short_code || '-'}</td>
+            <td class="right">${Number(item.qty || 0).toFixed(3)}</td>
+            <td class="right">${Number(item.no_of_units || 1).toFixed(0)}</td>
+          </tr>
+        `
+      )
+      .join('');
+
+    printWindow.document.write(`
+      <!doctype html>
+      <html>
+        <head>
+          <title>Purchase Order ${po.po_number || po.id}</title>
+          <style>
+            body { font-family: Arial, sans-serif; padding: 24px; color: #111827; }
+            h1 { text-align: center; margin: 0; font-size: 22px; }
+            .sub { text-align: center; margin-top: 4px; font-size: 13px; color: #555; }
+            .info {
+              display: grid;
+              grid-template-columns: 1fr 1fr;
+              gap: 8px 24px;
+              margin: 24px 0;
+              font-size: 14px;
+            }
+            .info div { border-bottom: 1px solid #eee; padding-bottom: 4px; }
+            table { width: 100%; border-collapse: collapse; font-size: 13px; }
+            th, td { border: 1px solid #d1d5db; padding: 8px; vertical-align: top; }
+            th { background: #eff6ff; text-align: left; }
+            .right { text-align: right; }
+            .footer {
+              margin-top: 40px;
+              display: flex;
+              justify-content: space-between;
+              font-size: 14px;
+            }
+            @media print {
+              button { display: none; }
+              body { padding: 12px; }
+            }
+          </style>
+        </head>
+        <body>
+          <h1>MANAKIRANA PURCHASE ORDER</h1>
+          <div class="sub">Supplier Copy - No Internal Price / Amount</div>
+
+          <div class="info">
+            <div><strong>PO No:</strong> ${po.po_number || po.id || '-'}</div>
+            <div><strong>Status:</strong> ${po.status || '-'}</div>
+            <div><strong>Supplier:</strong> ${
+              po.supplier_name || po.supplier_id || '-'
+            }</div>
+            <div><strong>Supplier Phone:</strong> ${po.supplier_phone || '-'}</div>
+            <div><strong>Warehouse:</strong> ${
+              po.warehouse_name || po.warehouse_id || '-'
+            }</div>
+            <div><strong>Warehouse Code:</strong> ${po.warehouse_code || '-'}</div>
+            <div><strong>Expected Date:</strong> ${
+              po.expected_date ? String(po.expected_date).slice(0, 10) : '-'
+            }</div>
+            <div><strong>Remarks:</strong> ${po.remarks || '-'}</div>
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th>S.No</th>
+                <th>Product</th>
+                <th>Category</th>
+                <th>Brand</th>
+                <th>Unit</th>
+                <th>Qty</th>
+                <th>No. Units</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${
+                rows ||
+                `<tr>
+                  <td colspan="7" style="text-align:center;">No items</td>
+                </tr>`
+              }
+            </tbody>
+          </table>
+
+          <div class="footer">
+            <div>Prepared By</div>
+            <div>Supplier Signature</div>
+          </div>
+
+          <script>
+            window.onload = function () {
+              window.print();
+            };
+          </script>
+        </body>
+      </html>
+    `);
+
+    printWindow.document.close();
+  };
 
   const startEditStatus = (po) => {
     setEditingId(po.id);
@@ -184,6 +510,7 @@ const PurchaseOrdersStatusSections = ({
         product_barcode_id:
           item.product_barcode_id ||
           item.product_barcode_id_fk ||
+          item.barcode_id ||
           getProductBarcodeId(item),
         product_id: Number(item.product_id),
         category_id: Number(item.category_id),
@@ -222,29 +549,23 @@ const PurchaseOrdersStatusSections = ({
     copy[index] = {
       ...copy[index],
       product_barcode_id: selected.id,
-
       product_id: Number(selected.product_id),
       product_name:
         selected.product_name_eng ||
         selected.product_name_tel ||
         selected.product_code ||
         '',
-
       product_code: selected.product_code || '',
       mk_barcode: selected.mk_barcode || '',
       barcode: selected.barcode || '',
-
       category_id: Number(selected.category_id),
       category_name:
         selected.category_name_english || selected.category_name || '-',
-
       brand_id: Number(selected.brand_id),
       brand_name: getBrandName(selected) || '-',
-
       unit_id: Number(selected.unit_id),
       unit_name: selected.unit_name || selected.unit_short_code || '-',
       unit_short_code: selected.unit_short_code || '',
-
       qty: Number(selected.quantity || 1),
     };
 
@@ -266,17 +587,19 @@ const PurchaseOrdersStatusSections = ({
         id: po.id,
         items: editedItems.map((item) => ({
           id: item.id,
-
+          product_barcode_id:
+            item.product_barcode_id ||
+            item.product_barcode_id_fk ||
+            item.barcode_id ||
+            getProductBarcodeId(item),
           product_id: Number(item.product_id),
           category_id: Number(item.category_id),
           brand_id: Number(item.brand_id),
           unit_id: Number(item.unit_id),
-
           qty: Number(item.qty),
           no_of_units: Number(item.no_of_units || 1),
           expected_unit_price: Number(item.expected_unit_price || 0),
           actual_unit_price: item.actual_unit_price ?? null,
-
           product_name: item.product_name,
           product_code: item.product_code,
           category_name: item.category_name,
@@ -302,11 +625,20 @@ const PurchaseOrdersStatusSections = ({
     setVerifyItems(
       getDisplayItems(po).map((item) => ({
         ...item,
+        product_barcode_id:
+          item.product_barcode_id ||
+          item.product_barcode_id_fk ||
+          item.barcode_id ||
+          getProductBarcodeId(item),
         actual_unit_price:
           item.actual_unit_price ?? item.expected_unit_price ?? 0,
         is_verified: Boolean(item.is_verified),
         mk_barcode: item.mk_barcode || '',
         barcode: item.barcode || '',
+        exp_date: item.exp_date || '',
+        mfg_date: item.mfg_date || '',
+        sku_id: item.sku_id || '',
+        inventory_remarks: item.inventory_remarks || '',
       }))
     );
   };
@@ -316,6 +648,11 @@ const PurchaseOrdersStatusSections = ({
     setVerifyItems([]);
     setVerifyRemarks('');
     setScanBarcode('');
+    setItemVerifyModal({
+      open: false,
+      index: null,
+      item: null,
+    });
   };
 
   const updateVerifyItem = (index, field, value) => {
@@ -324,12 +661,58 @@ const PurchaseOrdersStatusSections = ({
     setVerifyItems(copy);
   };
 
-  const toggleVerifyItem = (index) => {
+  const saveItemInventoryDetails = (updatedItem) => {
     setVerifyItems((prev) =>
       prev.map((item, i) =>
-        i === index ? { ...item, is_verified: !item.is_verified } : item
+        i === itemVerifyModal.index
+          ? {
+              ...item,
+              ...updatedItem,
+              product_barcode_id:
+                updatedItem.product_barcode_id ||
+                item.product_barcode_id ||
+                getProductBarcodeId(item),
+              is_verified: true,
+            }
+          : item
       )
     );
+
+    setItemVerifyModal({
+      open: false,
+      index: null,
+      item: null,
+    });
+  };
+
+  const toggleVerifyItem = (index) => {
+    const item = verifyItems[index];
+
+    if (!item) return;
+
+    if (item.is_verified) {
+      setVerifyItems((prev) =>
+        prev.map((row, i) =>
+          i === index
+            ? {
+                ...row,
+                is_verified: false,
+                exp_date: '',
+                mfg_date: '',
+                sku_id: '',
+                inventory_remarks: '',
+              }
+            : row
+        )
+      );
+      return;
+    }
+
+    setItemVerifyModal({
+      open: true,
+      index,
+      item,
+    });
   };
 
   const confirmItemByBarcode = (barcode) => {
@@ -346,11 +729,17 @@ const PurchaseOrdersStatusSections = ({
       return;
     }
 
-    setVerifyItems((prev) =>
-      prev.map((item, i) =>
-        i === index ? { ...item, is_verified: true, just_scanned: true } : item
-      )
-    );
+    setItemVerifyModal({
+      open: true,
+      index,
+      item: {
+        ...verifyItems[index],
+        product_barcode_id:
+          verifyItems[index].product_barcode_id ||
+          getProductBarcodeId(verifyItems[index]),
+        just_scanned: true,
+      },
+    });
 
     setTimeout(() => {
       rowRefs.current[index]?.scrollIntoView({
@@ -379,23 +768,103 @@ const PurchaseOrdersStatusSections = ({
       }
     }
 
-    await dispatch(
+    const verifiedItems = verifyItems.filter((item) => item.is_verified);
+
+    if (verifiedItems.length === 0) {
+      alert('Please verify at least one item.');
+      return;
+    }
+
+    const verifiedWithoutExpiryOrSku = verifiedItems.filter(
+      (item) => !item.exp_date || !item.sku_id
+    );
+
+    if (verifiedWithoutExpiryOrSku.length > 0) {
+      alert('Please enter expiry date and SKU for all verified items.');
+      return;
+    }
+
+    const batchId = makeBatchId();
+
+    const existingVerifiedItems = verifyItems.filter((item) => !item.is_new);
+
+    const verifyResult = await dispatch(
       verifyReceivedPurchaseOrder({
         id: po.id,
         remarks:
           notVerified.length > 0
             ? `APPROVED WITH MISSING ITEMS: ${verifyRemarks}`
             : verifyRemarks || null,
-        items: verifyItems.map((item) => ({
+        items: existingVerifiedItems.map((item) => ({
           id: item.id,
-          actual_unit_price: Number(item.actual_unit_price),
+          actual_unit_price: Number(item.actual_unit_price || 0),
           is_verified: Boolean(item.is_verified),
           missing: !item.is_verified,
+          inventory_remarks: item.inventory_remarks || null,
         })),
       })
     );
 
+    if (!verifyReceivedPurchaseOrder.fulfilled.match(verifyResult)) {
+      alert(verifyResult.payload || 'Purchase verification failed');
+      return;
+    }
+
+    for (const item of verifiedItems) {
+      const productBarcodeId =
+        item.product_barcode_id ||
+        item.product_barcode_id_fk ||
+        item.barcode_id ||
+        getProductBarcodeId(item);
+
+      if (!productBarcodeId) {
+        alert(
+          `Product barcode id missing for ${
+            item.product_name || item.product_id
+          }. Please select the product again or check catalog barcode data.`
+        );
+        return;
+      }
+
+      const payload = {
+        purchase_order_id: po.id,
+        purchase_order_item_id: item.is_new ? null : item.id,
+        product_barcode_id: productBarcodeId,
+        product_id: item.product_id,
+        batch_id: batchId,
+        sku_id: item.sku_id,
+        warehouse_id: po.warehouse_id,
+        supplier_id: po.supplier_id || po.stakeholders_id,
+        stakeholders_id: po.stakeholders_id || po.supplier_id,
+        qty: Number(item.qty || 0),
+        no_of_units: Number(item.no_of_units || 1),
+        unit_price: Number(item.actual_unit_price || 0),
+        mfg_date: item.mfg_date || null,
+        exp_date: item.exp_date,
+        remarks: item.inventory_remarks || verifyRemarks || null,
+      };
+
+      console.log('receiveVerifiedPurchaseToInventory payload:', payload);
+
+      const inventoryResult = await dispatch(
+        receiveVerifiedPurchaseToInventory(payload)
+      );
+
+      if (receiveVerifiedPurchaseToInventory.rejected.match(inventoryResult)) {
+        alert(
+          inventoryResult.payload ||
+            `Inventory update failed for ${item.product_name || item.product_id}`
+        );
+        return;
+      }
+    }
+
+    alert('Purchase verified, inventory updated, and stock movement added.');
+
     dispatch(fetchPurchaseOrders());
+    dispatch(fetchInventoryProducts());
+    dispatch(fetchStockTransactions());
+
     cancelVerify();
   };
 
@@ -438,6 +907,7 @@ const PurchaseOrdersStatusSections = ({
                     <th className="p-2 text-center">Edit Status</th>
                     <th className="p-2 text-center">Edit Items</th>
                     <th className="p-2 text-center">Verify</th>
+                    <th className="p-2 text-center">Share / Print</th>
                     <th className="p-2 text-center">Details</th>
                   </tr>
                 </thead>
@@ -445,10 +915,7 @@ const PurchaseOrdersStatusSections = ({
                 <tbody>
                   {grouped[status].length === 0 && (
                     <tr>
-                      <td
-                        colSpan="12"
-                        className="p-4 text-center text-gray-500"
-                      >
+                      <td colSpan="13" className="p-4 text-center text-gray-500">
                         No {status} orders
                       </td>
                     </tr>
@@ -466,6 +933,9 @@ const PurchaseOrdersStatusSections = ({
                       : isEditingItems
                       ? editedItems
                       : displayItems;
+
+                    const isSent =
+                      String(po.status || '').toLowerCase() === 'sent';
 
                     return (
                       <React.Fragment key={po.id}>
@@ -492,7 +962,7 @@ const PurchaseOrdersStatusSections = ({
                           </td>
 
                           <td className="p-2 text-right">
-                            ₹{Number(po.total_amount || 0).toFixed(2)}
+                            ₹{getPoTotal(po).toFixed(2)}
                           </td>
 
                           <td className="p-2">
@@ -634,6 +1104,29 @@ const PurchaseOrdersStatusSections = ({
                           </td>
 
                           <td className="p-2 text-center">
+                            {isSent ? (
+                              <div className="flex justify-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => sharePurchaseOrderWhatsApp(po)}
+                                  className="rounded bg-green-600 px-3 py-1 text-xs font-semibold text-white hover:bg-green-700"
+                                >
+                                  WhatsApp
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => printPurchaseOrder(po)}
+                                  className="rounded bg-slate-700 px-3 py-1 text-xs font-semibold text-white hover:bg-slate-800"
+                                >
+                                  Print
+                                </button>
+                              </div>
+                            ) : (
+                              '-'
+                            )}
+                          </td>
+
+                          <td className="p-2 text-center">
                             <button
                               type="button"
                               onClick={() =>
@@ -648,7 +1141,7 @@ const PurchaseOrdersStatusSections = ({
 
                         {isOpen && (
                           <tr>
-                            <td colSpan="12" className="p-3 bg-gray-50">
+                            <td colSpan="13" className="p-3 bg-gray-50">
                               {isVerifying && (
                                 <div className="mb-3 bg-purple-50 border border-purple-200 rounded-lg p-3">
                                   <label className="block text-xs font-semibold mb-1">
@@ -682,15 +1175,26 @@ const PurchaseOrdersStatusSections = ({
                                     placeholder="Required if any item is missed"
                                   />
 
-                                  <div className="mt-2 text-sm font-semibold">
-                                    Confirmed:{' '}
-                                    <span className="text-green-700">
-                                      {
-                                        verifyItems.filter((i) => i.is_verified)
-                                          .length
-                                      }
-                                    </span>{' '}
-                                    / {verifyItems.length}
+                                  <div className="mt-2 flex flex-wrap items-center gap-3">
+                                    <div className="text-sm font-semibold">
+                                      Confirmed:{' '}
+                                      <span className="text-green-700">
+                                        {
+                                          verifyItems.filter(
+                                            (i) => i.is_verified
+                                          ).length
+                                        }
+                                      </span>{' '}
+                                      / {verifyItems.length}
+                                    </div>
+
+                                    <button
+                                      type="button"
+                                      onClick={addVerifyProduct}
+                                      className="rounded bg-blue-700 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800"
+                                    >
+                                      + Add Product
+                                    </button>
                                   </div>
                                 </div>
                               )}
@@ -703,13 +1207,13 @@ const PurchaseOrdersStatusSections = ({
                                         Confirmed
                                       </th>
                                     )}
-                                    <th className="p-2 text-left w-[300px]">
+                                    <th className="p-2 text-left w-[330px]">
                                       Product
                                     </th>
-                                    <th className="p-2 text-left w-[150px]">
+                                    <th className="p-2 text-left w-[140px]">
                                       Category
                                     </th>
-                                    <th className="p-2 text-left w-[140px]">
+                                    <th className="p-2 text-left w-[130px]">
                                       Brand
                                     </th>
                                     <th className="p-2 text-left w-[90px]">
@@ -730,6 +1234,18 @@ const PurchaseOrdersStatusSections = ({
                                     <th className="p-2 text-right w-[130px]">
                                       Total
                                     </th>
+
+                                    {isVerifying && (
+                                      <>
+                                        <th className="p-2 text-left w-[220px]">
+                                          Product Remarks
+                                        </th>
+                                        <th className="p-2 text-center w-[90px]">
+                                          Delete
+                                        </th>
+                                      </>
+                                    )}
+
                                     {isEditingItems && (
                                       <th className="p-2 text-center w-[100px]">
                                         Remove
@@ -743,7 +1259,6 @@ const PurchaseOrdersStatusSections = ({
                                     const effectivePrice =
                                       getEffectivePrice(item);
                                     const total =
-                                      // Number(item.qty || 0) *
                                       Number(item.no_of_units || 1) *
                                       effectivePrice;
 
@@ -755,6 +1270,7 @@ const PurchaseOrdersStatusSections = ({
                                         : '';
 
                                     const selectedProductBarcodeId =
+                                      item.product_barcode_id ||
                                       getProductBarcodeId(item);
 
                                     return (
@@ -765,8 +1281,7 @@ const PurchaseOrdersStatusSections = ({
                                         }}
                                         tabIndex={-1}
                                         onClick={() =>
-                                          isVerifying &&
-                                          toggleVerifyItem(index)
+                                          isVerifying && toggleVerifyItem(index)
                                         }
                                         className={`border-t ${
                                           isVerifying ? 'cursor-pointer' : ''
@@ -776,9 +1291,7 @@ const PurchaseOrdersStatusSections = ({
                                           <td className="p-2 text-center">
                                             <input
                                               type="checkbox"
-                                              checked={Boolean(
-                                                item.is_verified
-                                              )}
+                                              checked={Boolean(item.is_verified)}
                                               onChange={() =>
                                                 toggleVerifyItem(index)
                                               }
@@ -790,7 +1303,31 @@ const PurchaseOrdersStatusSections = ({
                                         )}
 
                                         <td className="p-2">
-                                          {isEditingItems ? (
+                                          {isVerifying && item.is_new ? (
+                                            <select
+                                              value={
+                                                item.product_barcode_id || ''
+                                              }
+                                              onChange={(e) =>
+                                                updateVerifyProduct(
+                                                  index,
+                                                  e.target.value
+                                                )
+                                              }
+                                              onClick={(e) =>
+                                                e.stopPropagation()
+                                              }
+                                              className="border rounded px-2 py-1 w-full"
+                                            >
+                                              {productBarcodes.map((p) => (
+                                                <option key={p.id} value={p.id}>
+                                                  {p.product_name_eng ||
+                                                    p.product_name_tel ||
+                                                    p.product_code}
+                                                </option>
+                                              ))}
+                                            </select>
+                                          ) : isEditingItems ? (
                                             <select
                                               value={selectedProductBarcodeId}
                                               onChange={(e) =>
@@ -801,8 +1338,7 @@ const PurchaseOrdersStatusSections = ({
                                               }
                                               className="border rounded px-2 py-1 w-full"
                                             >
-                                              {selectedProductBarcodeId ===
-                                                '' && (
+                                              {!selectedProductBarcodeId && (
                                                 <option value="" disabled>
                                                   {item.product_name ||
                                                     'Product not matched'}
@@ -813,10 +1349,7 @@ const PurchaseOrdersStatusSections = ({
                                                 <option key={p.id} value={p.id}>
                                                   {p.product_name_eng ||
                                                     p.product_name_tel ||
-                                                    p.product_code}{' '}
-                                                  {/* | Code:{' '}
-                                                  {p.product_code || '-'} | MK:{' '}
-                                                  {p.mk_barcode || '-'} */}
+                                                    p.product_code}
                                                 </option>
                                               ))}
                                             </select>
@@ -827,8 +1360,7 @@ const PurchaseOrdersStatusSections = ({
                                                   item.product_id}
                                               </div>
                                               <div className="text-xs text-gray-500">
-                                                Code:{' '}
-                                                {item.product_code || '-'}
+                                                Code: {item.product_code || '-'}
                                               </div>
                                               <div className="text-xs text-gray-500">
                                                 MK:{' '}
@@ -842,6 +1374,13 @@ const PurchaseOrdersStatusSections = ({
                                                   item.barcode
                                                 ) || '-'}
                                               </div>
+                                              {isVerifying &&
+                                                item.is_verified && (
+                                                  <div className="mt-1 text-xs text-green-700">
+                                                    Exp: {item.exp_date || '-'} |
+                                                    SKU: {item.sku_id || '-'}
+                                                  </div>
+                                                )}
                                             </>
                                           )}
                                         </td>
@@ -866,18 +1405,27 @@ const PurchaseOrdersStatusSections = ({
                                         </td>
 
                                         <td className="p-2 text-right">
-                                          {isEditingItems ? (
+                                          {isEditingItems || isVerifying ? (
                                             <input
                                               type="number"
                                               min="0.001"
                                               step="0.001"
                                               value={item.qty}
                                               onChange={(e) =>
-                                                updateEditedItem(
-                                                  index,
-                                                  'qty',
-                                                  e.target.value
-                                                )
+                                                isVerifying
+                                                  ? updateVerifyItem(
+                                                      index,
+                                                      'qty',
+                                                      e.target.value
+                                                    )
+                                                  : updateEditedItem(
+                                                      index,
+                                                      'qty',
+                                                      e.target.value
+                                                    )
+                                              }
+                                              onClick={(e) =>
+                                                e.stopPropagation()
                                               }
                                               className="border rounded px-2 py-1 w-full text-right"
                                             />
@@ -887,18 +1435,27 @@ const PurchaseOrdersStatusSections = ({
                                         </td>
 
                                         <td className="p-2 text-right">
-                                          {isEditingItems ? (
+                                          {isEditingItems || isVerifying ? (
                                             <input
                                               type="number"
                                               min="1"
                                               step="1"
                                               value={item.no_of_units}
                                               onChange={(e) =>
-                                                updateEditedItem(
-                                                  index,
-                                                  'no_of_units',
-                                                  e.target.value
-                                                )
+                                                isVerifying
+                                                  ? updateVerifyItem(
+                                                      index,
+                                                      'no_of_units',
+                                                      e.target.value
+                                                    )
+                                                  : updateEditedItem(
+                                                      index,
+                                                      'no_of_units',
+                                                      e.target.value
+                                                    )
+                                              }
+                                              onClick={(e) =>
+                                                e.stopPropagation()
                                               }
                                               className="border rounded px-2 py-1 w-full text-right"
                                             />
@@ -965,6 +1522,43 @@ const PurchaseOrdersStatusSections = ({
                                         <td className="p-2 text-right font-semibold">
                                           ₹{total.toFixed(2)}
                                         </td>
+
+                                        {isVerifying && (
+                                          <>
+                                            <td className="p-2">
+                                              <input
+                                                value={
+                                                  item.inventory_remarks || ''
+                                                }
+                                                onChange={(e) =>
+                                                  updateVerifyItem(
+                                                    index,
+                                                    'inventory_remarks',
+                                                    e.target.value
+                                                  )
+                                                }
+                                                onClick={(e) =>
+                                                  e.stopPropagation()
+                                                }
+                                                className="w-full rounded border px-2 py-1"
+                                                placeholder="Product-wise remarks"
+                                              />
+                                            </td>
+
+                                            <td className="p-2 text-center">
+                                              <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  removeVerifyProduct(index);
+                                                }}
+                                                className="text-red-600 hover:underline"
+                                              >
+                                                Delete
+                                              </button>
+                                            </td>
+                                          </>
+                                        )}
 
                                         {isEditingItems && (
                                           <td className="p-2 text-center">
@@ -1034,6 +1628,19 @@ const PurchaseOrdersStatusSections = ({
           </div>
         );
       })}
+
+      <VerifyItemInventoryModal
+        open={itemVerifyModal.open}
+        item={itemVerifyModal.item}
+        onClose={() =>
+          setItemVerifyModal({
+            open: false,
+            index: null,
+            item: null,
+          })
+        }
+        onSave={saveItemInventoryDetails}
+      />
     </section>
   );
 };

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 
 import {
@@ -64,6 +64,109 @@ const makeMkBarcode = ({
   );
 };
 
+const SuggestionInput = ({
+  field,
+  value,
+  options = [],
+  getOptionLabel,
+  onChange,
+  required,
+  disabled,
+}) => {
+  const wrapperRef = useRef(null);
+  const [text, setText] = useState('');
+  const [open, setOpen] = useState(false);
+
+  const selectedItem = useMemo(
+    () =>
+      options.find(
+        (item) => String(item[field.valueKey]) === String(value ?? '')
+      ),
+    [options, field.valueKey, value]
+  );
+
+  useEffect(() => {
+    if (selectedItem) {
+      setText(getOptionLabel(field, selectedItem));
+    }
+  }, [selectedItem, field, getOptionLabel]);
+
+  useEffect(() => {
+    if (!value) {
+      setText('');
+    }
+  }, [value]);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target)) {
+        setOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const filteredOptions = useMemo(() => {
+    const q = text.trim().toLowerCase();
+
+    if (!q) return options.slice(0, 30);
+
+    return options
+      .filter((item) =>
+        getOptionLabel(field, item).toLowerCase().includes(q)
+      )
+      .slice(0, 30);
+  }, [options, text, field, getOptionLabel]);
+
+  const handleSelect = (item) => {
+    onChange(field.name, item[field.valueKey]);
+    setText(getOptionLabel(field, item));
+    setOpen(false);
+  };
+
+  return (
+    <div ref={wrapperRef} className="relative">
+      <input
+        type="text"
+        value={text}
+        required={required}
+        disabled={disabled}
+        placeholder={`Type ${field.label}`}
+        onFocus={() => setOpen(true)}
+        onChange={(e) => {
+          setText(e.target.value);
+          setOpen(true);
+        }}
+        className="border rounded-lg px-3 py-2 text-sm w-full disabled:bg-gray-100"
+      />
+
+      {open && !disabled && (
+        <div className="absolute z-50 mt-1 max-h-60 w-full overflow-auto rounded-lg border bg-white shadow-lg">
+          {filteredOptions.length > 0 ? (
+            filteredOptions.map((item) => (
+              <button
+                key={item[field.valueKey]}
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => handleSelect(item)}
+                className="block w-full px-3 py-2 text-left text-sm hover:bg-blue-50"
+              >
+                {getOptionLabel(field, item)}
+              </button>
+            ))
+          ) : (
+            <div className="px-3 py-2 text-sm text-gray-500">
+              No matching records
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const CatalogCrudSection = ({
   title,
   entity,
@@ -77,10 +180,10 @@ const CatalogCrudSection = ({
     (state) => state.catalogCrud || {}
   );
 
-  const rows = data[entity] || [];
+  const rows = useMemo(() => data[entity] || [], [data, entity]);
   const codeConfig = entityCodeConfig[entity];
 
-  const getInitialForm = () => {
+  const getInitialForm = useCallback(() => {
     const empty = emptyFromFields(fields);
 
     if (codeConfig) {
@@ -92,7 +195,7 @@ const CatalogCrudSection = ({
     }
 
     return empty;
-  };
+  }, [fields, codeConfig, rows]);
 
   const [form, setForm] = useState(() => getInitialForm());
   const [editingId, setEditingId] = useState(null);
@@ -114,7 +217,7 @@ const CatalogCrudSection = ({
       key: idKey,
       direction: 'asc',
     });
-  }, [fields, entity, idKey]);
+  }, [getInitialForm, entity, idKey]);
 
   useEffect(() => {
     if (!codeConfig || editingId) return;
@@ -127,24 +230,27 @@ const CatalogCrudSection = ({
         codeConfig.prefix
       ),
     }));
-  }, [rows.length, entity, editingId]);
+  }, [rows, codeConfig, editingId]);
 
-  const handleChange = (name, value) => {
-    setForm((prev) => {
-      const next = { ...prev, [name]: value };
+  const handleChange = useCallback(
+    (name, value) => {
+      setForm((prev) => {
+        const next = { ...prev, [name]: value };
 
-      if (
-        entity === 'product-barcodes' &&
-        ['product_id', 'brand_id', 'category_id', 'unit_id', 'quantity'].includes(
-          name
-        )
-      ) {
-        next.mk_barcode = makeMkBarcode(next);
-      }
+        if (
+          entity === 'product-barcodes' &&
+          ['product_id', 'brand_id', 'category_id', 'unit_id', 'quantity'].includes(
+            name
+          )
+        ) {
+          next.mk_barcode = makeMkBarcode(next);
+        }
 
-      return next;
-    });
-  };
+        return next;
+      });
+    },
+    [entity]
+  );
 
   const resetForm = () => {
     setForm(getInitialForm());
@@ -196,7 +302,7 @@ const CatalogCrudSection = ({
     }
   };
 
-  const getOptionLabel = (field, item) => {
+  const getOptionLabel = useCallback((field, item) => {
     if (!item) return '';
 
     if (field.optionsKey === 'products') {
@@ -206,11 +312,15 @@ const CatalogCrudSection = ({
     }
 
     if (field.optionsKey === 'brands') {
-      return item.brand_name_english || item.name || '';
+      return `${item.brand_name_english || ''} ${
+        item.brand_code ? `(${item.brand_code})` : ''
+      }`.trim();
     }
 
     if (field.optionsKey === 'categories') {
-      return item.category_name_english || item.name || '';
+      return `${item.category_name_english || ''} ${
+        item.category_code ? `(${item.category_code})` : ''
+      }`.trim();
     }
 
     if (field.optionsKey === 'units') {
@@ -219,53 +329,60 @@ const CatalogCrudSection = ({
       }`.trim();
     }
 
-    return item[field.labelKey] || item.name || item[idKey];
-  };
+    return item[field.labelKey] || item.name || item.id || '';
+  }, []);
 
-  const getCellValue = (row, field) => {
-    const value = row[field.name];
+  const getCellValue = useCallback(
+    (row, field) => {
+      const value = row[field.name];
 
-    if (entity === 'employees' && field.name === 'first_name') {
-      return `${row.first_name || ''} ${row.last_name || ''}`.trim();
-    }
-
-    if (entity === 'product-barcodes') {
-      if (field.name === 'product_id') {
-        return `${row.product_name_eng || row.product_id || ''} ${
-          row.product_code ? `(${row.product_code})` : ''
-        }`.trim();
+      if (entity === 'employees' && field.name === 'first_name') {
+        return `${row.first_name || ''} ${row.last_name || ''}`.trim();
       }
 
-      if (field.name === 'brand_id') {
-        return row.brand_name_english || row.brand_id || '';
+      if (entity === 'product-barcodes') {
+        if (field.name === 'product_id') {
+          return `${row.product_name_eng || row.product_id || ''} ${
+            row.product_code ? `(${row.product_code})` : ''
+          }`.trim();
+        }
+
+        if (field.name === 'brand_id') {
+          return row.brand_name_english || row.brand_id || '';
+        }
+
+        if (field.name === 'category_id') {
+          return row.category_name_english || row.category_id || '';
+        }
+
+        if (field.name === 'unit_id') {
+          return `${row.unit_name || row.unit_id || ''} ${
+            row.unit_short_code ? `(${row.unit_short_code})` : ''
+          }`.trim();
+        }
       }
 
-      if (field.name === 'category_id') {
-        return row.category_name_english || row.category_id || '';
+      if (field.type === 'checkbox') {
+        return value ? 'true' : 'false';
       }
 
-      if (field.name === 'unit_id') {
-        return `${row.unit_name || row.unit_id || ''} ${
-          row.unit_short_code ? `(${row.unit_short_code})` : ''
-        }`.trim();
+      if (field.name === 'created_at' || field.name === 'updated_at') {
+        return formatDate(value);
       }
-    }
 
-    if (field.type === 'checkbox') {
-      return value ? 'true' : 'false';
-    }
+      return value ?? '';
+    },
+    [entity]
+  );
 
-    if (field.name === 'created_at' || field.name === 'updated_at') {
-      return formatDate(value);
-    }
-
-    return value ?? '';
-  };
-
-  const visibleTableFields = fields.filter((field) => {
-    if (entity === 'employees' && field.name === 'last_name') return false;
-    return true;
-  });
+  const visibleTableFields = useMemo(
+    () =>
+      fields.filter((field) => {
+        if (entity === 'employees' && field.name === 'last_name') return false;
+        return true;
+      }),
+    [fields, entity]
+  );
 
   const filteredRows = useMemo(() => {
     const q = search.toLowerCase();
@@ -348,7 +465,7 @@ const CatalogCrudSection = ({
     });
 
     return list;
-  }, [filteredRows, sortConfig, idKey, visibleTableFields]);
+  }, [filteredRows, sortConfig, idKey, visibleTableFields, getCellValue]);
 
   return (
     <section className="bg-white rounded-xl shadow-sm border p-4 space-y-4">
@@ -383,24 +500,15 @@ const CatalogCrudSection = ({
               </label>
 
               {field.type === 'select' ? (
-                <select
-                  value={form[field.name] ?? ''}
-                  onChange={(e) => handleChange(field.name, e.target.value)}
+                <SuggestionInput
+                  field={field}
+                  value={form[field.name]}
+                  options={catalogOptions[field.optionsKey] || []}
+                  getOptionLabel={getOptionLabel}
+                  onChange={handleChange}
                   required={field.required}
                   disabled={field.readOnly || isAutoCodeField}
-                  className="border rounded-lg px-3 py-2 text-sm w-full"
-                >
-                  <option value="">Select {field.label}</option>
-
-                  {(catalogOptions[field.optionsKey] || []).map((item) => (
-                    <option
-                      key={item[field.valueKey]}
-                      value={item[field.valueKey]}
-                    >
-                      {getOptionLabel(field, item)}
-                    </option>
-                  ))}
-                </select>
+                />
               ) : field.type === 'checkbox' ? (
                 <input
                   type="checkbox"
