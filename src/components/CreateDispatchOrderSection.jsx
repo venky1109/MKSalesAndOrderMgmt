@@ -290,10 +290,6 @@ const CreateDispatchOrderSection = ({
       })),
     };
 
-    console.log('================ DISPATCH CREATE PAYLOAD ================');
-    console.table(payload.items);
-    console.log('RAW payload:', payload);
-
     const result = await dispatch(createInventoryDispatchOrder(payload));
 
     if (createInventoryDispatchOrder.fulfilled.match(result)) {
