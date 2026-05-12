@@ -62,7 +62,7 @@ const ProductList = forwardRef((props, ref) => {
     (result, err) => {
       if (result) {
         const scanned = result.getText();
-        console.log("📦 Scanned Code:", scanned);
+        // console.log("📦 Scanned Code:", scanned);
         setScannedCode(scanned);
       }
     },

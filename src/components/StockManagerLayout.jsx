@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
-import { Package, ClipboardList, Truck, RefreshCcw,BookImage } from 'lucide-react';
+import { Package, ClipboardList, Truck,BookImage } from 'lucide-react';
 
 const StockManagerLayout = ({ children }) => {
   return (
@@ -79,9 +79,9 @@ const StockManagerLayout = ({ children }) => {
   Dispatch</div>
  
 </NavLink>
-            <div className="flex items-center gap-2 font-medium text-gray-700">
+            {/* <div className="flex items-center gap-2 font-medium text-gray-700">
               <RefreshCcw size={18} /> Transactions
-            </div>
+            </div> */}
           </nav>
         </aside>
 

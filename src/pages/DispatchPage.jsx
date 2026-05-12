@@ -6,14 +6,10 @@ import CreateDispatchOrderSection from '../components/CreateDispatchOrderSection
 import DispatchOrdersSection from '../components/DispatchOrdersSection';
 
 import {
-  fetchCatalogProducts,
-  fetchCatalogBarcodes,
-  fetchBrands,
-  fetchUnits,
   fetchSuppliers,
   fetchWarehouses,
-  fetchCategories,
   fetchOutlets,
+  fetchInventoryProducts,
   fetchInventoryDispatchOrders,
 } from '../features/inventory/stockManagerInventorySlice';
 
@@ -23,11 +19,7 @@ const DispatchPage = () => {
   const { userInfo } = useSelector((state) => state.posUser || {});
 
   const {
-    catalogProducts = [],
-    catalogBarcodes = [],
-    brands = [],
-    categories = [],
-    units = [],
+    inventoryProducts = [],
     suppliers = [],
     warehouses = [],
     outlets = [],
@@ -39,11 +31,7 @@ const DispatchPage = () => {
 
   useEffect(() => {
     if (userInfo?.token) {
-      dispatch(fetchCatalogProducts());
-      dispatch(fetchCatalogBarcodes());
-      dispatch(fetchCategories());
-      dispatch(fetchBrands());
-      dispatch(fetchUnits());
+      dispatch(fetchInventoryProducts());
       dispatch(fetchSuppliers());
       dispatch(fetchWarehouses());
       dispatch(fetchOutlets());
@@ -57,7 +45,7 @@ const DispatchPage = () => {
         <div className="rounded-xl border bg-white p-4 shadow-sm">
           <h1 className="text-xl font-bold">Inventory Dispatch</h1>
           <p className="text-sm text-gray-500">
-            Dispatch stock from inventory to outlets, stakeholders and warehouses.
+            Dispatch only available stock from inventory to outlets, stakeholders and warehouses.
           </p>
         </div>
 
@@ -74,11 +62,7 @@ const DispatchPage = () => {
         )}
 
         <CreateDispatchOrderSection
-          catalogProducts={catalogProducts}
-          catalogBarcodes={catalogBarcodes}
-          brands={brands}
-          categories={categories}
-          units={units}
+          inventoryProducts={inventoryProducts}
           suppliers={suppliers}
           warehouses={warehouses}
           outlets={outlets}

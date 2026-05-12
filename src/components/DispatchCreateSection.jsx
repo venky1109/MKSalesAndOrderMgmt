@@ -4,11 +4,7 @@ import { useDispatch } from 'react-redux';
 import { createInventoryDispatchOrder } from '../features/inventory/stockManagerInventorySlice';
 
 const DispatchCreateSection = ({
-  catalogProducts = [],
-  catalogBarcodes = [],
-  brands = [],
-  categories = [],
-  units = [],
+  inventoryProducts = [],
   suppliers = [],
   warehouses = [],
   outlets = [],
@@ -22,23 +18,11 @@ const DispatchCreateSection = ({
   const [expectedDispatchAt, setExpectedDispatchAt] = useState('');
   const [dispatchNotes, setDispatchNotes] = useState('');
 
-  const [productBarcodeId, setProductBarcodeId] = useState('');
-  const [qty, setQty] = useState('');
+  const [inventoryProductId, setInventoryProductId] = useState('');
+  const [noOfUnits, setNoOfUnits] = useState('');
   const [notes, setNotes] = useState('');
 
   const [items, setItems] = useState([]);
-
-  const getProductById = (id) =>
-    catalogProducts.find((p) => String(p.id) === String(id));
-
-  const getBrandById = (id) =>
-    brands.find((b) => String(b.id) === String(id));
-
-  const getCategoryById = (id) =>
-    categories.find((c) => String(c.id) === String(id));
-
-  const getUnitById = (id) =>
-    units.find((u) => String(u.id) === String(id));
 
   const destinations = useMemo(() => {
     if (destinationType === 'warehouse') return warehouses;
@@ -55,55 +39,36 @@ const DispatchCreateSection = ({
     (d) => String(d.id) === String(destinationId)
   );
 
-  const selectedBarcode = catalogBarcodes.find(
-    (b) => String(b.id) === String(productBarcodeId)
-  );
+  const availableInventoryOptions = useMemo(() => {
+    return inventoryProducts
+      .filter((item) => {
+        const availableUnits = Number(item.no_of_units || 0);
+        const sameWarehouse =
+          !sourceWarehouseId ||
+          String(item.warehouse_id) === String(sourceWarehouseId);
 
-  const selectedProduct = getProductById(selectedBarcode?.product_id);
-  const selectedBrand = getBrandById(selectedBarcode?.brand_id);
-  const selectedCategory = getCategoryById(selectedBarcode?.category_id);
-  const selectedUnit = getUnitById(selectedBarcode?.unit_id);
-
-  const productBarcodeOptions = useMemo(() => {
-  return catalogBarcodes
-    .filter((barcode) => barcode?.is_active !== false)
-    .map((barcode) => {
-      const product = catalogProducts.find(
-        (p) => String(p.id) === String(barcode.product_id)
-      );
-
-      const brand = brands.find(
-        (b) => String(b.id) === String(barcode.brand_id)
-      );
-
-      const category = categories.find(
-        (c) => String(c.id) === String(barcode.category_id)
-      );
-
-      const unit = units.find(
-        (u) => String(u.id) === String(barcode.unit_id)
-      );
-
-      return {
-        ...barcode,
-        product,
-        brand,
-        category,
-        unit,
+        return availableUnits > 0 && sameWarehouse && item.is_active !== false;
+      })
+      .map((item) => ({
+        ...item,
         label: [
-          barcode.mk_barcode || barcode.barcode,
-          product?.product_code,
-          product?.product_name_eng || product?.product_name_tel,
-          brand?.brand_name_english,
-          `${barcode.quantity || ''} ${
-            unit?.unit_short_code || unit?.unit_code || unit?.unit_name || ''
-          }`,
+          item.mk_barcode || item.bar_code || item.barcode,
+          item.product_code,
+          item.product_name,
+          item.brand_name_english,
+          item.category_name_english,
+          item.exp_date ? `Exp: ${String(item.exp_date).slice(0, 10)}` : '',
+          `Available: ${Number(item.no_of_units || 0).toFixed(0)} units`,
         ]
           .filter(Boolean)
           .join(' | '),
-      };
-    });
-}, [catalogBarcodes, catalogProducts, brands, categories, units]);
+      }));
+  }, [inventoryProducts, sourceWarehouseId]);
+
+  const selectedInventory = availableInventoryOptions.find(
+    (item) => String(item.id) === String(inventoryProductId)
+  );
+
   const getSourceLabel = (item) => {
     if (!item) return '';
     return `${item.warehouse_code || ''} - ${item.warehouse_name || ''}`;
@@ -126,59 +91,101 @@ const DispatchCreateSection = ({
   };
 
   const resetItemForm = () => {
-    setProductBarcodeId('');
-    setQty('');
+    setInventoryProductId('');
+    setNoOfUnits('');
     setNotes('');
   };
 
+  const getAlreadyAddedUnits = (productBarcodeId, expDate) => {
+    return items
+      .filter(
+        (item) =>
+          String(item.product_barcode_id) === String(productBarcodeId) &&
+          String(item.exp_date).slice(0, 10) === String(expDate).slice(0, 10)
+      )
+      .reduce((sum, item) => sum + Number(item.no_of_units || 0), 0);
+  };
+
   const addItem = () => {
-    if (!productBarcodeId) {
-      alert('Please select product barcode');
+    if (!sourceWarehouseId) {
+      alert('Please select source warehouse first');
       return;
     }
 
-    if (!selectedBarcode) {
-      alert('Selected product barcode not found');
+    if (!inventoryProductId) {
+      alert('Please select available inventory product');
       return;
     }
 
-    if (!qty || Number(qty) <= 0) {
-      alert('Quantity must be greater than 0');
+    if (!selectedInventory) {
+      alert('Selected inventory product not found');
+      return;
+    }
+
+    if (!noOfUnits || Number(noOfUnits) <= 0) {
+      alert('No. of units must be greater than 0');
+      return;
+    }
+
+    const dispatchUnits = Number(noOfUnits);
+    const availableUnits = Number(selectedInventory.no_of_units || 0);
+
+    const alreadyAddedUnits = getAlreadyAddedUnits(
+      selectedInventory.product_barcode_id,
+      selectedInventory.exp_date
+    );
+
+    if (alreadyAddedUnits + dispatchUnits > availableUnits) {
+      alert(
+        `Only ${availableUnits} units available. Already added ${alreadyAddedUnits}, trying to add ${dispatchUnits}.`
+      );
       return;
     }
 
     const newItem = {
-      product_barcode_id: Number(selectedBarcode.id),
-      product_id: Number(selectedBarcode.product_id),
-      brand_id: Number(selectedBarcode.brand_id),
-      category_id: Number(selectedBarcode.category_id),
-      unit_id: Number(selectedBarcode.unit_id),
-      qty: Number(qty),
+      inventory_product_row_id: Number(selectedInventory.id),
+
+      product_barcode_id: Number(selectedInventory.product_barcode_id),
+      product_id: Number(selectedInventory.id),
+      brand_id: selectedInventory.brand_id
+        ? Number(selectedInventory.brand_id)
+        : null,
+      category_id: selectedInventory.category_id
+        ? Number(selectedInventory.category_id)
+        : null,
+      unit_id: selectedInventory.unit_id ? Number(selectedInventory.unit_id) : null,
+
+      qty: dispatchUnits,
+      no_of_units: dispatchUnits,
+      exp_date: selectedInventory.exp_date
+        ? String(selectedInventory.exp_date).slice(0, 10)
+        : null,
       notes: notes || '',
 
-      mk_barcode: selectedBarcode.mk_barcode,
-      barcode: selectedBarcode.barcode,
-      barcode_quantity: selectedBarcode.quantity,
+      available_units: availableUnits,
+      mk_barcode:
+        selectedInventory.mk_barcode ||
+        selectedInventory.bar_code ||
+        selectedInventory.barcode ||
+        '',
+      barcode: selectedInventory.barcode || selectedInventory.bar_code || '',
+      barcode_quantity: selectedInventory.barcode_quantity || '',
 
-      product_code: selectedProduct?.product_code,
-      product_name_eng: selectedProduct?.product_name_eng,
-      product_name_tel: selectedProduct?.product_name_tel,
+      product_code: selectedInventory.product_code,
+      product_name: selectedInventory.product_name,
 
-      brand_code: selectedBrand?.brand_code,
-      brand_name_english: selectedBrand?.brand_name_english,
+      brand_name_english: selectedInventory.brand_name_english,
+      category_name_english: selectedInventory.category_name_english,
 
-      category_code: selectedCategory?.category_code,
-      category_name_english: selectedCategory?.category_name_english,
-
-      unit_code: selectedUnit?.unit_code,
-      unit_short_code: selectedUnit?.unit_short_code,
-      unit_name: selectedUnit?.unit_name,
+      unit_short_code: selectedInventory.unit_short_code,
+      unit_name: selectedInventory.unit_name,
     };
 
     setItems((prev) => {
       const existingIndex = prev.findIndex(
-        (i) =>
-          String(i.product_barcode_id) === String(newItem.product_barcode_id)
+        (item) =>
+          String(item.product_barcode_id) === String(newItem.product_barcode_id) &&
+          String(item.exp_date).slice(0, 10) === String(newItem.exp_date).slice(0, 10)
       );
 
       if (existingIndex !== -1) {
@@ -187,6 +194,8 @@ const DispatchCreateSection = ({
             ? {
                 ...item,
                 qty: Number(item.qty) + Number(newItem.qty),
+                no_of_units:
+                  Number(item.no_of_units) + Number(newItem.no_of_units),
                 notes: newItem.notes || item.notes,
               }
             : item
@@ -234,6 +243,8 @@ const DispatchCreateSection = ({
         category_id: item.category_id,
         unit_id: item.unit_id,
         qty: item.qty,
+        no_of_units: item.no_of_units,
+        exp_date: item.exp_date,
         notes: item.notes || null,
       })),
     };
@@ -258,8 +269,7 @@ const DispatchCreateSection = ({
           <div>
             <h2 className="text-2xl font-bold">Create Inventory Dispatch</h2>
             <p className="mt-1 text-sm text-blue-100">
-              Same purchase-order style flow. Select destination, choose product barcode,
-              enter quantity, and add items.
+              Select only available inventory products and dispatch available units.
             </p>
           </div>
 
@@ -283,7 +293,11 @@ const DispatchCreateSection = ({
               </label>
               <select
                 value={sourceWarehouseId}
-                onChange={(e) => setSourceWarehouseId(e.target.value)}
+                onChange={(e) => {
+                  setSourceWarehouseId(e.target.value);
+                  resetItemForm();
+                  setItems([]);
+                }}
                 className="w-full rounded-2xl border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-blue-500"
               >
                 <option value="">Select warehouse</option>
@@ -365,8 +379,7 @@ const DispatchCreateSection = ({
                 Add Dispatch Items
               </h3>
               <p className="text-xs text-slate-500">
-                Product suggestion is from product_barcode. Brand, category and unit
-                auto-fill from selected barcode.
+                Products are shown from inventory only. Available units and expiry are visible.
               </p>
             </div>
 
@@ -384,17 +397,23 @@ const DispatchCreateSection = ({
               <div className="grid gap-3 md:grid-cols-12">
                 <div className="md:col-span-7">
                   <label className="mb-1 block text-xs font-bold uppercase text-slate-500">
-                    Product Barcode
+                    Available Inventory Product
                   </label>
                   <select
-                    value={productBarcodeId}
-                    onChange={(e) => setProductBarcodeId(e.target.value)}
-                    className="w-full rounded-2xl border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-blue-500"
+                    value={inventoryProductId}
+                    onChange={(e) => setInventoryProductId(e.target.value)}
+                    disabled={!sourceWarehouseId}
+                    className="w-full rounded-2xl border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-blue-500 disabled:bg-slate-100"
                   >
-                    <option value="">Select product barcode</option>
-                    {productBarcodeOptions.map((barcode) => (
-                      <option key={barcode.id} value={barcode.id}>
-                        {barcode.label}
+                    <option value="">
+                      {sourceWarehouseId
+                        ? 'Select available inventory product'
+                        : 'Select source warehouse first'}
+                    </option>
+
+                    {availableInventoryOptions.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.label}
                       </option>
                     ))}
                   </select>
@@ -402,15 +421,16 @@ const DispatchCreateSection = ({
 
                 <div className="md:col-span-2">
                   <label className="mb-1 block text-xs font-bold uppercase text-slate-500">
-                    Quantity
+                    Units
                   </label>
                   <input
                     type="number"
                     min="1"
-                    value={qty}
-                    onChange={(e) => setQty(e.target.value)}
+                    max={selectedInventory?.no_of_units || undefined}
+                    value={noOfUnits}
+                    onChange={(e) => setNoOfUnits(e.target.value)}
                     className="w-full rounded-2xl border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-blue-500"
-                    placeholder="Qty"
+                    placeholder="Units"
                   />
                 </div>
 
@@ -430,20 +450,18 @@ const DispatchCreateSection = ({
 
             <div className="rounded-2xl border border-blue-100 bg-blue-50 p-4">
               <p className="mb-3 text-xs font-bold uppercase text-blue-700">
-                Selected Product Details
+                Selected Inventory Details
               </p>
 
-              {selectedBarcode ? (
+              {selectedInventory ? (
                 <div className="space-y-2 text-sm">
                   <div>
                     <p className="text-xs font-semibold text-slate-500">Product</p>
                     <p className="font-bold text-slate-800">
-                      {selectedProduct?.product_code
-                        ? `${selectedProduct.product_code} - `
+                      {selectedInventory.product_code
+                        ? `${selectedInventory.product_code} - `
                         : ''}
-                      {selectedProduct?.product_name_eng ||
-                        selectedProduct?.product_name_tel ||
-                        '-'}
+                      {selectedInventory.product_name || '-'}
                     </p>
                   </div>
 
@@ -451,17 +469,36 @@ const DispatchCreateSection = ({
                     <div>
                       <p className="text-xs font-semibold text-slate-500">Barcode</p>
                       <p className="font-semibold text-slate-800">
-                        {selectedBarcode.mk_barcode || selectedBarcode.barcode || '-'}
+                        {selectedInventory.mk_barcode ||
+                          selectedInventory.bar_code ||
+                          selectedInventory.barcode ||
+                          '-'}
+                      </p>
+                    </div>
+
+                    <div>
+                      <p className="text-xs font-semibold text-slate-500">
+                        Available Units
+                      </p>
+                      <p className="font-bold text-green-700">
+                        {Number(selectedInventory.no_of_units || 0).toFixed(0)}
+                      </p>
+                    </div>
+
+                    <div>
+                      <p className="text-xs font-semibold text-slate-500">Expiry</p>
+                      <p className="font-semibold text-slate-800">
+                        {selectedInventory.exp_date
+                          ? String(selectedInventory.exp_date).slice(0, 10)
+                          : '-'}
                       </p>
                     </div>
 
                     <div>
                       <p className="text-xs font-semibold text-slate-500">Unit</p>
                       <p className="font-semibold text-slate-800">
-                        {selectedBarcode.quantity || ''}{' '}
-                        {selectedUnit?.unit_short_code ||
-                          selectedUnit?.unit_code ||
-                          selectedUnit?.unit_name ||
+                        {selectedInventory.unit_short_code ||
+                          selectedInventory.unit_name ||
                           '-'}
                       </p>
                     </div>
@@ -469,7 +506,7 @@ const DispatchCreateSection = ({
                     <div>
                       <p className="text-xs font-semibold text-slate-500">Brand</p>
                       <p className="font-semibold text-slate-800">
-                        {selectedBrand?.brand_name_english || '-'}
+                        {selectedInventory.brand_name_english || '-'}
                       </p>
                     </div>
 
@@ -478,14 +515,14 @@ const DispatchCreateSection = ({
                         Category
                       </p>
                       <p className="font-semibold text-slate-800">
-                        {selectedCategory?.category_name_english || '-'}
+                        {selectedInventory.category_name_english || '-'}
                       </p>
                     </div>
                   </div>
                 </div>
               ) : (
                 <p className="text-sm text-slate-500">
-                  Select a product barcode to view product, brand, category and unit.
+                  Select an available inventory product to view stock details.
                 </p>
               )}
             </div>
@@ -506,9 +543,9 @@ const DispatchCreateSection = ({
                 <tr>
                   <th className="px-4 py-3 text-left">Product</th>
                   <th className="px-4 py-3 text-left">Barcode</th>
-                  <th className="px-4 py-3 text-left">Category</th>
-                  <th className="px-4 py-3 text-left">Brand</th>
-                  <th className="px-4 py-3 text-center">Qty</th>
+                  <th className="px-4 py-3 text-left">Expiry</th>
+                  <th className="px-4 py-3 text-center">Available</th>
+                  <th className="px-4 py-3 text-center">Dispatch Units</th>
                   <th className="px-4 py-3 text-center">Unit</th>
                   <th className="px-4 py-3 text-left">Notes</th>
                   <th className="px-4 py-3 text-center">Action</th>
@@ -528,21 +565,14 @@ const DispatchCreateSection = ({
                 ) : (
                   items.map((item, index) => (
                     <tr
-                      key={`${item.product_barcode_id}-${index}`}
+                      key={`${item.product_barcode_id}-${item.exp_date}-${index}`}
                       className="border-t hover:bg-slate-50"
                     >
                       <td className="px-4 py-3">
                         <p className="font-bold text-slate-800">
-                          {item.product_code
-                            ? `${item.product_code} - `
-                            : ''}
-                          {item.product_name_eng || item.product_name_tel || '-'}
+                          {item.product_code ? `${item.product_code} - ` : ''}
+                          {item.product_name || '-'}
                         </p>
-                        {item.product_name_tel ? (
-                          <p className="text-xs text-slate-500">
-                            {item.product_name_tel}
-                          </p>
-                        ) : null}
                       </td>
 
                       <td className="px-4 py-3 font-semibold text-slate-700">
@@ -550,20 +580,19 @@ const DispatchCreateSection = ({
                       </td>
 
                       <td className="px-4 py-3">
-                        {item.category_name_english || '-'}
+                        {item.exp_date || '-'}
                       </td>
 
-                      <td className="px-4 py-3">
-                        {item.brand_name_english || '-'}
+                      <td className="px-4 py-3 text-center font-bold text-green-700">
+                        {Number(item.available_units || 0).toFixed(0)}
                       </td>
 
                       <td className="px-4 py-3 text-center font-bold">
-                        {item.qty}
+                        {Number(item.no_of_units || 0).toFixed(0)}
                       </td>
 
                       <td className="px-4 py-3 text-center">
-                        {item.barcode_quantity || ''}{' '}
-                        {item.unit_short_code || item.unit_code || item.unit_name}
+                        {item.unit_short_code || item.unit_name || '-'}
                       </td>
 
                       <td className="px-4 py-3">{item.notes || '-'}</td>

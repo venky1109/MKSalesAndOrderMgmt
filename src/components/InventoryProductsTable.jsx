@@ -57,8 +57,8 @@ const InventoryProductsTable = ({ products = [], loading }) => {
                   <td className="p-3">{item.warehouse_id || '-'}</td>
                   <td className="p-3">
                     {item.exp_date
-                      ? new Date(item.exp_date).toLocaleDateString()
-                      : '-'}
+  ? String(item.exp_date).split('T')[0]
+  : '-'}
                   </td>
                 </tr>
               ))}

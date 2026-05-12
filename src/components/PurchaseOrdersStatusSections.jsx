@@ -844,7 +844,7 @@ const PurchaseOrdersStatusSections = ({
         remarks: item.inventory_remarks || verifyRemarks || null,
       };
 
-      console.log('receiveVerifiedPurchaseToInventory payload:', payload);
+      // console.log('receiveVerifiedPurchaseToInventory payload:', payload);
 
       const inventoryResult = await dispatch(
         receiveVerifiedPurchaseToInventory(payload)

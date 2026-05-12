@@ -19,6 +19,8 @@ const authConfig = (getState) => {
 const normalizeArray = (payload) => {
   if (Array.isArray(payload)) return payload;
   if (Array.isArray(payload?.data)) return payload.data;
+  if (Array.isArray(payload?.products)) return payload.products;
+  if (Array.isArray(payload?.rows)) return payload.rows;
   return [];
 };
 
@@ -34,6 +36,7 @@ export const fetchInventoryProducts = createAsyncThunk(
         apiUrl('/inventory-pg/products'),
         authConfig(thunkAPI.getState)
       );
+
       return data;
     } catch (error) {
       return thunkAPI.rejectWithValue(
@@ -51,6 +54,7 @@ export const fetchStockTransactions = createAsyncThunk(
         apiUrl('/inventory-pg/stock-transactions'),
         authConfig(thunkAPI.getState)
       );
+
       return data;
     } catch (error) {
       return thunkAPI.rejectWithValue(
@@ -72,6 +76,7 @@ export const fetchCatalogProducts = createAsyncThunk(
         apiUrl('/catalog-pg/products/'),
         authConfig(thunkAPI.getState)
       );
+
       return data;
     } catch (error) {
       return thunkAPI.rejectWithValue(
@@ -89,6 +94,7 @@ export const fetchBrands = createAsyncThunk(
         apiUrl('/catalog-pg/brands'),
         authConfig(thunkAPI.getState)
       );
+
       return data;
     } catch (error) {
       return thunkAPI.rejectWithValue(
@@ -106,6 +112,7 @@ export const fetchCategories = createAsyncThunk(
         apiUrl('/catalog-pg/categories'),
         authConfig(thunkAPI.getState)
       );
+
       return data;
     } catch (error) {
       return thunkAPI.rejectWithValue(
@@ -123,6 +130,7 @@ export const fetchUnits = createAsyncThunk(
         apiUrl('/catalog-pg/units'),
         authConfig(thunkAPI.getState)
       );
+
       return data;
     } catch (error) {
       return thunkAPI.rejectWithValue(
@@ -165,6 +173,7 @@ export const fetchWarehouses = createAsyncThunk(
         apiUrl('/catalog-pg/warehouses'),
         authConfig(thunkAPI.getState)
       );
+
       return data;
     } catch (error) {
       return thunkAPI.rejectWithValue(
@@ -182,6 +191,7 @@ export const fetchOutlets = createAsyncThunk(
         apiUrl('/catalog-pg/outlets'),
         authConfig(thunkAPI.getState)
       );
+
       return data;
     } catch (error) {
       return thunkAPI.rejectWithValue(
@@ -199,6 +209,7 @@ export const fetchCatalogBarcodes = createAsyncThunk(
         apiUrl('/catalog-pg/product-barcodes'),
         authConfig(thunkAPI.getState)
       );
+
       return data;
     } catch (error) {
       return thunkAPI.rejectWithValue(
@@ -220,6 +231,7 @@ export const fetchPurchaseOrders = createAsyncThunk(
         apiUrl('/purchases/orders-detailed'),
         authConfig(thunkAPI.getState)
       );
+
       return data;
     } catch (error) {
       return thunkAPI.rejectWithValue(
@@ -238,6 +250,7 @@ export const createPurchaseOrderWithItems = createAsyncThunk(
         payload,
         authConfig(thunkAPI.getState)
       );
+
       return data;
     } catch (error) {
       return thunkAPI.rejectWithValue(
@@ -300,6 +313,7 @@ export const updatePurchaseOrder = createAsyncThunk(
         payload,
         authConfig(thunkAPI.getState)
       );
+
       return data;
     } catch (error) {
       return thunkAPI.rejectWithValue(
@@ -318,6 +332,7 @@ export const updatePurchaseOrderItems = createAsyncThunk(
         { items },
         authConfig(thunkAPI.getState)
       );
+
       return data;
     } catch (error) {
       return thunkAPI.rejectWithValue(
@@ -336,6 +351,7 @@ export const receivePurchaseOrder = createAsyncThunk(
         payload,
         authConfig(thunkAPI.getState)
       );
+
       return data;
     } catch (error) {
       return thunkAPI.rejectWithValue(
@@ -354,6 +370,7 @@ export const verifyReceivedPurchaseOrder = createAsyncThunk(
         { items, remarks },
         authConfig(thunkAPI.getState)
       );
+
       return data;
     } catch (error) {
       return thunkAPI.rejectWithValue(
@@ -375,6 +392,7 @@ export const fetchInventoryDispatchOrders = createAsyncThunk(
         apiUrl('/dispatch-pg/orders'),
         authConfig(thunkAPI.getState)
       );
+
       return data;
     } catch (error) {
       return thunkAPI.rejectWithValue(
@@ -412,6 +430,7 @@ export const createInventoryDispatchOrder = createAsyncThunk(
         payload,
         authConfig(thunkAPI.getState)
       );
+
       return data;
     } catch (error) {
       return thunkAPI.rejectWithValue(
@@ -430,6 +449,7 @@ export const updateInventoryDispatchOrder = createAsyncThunk(
         payload,
         authConfig(thunkAPI.getState)
       );
+
       return data;
     } catch (error) {
       return thunkAPI.rejectWithValue(
@@ -448,6 +468,7 @@ export const updateInventoryDispatchOrderItems = createAsyncThunk(
         { items },
         authConfig(thunkAPI.getState)
       );
+
       return data;
     } catch (error) {
       return thunkAPI.rejectWithValue(
@@ -466,6 +487,7 @@ export const updateInventoryDispatchStatus = createAsyncThunk(
         { dispatch_status },
         authConfig(thunkAPI.getState)
       );
+
       return data;
     } catch (error) {
       return thunkAPI.rejectWithValue(
@@ -483,6 +505,7 @@ export const deleteInventoryDispatchOrder = createAsyncThunk(
         apiUrl(`/dispatch-pg/orders/${id}`),
         authConfig(thunkAPI.getState)
       );
+
       return id;
     } catch (error) {
       return thunkAPI.rejectWithValue(
@@ -497,7 +520,8 @@ export const deleteInventoryDispatchOrder = createAsyncThunk(
 ========================= */
 
 const initialState = {
-  products: [],
+  products: [], // keep separate for old purchase/product usage
+  inventoryProducts: [], // inventory.inventory_products rows only
   transactions: [],
   purchaseOrders: [],
 
@@ -546,11 +570,14 @@ const stockManagerInventorySlice = createSlice({
       })
       .addCase(fetchInventoryProducts.fulfilled, (state, action) => {
         state.loading = false;
-        state.products = normalizeArray(action.payload);
+
+        // IMPORTANT: keep inventory products separate.
+        // Do not overwrite state.products because other purchase flows may use it.
+        state.inventoryProducts = normalizeArray(action.payload);
       })
       .addCase(fetchInventoryProducts.rejected, (state, action) => {
         state.loading = false;
-        state.error = action.payload;
+        state.error = action.payload || 'Failed to fetch inventory products';
       })
 
       /* STOCK TRANSACTIONS */
@@ -643,7 +670,8 @@ const stockManagerInventorySlice = createSlice({
       })
       .addCase(fetchInventoryDispatchOrders.rejected, (state, action) => {
         state.inventoryDispatchLoading = false;
-        state.inventoryDispatchError = action.payload;
+        state.inventoryDispatchError =
+          action.payload || 'Failed to fetch inventory dispatch orders';
       })
 
       .addCase(receiveDispatchToOutlet.pending, (state) => {
@@ -692,7 +720,8 @@ const stockManagerInventorySlice = createSlice({
       })
       .addCase(createInventoryDispatchOrder.rejected, (state, action) => {
         state.inventoryDispatchLoading = false;
-        state.inventoryDispatchError = action.payload;
+        state.inventoryDispatchError =
+          action.payload || 'Failed to create dispatch order';
       })
 
       .addCase(updateInventoryDispatchOrder.fulfilled, (state, action) => {
@@ -710,7 +739,8 @@ const stockManagerInventorySlice = createSlice({
         state.inventoryDispatchSuccess = 'Dispatch order updated successfully';
       })
       .addCase(updateInventoryDispatchOrder.rejected, (state, action) => {
-        state.inventoryDispatchError = action.payload;
+        state.inventoryDispatchError =
+          action.payload || 'Failed to update dispatch order';
       })
 
       .addCase(updateInventoryDispatchOrderItems.fulfilled, (state, action) => {
@@ -725,7 +755,8 @@ const stockManagerInventorySlice = createSlice({
         state.inventoryDispatchSuccess = 'Dispatch items updated successfully';
       })
       .addCase(updateInventoryDispatchOrderItems.rejected, (state, action) => {
-        state.inventoryDispatchError = action.payload;
+        state.inventoryDispatchError =
+          action.payload || 'Failed to update dispatch items';
       })
 
       .addCase(updateInventoryDispatchStatus.fulfilled, (state, action) => {
@@ -743,7 +774,8 @@ const stockManagerInventorySlice = createSlice({
         state.inventoryDispatchSuccess = 'Dispatch status updated successfully';
       })
       .addCase(updateInventoryDispatchStatus.rejected, (state, action) => {
-        state.inventoryDispatchError = action.payload;
+        state.inventoryDispatchError =
+          action.payload || 'Failed to update dispatch status';
       })
 
       .addCase(deleteInventoryDispatchOrder.fulfilled, (state, action) => {
@@ -754,7 +786,8 @@ const stockManagerInventorySlice = createSlice({
         state.inventoryDispatchSuccess = 'Dispatch order deleted successfully';
       })
       .addCase(deleteInventoryDispatchOrder.rejected, (state, action) => {
-        state.inventoryDispatchError = action.payload;
+        state.inventoryDispatchError =
+          action.payload || 'Failed to delete dispatch order';
       });
   },
 });

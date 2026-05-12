@@ -4,15 +4,19 @@ import { useDispatch } from 'react-redux';
 import {
   createInventoryDispatchOrder,
   fetchInventoryDispatchOrders,
+  fetchInventoryProducts,
   fetchStockTransactions,
 } from '../features/inventory/stockManagerInventorySlice';
 
+// const getDateOnly = (value) => {
+//   if (!value) return '';
+//   const text = String(value).trim();
+//   const match = text.match(/(\d{4})-(\d{2})-(\d{2})/);
+//   return match ? match[0] : '';
+// };
+
 const CreateDispatchOrderSection = ({
-  catalogProducts = [],
-  catalogBarcodes = [],
-  brands = [],
-  categories = [],
-  units = [],
+  inventoryProducts = [],
   suppliers = [],
   warehouses = [],
   outlets = [],
@@ -25,7 +29,7 @@ const CreateDispatchOrderSection = ({
   const [destinationId, setDestinationId] = useState('');
   const [expectedDispatchAt, setExpectedDispatchAt] = useState('');
   const [dispatchNotes, setDispatchNotes] = useState('');
-
+  const [showSuggestions, setShowSuggestions] = useState(false);
   const [search, setSearch] = useState('');
   const [items, setItems] = useState([]);
 
@@ -36,8 +40,6 @@ const CreateDispatchOrderSection = ({
     return [];
   }, [destinationType, warehouses, outlets, suppliers]);
 
- 
-
   const sourceWarehouse = warehouses.find(
     (w) => String(w.id) === String(sourceWarehouseId)
   );
@@ -46,57 +48,67 @@ const CreateDispatchOrderSection = ({
     (d) => String(d.id) === String(destinationId)
   );
 
- const barcodeRows = useMemo(() => {
-  return catalogBarcodes
-    .filter((b) => b?.is_active !== false)
-    .map((barcode) => {
-      const product = catalogProducts.find(
-        (p) => String(p.id) === String(barcode.product_id)
-      );
+  const inventoryRows = useMemo(() => {
+    return inventoryProducts
+      .filter((item) => {
+        const availableUnits = Number(item.no_of_units || item.count_in_stock || 0);
+        const sameWarehouse =
+          !sourceWarehouseId ||
+          String(item.warehouse_id) === String(sourceWarehouseId);
 
-      const brand = brands.find(
-        (b) => String(b.id) === String(barcode.brand_id)
-      );
+        return (
+          availableUnits > 0 &&
+          sameWarehouse &&
+          item.is_active !== false &&
+          item.product_barcode_id
+        );
+      })
+      .map((item) => {
+        const expDateOnly =  item.exp_date
+      
 
-      const category = categories.find(
-        (c) => String(c.id) === String(barcode.category_id)
-      );
+        return {
+          ...item,
+          inventory_product_id: item.id,
+          exp_date_only: expDateOnly,
+          available_units: Number(item.no_of_units || item.count_in_stock || 0),
+          product_barcode_id: item.product_barcode_id,
+          display_barcode: item.mk_barcode || item.bar_code || item.barcode || '',
+          display_product_name:
+            item.product_name ||
+            item.product_name_eng ||
+            item.product_name_tel ||
+            item.product_code ||
+            'Product',
+          searchText: [
+            item.product_code,
+            item.product_name,
+            item.product_name_eng,
+            item.product_name_tel,
+            item.mk_barcode,
+            item.bar_code,
+            item.barcode,
+            item.brand_name_english,
+            item.category_name_english,
+            item.unit_name,
+            item.unit_short_code,
+            expDateOnly,
+          ]
+            .filter(Boolean)
+            .join(' ')
+            .toLowerCase(),
+        };
+      });
+  }, [inventoryProducts, sourceWarehouseId]);
 
-      const unit = units.find(
-        (u) => String(u.id) === String(barcode.unit_id)
-      );
-
-      return {
-        ...barcode,
-        product,
-        brand,
-        category,
-        unit,
-        searchText: [
-          barcode.mk_barcode,
-          barcode.barcode,
-          product?.product_code,
-          product?.product_name_eng,
-          product?.product_name_tel,
-          brand?.brand_name_english,
-          category?.category_name_english,
-          unit?.unit_name,
-          unit?.unit_short_code,
-        ]
-          .filter(Boolean)
-          .join(' ')
-          .toLowerCase(),
-      };
-    });
-}, [catalogBarcodes, catalogProducts, brands, categories, units]);
   const suggestions = useMemo(() => {
     const value = search.trim().toLowerCase();
-    if (!value) return [];
 
-    return barcodeRows
-      .filter((row) => row.searchText.includes(value))
-      .slice(0, 10);
-  }, [barcodeRows, search]);
+    if (!sourceWarehouseId) return [];
+    if (!value) return inventoryRows.slice(0, 20);
+
+    return inventoryRows.filter((row) => row.searchText.includes(value)).slice(0, 20);
+  }, [inventoryRows, search, sourceWarehouseId]);
 
   const getSourceLabel = (item) => {
     if (!item) return '';
@@ -119,63 +131,108 @@ const CreateDispatchOrderSection = ({
     }`;
   };
 
- const addBarcodeItem = (barcodeRow) => {
-  const exists = items.find(
-    (item) => String(item.product_barcode_id) === String(barcodeRow.id)
-  );
-
-  if (exists) {
-    setItems((prev) =>
-      prev.map((item) =>
-        String(item.product_barcode_id) === String(barcodeRow.id)
-          ? { ...item, qty: Number(item.qty || 0) + 1 }
-          : item
+  const getAlreadyAddedUnits = (row) => {
+    return items
+      .filter(
+        (item) =>
+          String(item.inventory_product_id) === String(row.inventory_product_id)
       )
+      .reduce((sum, item) => sum + Number(item.no_of_units || 0), 0);
+  };
+
+  const addInventoryItem = (inventoryRow) => {
+    if (!sourceWarehouseId) {
+      alert('Please select source warehouse first');
+      return;
+    }
+
+    const availableUnits = Number(
+      inventoryRow.available_units || inventoryRow.no_of_units || 0
     );
-    setSearch('');
-    return;
-  }
 
-  setItems((prev) => [
-    ...prev,
-    {
-      product_barcode_id: Number(barcodeRow.id),
-      product_id: Number(barcodeRow.product_id),
-      brand_id: Number(barcodeRow.brand_id),
-      category_id: Number(barcodeRow.category_id),
-      unit_id: Number(barcodeRow.unit_id),
+    const alreadyAddedUnits = getAlreadyAddedUnits(inventoryRow);
 
-      mk_barcode: barcodeRow.mk_barcode,
-      barcode: barcodeRow.barcode,
-      barcode_quantity: barcodeRow.quantity,
+    if (alreadyAddedUnits + 1 > availableUnits) {
+      alert(`Only ${availableUnits} units available.`);
+      return;
+    }
 
-      product_code: barcodeRow.product?.product_code,
-      product_name_eng: barcodeRow.product?.product_name_eng,
-      product_name_tel: barcodeRow.product?.product_name_tel,
+    const newItem = {
+      inventory_product_id: Number(inventoryRow.inventory_product_id),
+      product_barcode_id: Number(inventoryRow.product_barcode_id),
 
-      brand_code: barcodeRow.brand?.brand_code,
-      brand_name_english: barcodeRow.brand?.brand_name_english,
+      mk_barcode: inventoryRow.mk_barcode || inventoryRow.bar_code || inventoryRow.barcode || '',
+      barcode: inventoryRow.barcode || inventoryRow.bar_code || '',
+      barcode_quantity: inventoryRow.barcode_quantity || '',
 
-      category_code: barcodeRow.category?.category_code,
-      category_name_english: barcodeRow.category?.category_name_english,
+      product_code: inventoryRow.product_code,
+      product_name:
+        inventoryRow.product_name ||
+        inventoryRow.product_name_eng ||
+        inventoryRow.product_name_tel ||
+        inventoryRow.product_code,
 
-      unit_code: barcodeRow.unit?.unit_code,
-      unit_short_code: barcodeRow.unit?.unit_short_code,
-      unit_name: barcodeRow.unit?.unit_name,
+      brand_name_english: inventoryRow.brand_name_english,
+      category_name_english: inventoryRow.category_name_english,
+      unit_short_code: inventoryRow.unit_short_code,
+      unit_name: inventoryRow.unit_name,
+
+      exp_date: inventoryRow.exp_date_only,
+      available_units: availableUnits,
 
       qty: 1,
+      no_of_units: 1,
       notes: '',
-    },
-  ]);
+    };
 
-  setSearch('');
-};
+    setItems((prev) => {
+      const existingIndex = prev.findIndex(
+        (item) =>
+          String(item.inventory_product_id) ===
+          String(newItem.inventory_product_id)
+      );
+
+      if (existingIndex !== -1) {
+        return prev.map((item, index) =>
+          index === existingIndex
+            ? {
+                ...item,
+                qty: Number(item.qty || 0) + 1,
+                no_of_units: Number(item.no_of_units || 0) + 1,
+              }
+            : item
+        );
+      }
+
+      return [...prev, newItem];
+    });
+
+    setSearch('');
+    setShowSuggestions(false);
+  };
 
   const updateItem = (index, field, value) => {
     setItems((prev) =>
-      prev.map((item, itemIndex) =>
-        itemIndex === index ? { ...item, [field]: value } : item
-      )
+      prev.map((item, itemIndex) => {
+        if (itemIndex !== index) return item;
+
+        if (field === 'no_of_units' || field === 'qty') {
+          const nextUnits = Number(value || 0);
+
+          if (nextUnits > Number(item.available_units || 0)) {
+            alert(`Only ${Number(item.available_units || 0)} units available.`);
+            return item;
+          }
+
+          return {
+            ...item,
+            qty: nextUnits,
+            no_of_units: nextUnits,
+          };
+        }
+
+        return { ...item, [field]: value };
+      })
     );
   };
 
@@ -201,36 +258,47 @@ const CreateDispatchOrderSection = ({
       return;
     }
 
-    const invalidItem = items.find((item) => Number(item.qty) <= 0);
+    const invalidItem = items.find(
+      (item) =>
+        !item.inventory_product_id ||
+        !item.product_barcode_id ||
+        !item.exp_date ||
+        Number(item.no_of_units || 0) <= 0 ||
+        Number(item.no_of_units || 0) > Number(item.available_units || 0)
+    );
 
     if (invalidItem) {
-      alert('Dispatch quantity must be greater than 0');
+      alert('Dispatch item is invalid. Check barcode, expiry and available units.');
       return;
     }
 
-  const payload = {
-  source: `warehouse:${sourceWarehouseId}:${getSourceLabel(sourceWarehouse)}`,
-  destination: `${destinationType}:${destinationId}:${getDestinationLabel(
-    selectedDestination
-  )}`,
-  expected_dispatch_at: expectedDispatchAt || null,
-  dispatch_notes: dispatchNotes || null,
-  dispatch_status: 'draft',
-  items: items.map((item) => ({
-    product_barcode_id: item.product_barcode_id,
-    product_id: item.product_id,
-    brand_id: item.brand_id,
-    category_id: item.category_id,
-    unit_id: item.unit_id,
-    qty: Number(item.qty),
-    notes: item.notes || null,
-  })),
-};
+    const payload = {
+      source: `warehouse:${sourceWarehouseId}:${getSourceLabel(sourceWarehouse)}`,
+      destination: `${destinationType}:${destinationId}:${getDestinationLabel(
+        selectedDestination
+      )}`,
+      expected_dispatch_at: expectedDispatchAt || null,
+      dispatch_notes: dispatchNotes || null,
+      dispatch_status: 'draft',
+      items: items.map((item) => ({
+        inventory_product_id: Number(item.inventory_product_id),
+        product_barcode_id: Number(item.product_barcode_id),
+        qty: Number(item.no_of_units),
+        no_of_units: Number(item.no_of_units),
+        exp_date: item.exp_date,
+        notes: item.notes || null,
+      })),
+    };
+
+    console.log('================ DISPATCH CREATE PAYLOAD ================');
+    console.table(payload.items);
+    console.log('RAW payload:', payload);
 
     const result = await dispatch(createInventoryDispatchOrder(payload));
 
     if (createInventoryDispatchOrder.fulfilled.match(result)) {
       dispatch(fetchInventoryDispatchOrders());
+      dispatch(fetchInventoryProducts());
       dispatch(fetchStockTransactions());
 
       setSourceWarehouseId('');
@@ -239,6 +307,7 @@ const CreateDispatchOrderSection = ({
       setExpectedDispatchAt('');
       setDispatchNotes('');
       setSearch('');
+      setShowSuggestions(false);
       setItems([]);
     }
   };
@@ -246,11 +315,9 @@ const CreateDispatchOrderSection = ({
   return (
     <section className="rounded-xl border bg-white p-4 shadow-sm">
       <div className="mb-4 rounded-xl bg-blue-50 p-4">
-        <h2 className="text-lg font-bold text-blue-900">
-          Create Dispatch Order
-        </h2>
+        <h2 className="text-lg font-bold text-blue-900">Create Dispatch Order</h2>
         <p className="text-sm text-blue-700">
-          Search product from product barcode. Brand, category and unit will come automatically.
+          Search only available inventory products. Available units and expiry are shown.
         </p>
       </div>
 
@@ -262,7 +329,12 @@ const CreateDispatchOrderSection = ({
             </label>
             <select
               value={sourceWarehouseId}
-              onChange={(e) => setSourceWarehouseId(e.target.value)}
+              onChange={(e) => {
+                setSourceWarehouseId(e.target.value);
+                setSearch('');
+                setShowSuggestions(false);
+                setItems([]);
+              }}
               className="w-full rounded-lg border px-3 py-2"
             >
               <option value="">Select warehouse</option>
@@ -338,49 +410,59 @@ const CreateDispatchOrderSection = ({
 
         <div className="rounded-xl border bg-slate-50 p-4">
           <label className="mb-1 block text-sm font-bold text-gray-700">
-            Add Product
+            Add Product From Inventory
           </label>
 
           <div className="relative">
             <input
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by barcode, product name, product code, brand..."
-              className="w-full rounded-lg border px-3 py-3 text-sm"
+              onFocus={() => setShowSuggestions(true)}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setShowSuggestions(true);
+              }}
+              disabled={!sourceWarehouseId}
+              placeholder={
+                sourceWarehouseId
+                  ? 'Search by barcode, product name, product code, brand, expiry...'
+                  : 'Select source warehouse first'
+              }
+              className="w-full rounded-lg border px-3 py-3 text-sm disabled:bg-gray-100"
             />
 
-            {suggestions.length > 0 && (
+            {showSuggestions && suggestions.length > 0 && (
               <div className="absolute z-30 mt-1 max-h-72 w-full overflow-auto rounded-xl border bg-white shadow-lg">
                 {suggestions.map((row) => (
                   <button
-                    key={row.id}
+                    key={`${row.inventory_product_id}-${row.product_barcode_id}`}
                     type="button"
-                    onClick={() => addBarcodeItem(row)}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => addInventoryItem(row)}
                     className="block w-full border-b px-3 py-3 text-left hover:bg-blue-50"
                   >
                     <div className="flex justify-between gap-3">
                       <div>
                         <div className="font-bold text-gray-900">
-                          {row.product?.product_name_eng ||
-                            row.product?.product_name_tel ||
-                            'Product'}
+                          {row.display_product_name}
                         </div>
                         <div className="text-xs text-gray-500">
-                          Code: {row.product?.product_code || '-'} | Barcode:{' '}
-                          {row.mk_barcode || row.barcode || '-'}
+                          Inv ID: {row.inventory_product_id} | Code:{' '}
+                          {row.product_code || '-'} | Barcode:{' '}
+                          {row.display_barcode || '-'} | Exp:{' '}
+                          {row.exp_date_only || '-'}
+                        </div>
+                        <div className="text-xs text-gray-500">
+                          Brand: {row.brand_name_english || '-'} | Category:{' '}
+                          {row.category_name_english || '-'}
                         </div>
                       </div>
 
                       <div className="text-right text-xs">
-                        <div className="font-semibold text-gray-700">
-                          {row.brand?.brand_name_english || '-'}
+                        <div className="font-semibold text-green-700">
+                          Available: {Number(row.available_units || 0).toFixed(0)}
                         </div>
                         <div className="text-gray-500">
-                          {row.quantity || ''}{' '}
-                          {row.unit?.unit_short_code ||
-                            row.unit?.unit_code ||
-                            row.unit?.unit_name ||
-                            ''}
+                          {row.unit_short_code || row.unit_name || ''}
                         </div>
                       </div>
                     </div>
@@ -399,7 +481,9 @@ const CreateDispatchOrderSection = ({
                 <th className="p-2 text-left">Barcode</th>
                 <th className="p-2 text-left">Brand</th>
                 <th className="p-2 text-left">Category</th>
-                <th className="p-2 text-center">Qty</th>
+                <th className="p-2 text-center">Expiry</th>
+                <th className="p-2 text-center">Available</th>
+                <th className="p-2 text-center">Dispatch Units</th>
                 <th className="p-2 text-center">Unit</th>
                 <th className="p-2 text-left">Notes</th>
                 <th className="p-2 text-center">Remove</th>
@@ -409,46 +493,49 @@ const CreateDispatchOrderSection = ({
             <tbody>
               {items.length === 0 ? (
                 <tr>
-                  <td colSpan="8" className="p-6 text-center text-gray-500">
+                  <td colSpan="10" className="p-6 text-center text-gray-500">
                     No products added
                   </td>
                 </tr>
               ) : (
                 items.map((item, index) => (
-                  <tr key={`${item.product_barcode_id}-${index}`} className="border-t">
+                  <tr
+                    key={`${item.inventory_product_id}-${index}`}
+                    className="border-t"
+                  >
                     <td className="p-2">
                       <div className="font-semibold">
-                        {item.product_code} -{' '}
-                        {item.product_name_eng || item.product_name_tel}
+                        {item.product_code} - {item.product_name}
                       </div>
-                      {item.product_name_tel && (
-                        <div className="text-xs text-gray-500">
-                          {item.product_name_tel}
-                        </div>
-                      )}
+                      <div className="text-xs text-gray-500">
+                        Inventory ID: {item.inventory_product_id}
+                      </div>
                     </td>
 
-                    <td className="p-2">
-                      {item.mk_barcode || item.barcode || '-'}
-                    </td>
-
+                    <td className="p-2">{item.mk_barcode || item.barcode || '-'}</td>
                     <td className="p-2">{item.brand_name_english || '-'}</td>
-
                     <td className="p-2">{item.category_name_english || '-'}</td>
+                    <td className="p-2 text-center">{item.exp_date || '-'}</td>
+
+                    <td className="p-2 text-center font-bold text-green-700">
+                      {Number(item.available_units || 0).toFixed(0)}
+                    </td>
 
                     <td className="p-2 text-center">
                       <input
                         type="number"
                         min="1"
-                        value={item.qty}
-                        onChange={(e) => updateItem(index, 'qty', e.target.value)}
+                        max={item.available_units}
+                        value={item.no_of_units}
+                        onChange={(e) =>
+                          updateItem(index, 'no_of_units', e.target.value)
+                        }
                         className="w-24 rounded border px-2 py-1 text-center"
                       />
                     </td>
 
                     <td className="p-2 text-center">
-                      {item.barcode_quantity || ''}{' '}
-                      {item.unit_short_code || item.unit_code || item.unit_name}
+                      {item.unit_short_code || item.unit_name || '-'}
                     </td>
 
                     <td className="p-2">

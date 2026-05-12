@@ -355,37 +355,41 @@ const InvoiceShareModal = ({
         <div>Payment: {order.paymentMethod || "--"}</div>
         <div style={{ borderTop: "1px dashed #000", margin: "1.5mm 0" }} />
 
-        {items.map((it, idx) => {
-          const name = (it.item || it.name || "")
-            .replace(/\s*\([^)]*\)/g, "")
-            .trim();
-          const price = Number(it.dprice || it.price || 0);
-          const qty = Number(it.qty || 0);
-          const lineTotal = qty * price;
+       {items.map((it, idx) => {
+  const name =
+    (it.item || "")
+      .replace(/\s*\([^)]*\)/g, "")
+      .trim() || it.weight;
 
-          return (
-            <div key={idx} style={{ marginBottom: "3px" }}>
-              <div style={{ fontWeight: 600 }}>{name}</div>
+  const price = Number(it.pricePerQty || 0);
+  const qty = Number(it.qty || 0);
+  const lineTotal = qty * price;
 
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  gap: 8,
-                  fontSize: "10px",
-                }}
-              >
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  {qty} x {money(price)}{" "}
-                  {it.catalogQuantity || it.quantity
-                    ? `(${it.catalogQuantity || it.quantity} ${it.units || ""})`
-                    : ""}
-                </div>
-                <div style={{ whiteSpace: "nowrap" }}>{money(lineTotal)}</div>
-              </div>
-            </div>
-          );
-        })}
+
+  return (
+    <div key={idx} style={{ marginBottom: "3px" }}>
+      <div style={{ fontWeight: 600 }}> {name}  {it.weight}</div>
+
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          gap: 8,
+          fontSize: "10px",
+        }}
+      >
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {qty} x {money(price)}{" "}
+          
+        </div>
+
+        <div style={{ whiteSpace: "nowrap" }}>
+          {money(lineTotal)}
+        </div>
+      </div>
+    </div>
+  );
+})}
 
         <div style={{ borderTop: "1px dashed #000", margin: "1.5mm 0" }} />
 
