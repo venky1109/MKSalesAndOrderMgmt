@@ -139,7 +139,7 @@ export default function AccountsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-100 p-3 md:p-5">
+    <div className="h-screen overflow-y-auto bg-slate-100 p-3 md:p-5">
       <div className="mx-auto max-w-7xl">
         <div className="flex flex-col gap-3 rounded-lg border bg-white p-4 shadow-sm md:flex-row md:items-center md:justify-between">
           <div>
@@ -292,7 +292,7 @@ export default function AccountsPage() {
           <div className="border-b px-4 py-3 text-sm font-bold text-gray-800">
             Payment Details
           </div>
-          <div className="overflow-auto">
+         <div className="max-h-[70vh] overflow-auto">
             <table className="min-w-full text-sm">
               <thead className="bg-slate-100">
                 <tr>
