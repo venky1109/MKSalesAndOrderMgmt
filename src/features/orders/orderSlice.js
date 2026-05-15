@@ -3,7 +3,19 @@ import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import { updateProductStockOnly } from '../products/productSlice';
 import { enqueueOrder, peekOrdersQueue, setOrdersQueue } from '../../utils/offlineStorage';
 import { fetchCustomerByPhone, createCustomer } from '../customers/customerSlice'; 
+import { API_BASE_URL, getNetworkFailureMessage } from '../../utils/apiConfig';
 const generateMKOrderId = () => Number(`${Date.now()}${Math.floor(Math.random() * 90 + 10)}`);
+
+const getStoredToken = () => {
+  try {
+    const saved = localStorage.getItem('posUserInfo');
+    return saved ? JSON.parse(saved)?.token : '';
+  } catch {
+    return '';
+  }
+};
+
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 // -----------------------------
 // Save order offline (no network)
 // -----------------------------
@@ -350,7 +362,7 @@ export const fetchPOSOrders = createAsyncThunk(
   'orders/fetchPOSOrders',
   async ({ mode = 'latest', phone = '', from = '', to = '' }, thunkAPI) => {
     try {
-      const token = thunkAPI.getState().posUser?.userInfo?.token;
+      const token = thunkAPI.getState().posUser?.userInfo?.token || getStoredToken();
 
       const params = new URLSearchParams();
       params.set('mode', mode);
@@ -359,18 +371,37 @@ export const fetchPOSOrders = createAsyncThunk(
       if (from) params.set('from', from);
       if (to) params.set('to', to);
 
-      const response = await fetch(
-        `${process.env.REACT_APP_API_BASE_URL}/orders/pos/orders/search?${params.toString()}`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
+      const url = `${API_BASE_URL}/orders/pos/orders/search?${params.toString()}`;
+      const requestOptions = {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store',
+      };
 
-      const data = await response.json();
+      let response;
+      try {
+        response = await fetch(url, requestOptions);
+      } catch (error) {
+        if (error?.name === 'TypeError' && error?.message === 'Failed to fetch') {
+          await wait(800);
+          response = await fetch(url, requestOptions);
+        } else {
+          throw error;
+        }
+      }
+
+      const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.message || 'Failed to fetch POS orders');
       return data;
     } catch (error) {
-      return thunkAPI.rejectWithValue(error.message);
+      if (error?.name === 'TypeError' && error?.message === 'Failed to fetch') {
+        return thunkAPI.rejectWithValue(
+          navigator.onLine
+            ? getNetworkFailureMessage('Finance data load')
+            : 'No internet connection. Connect to the internet and try Refresh.'
+        );
+      }
+
+      return thunkAPI.rejectWithValue(error.message || 'Failed to fetch POS orders');
     }
   }
 );

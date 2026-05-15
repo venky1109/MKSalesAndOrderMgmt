@@ -1,5 +1,6 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import { cacheProducts, getCachedProducts } from '../../utils/offlineStorage'; 
+import { fetchWithRetry } from '../../utils/network';
 
 export const fetchAllProductsFresh = createAsyncThunk(
   'products/fetchAllFresh',
@@ -12,7 +13,7 @@ export const fetchAllProductsFresh = createAsyncThunk(
       return thunkAPI.rejectWithValue('offline');
     }
 
-    const res = await fetch(`${process.env.REACT_APP_API_BASE_URL}/products`, {
+    const res = await fetchWithRetry(`${process.env.REACT_APP_API_BASE_URL}/products`, {
       headers: { Authorization: `Bearer ${token}` },
     });
 
@@ -50,7 +51,7 @@ export const fetchAllProducts = createAsyncThunk(
     }
 
     // 3) Fetch from API (first load / cache miss)
-    const res = await fetch(`${process.env.REACT_APP_API_BASE_URL}/products`, {
+    const res = await fetchWithRetry(`${process.env.REACT_APP_API_BASE_URL}/products`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     const data = await res.json();
@@ -108,7 +109,7 @@ export const addProduct = createAsyncThunk(
 export const fetchProductByBarcode = createAsyncThunk(
   'products/fetchByBarcode',
   async ({ barcode, token }) => {
-    const res = await fetch(`${process.env.REACT_APP_API_BASE_URL}/pos-products/barcode/${barcode}`, {
+    const res = await fetchWithRetry(`${process.env.REACT_APP_API_BASE_URL}/pos-products/barcode/${barcode}`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     const data = await res.json();

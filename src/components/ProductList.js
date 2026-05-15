@@ -40,13 +40,7 @@ const normalizeScan = (raw) => {
 
 const sortText = (a, b) => String(a || "").localeCompare(String(b || ""));
 
-const getShortcutKey = ({
-  categoryIndex,
-  brandIndex,
-  productIndex,
-  quantityIndex,
-  unitIndex,
-}) => `${categoryIndex}${brandIndex}${productIndex}${quantityIndex}${unitIndex}`;
+const getShortcutKey = (index) => String(((index - 1) % 90000) + 10001);
 
 const getCatalogEntryKey = (p, d, f) =>
   [
@@ -60,23 +54,6 @@ const getCatalogEntryKey = (p, d, f) =>
   ].join("::");
 
 const getProductGroupKey = (p) => p?._id || p?.id || p?.name || "";
-
-const getQuantityKey = (value) => {
-  const qty = Number(value);
-  if (Number.isFinite(qty)) return String(qty);
-  return String(value ?? "").trim().toLowerCase();
-};
-
-const getUnitKey = (value) => String(value || "unit").trim().toLowerCase();
-
-const sortQuantity = (a, b) => {
-  const qtyA = Number(a);
-  const qtyB = Number(b);
-  if (Number.isFinite(qtyA) && Number.isFinite(qtyB) && qtyA !== qtyB) {
-    return qtyA - qtyB;
-  }
-  return sortText(a, b);
-};
 
 const shouldShowTouchNumberPad = () => {
   const width = window.innerWidth || 0;
@@ -482,8 +459,6 @@ const ProductList = forwardRef((props, ref) => {
     const shortcutMap = new Map();
     const entryShortcuts = new Map();
     const categoryMap = new Map();
-    const quantitySet = new Set();
-    const unitSet = new Set();
 
     for (const p of safeProducts || []) {
       const categoryName = safeLower(p?.category) || "uncategorized";
@@ -491,27 +466,14 @@ const ProductList = forwardRef((props, ref) => {
         categoryMap.set(categoryName, { name: categoryName, products: [] });
       }
       categoryMap.get(categoryName).products.push(p);
-
-      for (const d of asArray(p?.details)) {
-        for (const f of asArray(d?.financials).filter(Boolean)) {
-          quantitySet.add(getQuantityKey(f?.quantity));
-          unitSet.add(getUnitKey(f?.units));
-        }
-      }
     }
-
-    const quantityMap = new Map(
-      [...quantitySet].sort(sortQuantity).map((qty, index) => [qty, index + 1])
-    );
-    const unitMap = new Map(
-      [...unitSet].sort(sortText).map((unit, index) => [unit, index + 1])
-    );
 
     const categories = [...categoryMap.values()].sort((a, b) =>
       sortText(a.name, b.name)
     );
+    let shortcutIndex = 1;
 
-    categories.forEach((category, categoryIndex) => {
+    categories.forEach((category) => {
       const brandMap = new Map();
 
       for (const p of category.products) {
@@ -534,23 +496,15 @@ const ProductList = forwardRef((props, ref) => {
         sortText(a, b)
       );
 
-      brands.forEach(([, productMap], brandIndex) => {
+      brands.forEach(([, productMap]) => {
         const products = [...productMap.values()].sort((a, b) =>
           sortText(a.p?.name, b.p?.name)
         );
 
-        products.forEach((product, productIndex) => {
+        products.forEach((product) => {
           product.items.forEach((item) => {
-            const quantityIndex =
-              quantityMap.get(getQuantityKey(item.f?.quantity)) || 1;
-            const unitIndex = unitMap.get(getUnitKey(item.f?.units)) || 1;
-            const shortcutCode = getShortcutKey({
-              categoryIndex: categoryIndex + 1,
-              brandIndex: brandIndex + 1,
-              productIndex: productIndex + 1,
-              quantityIndex,
-              unitIndex,
-            });
+            const shortcutCode = getShortcutKey(shortcutIndex);
+            shortcutIndex += 1;
 
             const entryKey = getCatalogEntryKey(item.p, item.d, item.f);
             entryShortcuts.set(entryKey, shortcutCode);

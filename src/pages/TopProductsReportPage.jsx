@@ -32,6 +32,8 @@ const asArray = (value) => (Array.isArray(value) ? value : value ? [value] : [])
 
 const firstValue = (value) => (Array.isArray(value) ? value[0] || "" : value || "");
 
+const getGeneratedCode = (index) => String(((index - 1) % 90000) + 10001);
+
 const quantityKey = (value) => {
   const qty = Number(value);
   return Number.isFinite(qty) ? String(qty) : safeKey(value);
@@ -46,20 +48,16 @@ const normalizeUnit = (value) => {
   return unit || "unit";
 };
 
-const sortQuantity = (a, b) => {
-  const qtyA = Number(a);
-  const qtyB = Number(b);
-  if (Number.isFinite(qtyA) && Number.isFinite(qtyB) && qtyA !== qtyB) {
-    return qtyA - qtyB;
-  }
-  return sortText(a, b);
+const limitGeneratedCode = (value, fallbackIndex) => {
+  const digits = String(value || "").replace(/\D/g, "");
+  if (digits) return digits.slice(-5).padStart(5, "0");
+  return getGeneratedCode(fallbackIndex);
 };
 
 const buildGeneratedLookup = (products = []) => {
   const categoryMap = new Map();
-  const quantitySet = new Set();
-  const unitSet = new Set();
   const byProductFinancial = new Map();
+  const byProductQuantity = new Map();
   const byProduct = new Map();
   const byLoose = new Map();
 
@@ -69,25 +67,12 @@ const buildGeneratedLookup = (products = []) => {
       categoryMap.set(category, { name: category, products: [] });
     }
     categoryMap.get(category).products.push(product);
-
-    for (const detail of asArray(product?.details)) {
-      for (const financial of asArray(detail?.financials)) {
-        quantitySet.add(quantityKey(financial?.quantity));
-        unitSet.add(normalizeUnit(financial?.units));
-      }
-    }
   }
 
-  const quantityMap = new Map(
-    [...quantitySet].sort(sortQuantity).map((qty, index) => [qty, index + 1])
-  );
-  const unitMap = new Map(
-    [...unitSet].sort(sortText).map((unit, index) => [unit, index + 1])
-  );
-
+  let generatedIndex = 1;
   [...categoryMap.values()]
     .sort((a, b) => sortText(a.name, b.name))
-    .forEach((category, categoryIndex) => {
+    .forEach((category) => {
       const brandMap = new Map();
 
       for (const product of category.products) {
@@ -109,21 +94,18 @@ const buildGeneratedLookup = (products = []) => {
 
       [...brandMap.entries()]
         .sort(([a], [b]) => sortText(a, b))
-        .forEach(([, productMap], brandIndex) => {
+        .forEach(([, productMap]) => {
           [...productMap.entries()]
             .sort(([a], [b]) => sortText(a, b))
-            .forEach(([, entries], productIndex) => {
+            .forEach(([, entries]) => {
               entries.forEach(({ product, detail, financial, brand }) => {
                 const productId = String(product?._id || product?.id || "");
                 const financialId = String(financial?._id || financial?.id || "");
                 const packQuantity = Number(financial?.quantity || 1);
                 const unit = financial?.units || "-";
                 const rate = Number(financial?.dprice || financial?.price || 0);
-                const generatedCode = `${categoryIndex + 1}${brandIndex + 1}${
-                  productIndex + 1
-                }${quantityMap.get(quantityKey(financial?.quantity)) || 1}${
-                  unitMap.get(normalizeUnit(financial?.units)) || 1
-                }`;
+                const generatedCode = getGeneratedCode(generatedIndex);
+                generatedIndex += 1;
                 const productCode =
                   product?.product_code || product?.productCode || productId || "-";
                 const entry = {
@@ -143,6 +125,16 @@ const buildGeneratedLookup = (products = []) => {
                 if (productId && financialId) {
                   byProductFinancial.set(`${productId}|${financialId}`, entry);
                 }
+                if (productId) {
+                  byProductQuantity.set(
+                    [
+                      productId,
+                      quantityKey(packQuantity),
+                      normalizeUnit(unit),
+                    ].join("|"),
+                    entry
+                  );
+                }
                 byLoose.set(
                   [
                     safeKey(product?.name),
@@ -158,7 +150,7 @@ const buildGeneratedLookup = (products = []) => {
         });
     });
 
-  return { byProductFinancial, byProduct, byLoose };
+  return { byProductFinancial, byProductQuantity, byProduct, byLoose };
 };
 
 export default function TopProductsReportPage() {
@@ -193,7 +185,7 @@ export default function TopProductsReportPage() {
 
   const displayRows = useMemo(
     () =>
-      rows.map((row) => {
+      rows.map((row, index) => {
         const looseKey = [
           safeKey(row.productName),
           safeKey(row.brand),
@@ -205,20 +197,28 @@ export default function TopProductsReportPage() {
           generatedLookup.byProductFinancial.get(
             `${row.productId}|${row.financialId}`
           ) ||
+          generatedLookup.byProductQuantity.get(
+            [
+              String(row.productId || ""),
+              quantityKey(row.packQuantity),
+              normalizeUnit(row.unit),
+            ].join("|")
+          ) ||
           generatedLookup.byLoose.get(looseKey) ||
-          generatedLookup.byProduct.get(String(row.productId || "")) ||
           {};
+        const productFallback = generatedLookup.byProduct.get(
+          String(row.productId || "")
+        );
 
         return {
           ...row,
           productCode:
             row.productCode && row.productCode !== "-"
               ? row.productCode
-              : fallback.productCode || "-",
+              : fallback.productCode || productFallback?.productCode || "-",
           generatedCode:
-            row.generatedCode && row.generatedCode !== "-"
-              ? row.generatedCode
-              : fallback.generatedCode || "-",
+            fallback.generatedCode ||
+            limitGeneratedCode(row.generatedCode, index + 1),
         };
       }),
     [generatedLookup, rows]

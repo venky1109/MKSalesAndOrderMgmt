@@ -2,7 +2,6 @@
 import { useState, useEffect } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { loginPosUser } from '../features/auth/posUserSlice';
-import { useNavigate } from 'react-router-dom';
 import logo from '../assests/ManaKiranaLogo1024x1024.png';
 
 const LOCATIONS = ['YANAM','MURAMULLA','GOLLAVELLI','VADAPARRU','UPPALAGUPTHAM'];
@@ -13,9 +12,12 @@ function Login() {
   const [location, setLocation] = useState('');
   const [fallbackError, setFallbackError] = useState('');
   const dispatch = useDispatch();
-  const navigate = useNavigate();
 
   const { userInfo, loading, error } = useSelector((state) => state.posUser);
+
+  const reloadApp = () => {
+    window.location.reload();
+  };
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -34,21 +36,21 @@ function Login() {
       const role = userInfo.role;
 
       if (['CASHIER', 'ONLINE_CASHIER', 'HYBRID_CASHIER','ADMIN'].includes(role)) {
-        navigate('/pos');
+        window.location.replace('/pos');
       } else if (role === 'STOCKMANAGER') {
-        navigate('/inventory');
+        window.location.replace('/inventory');
       }
       else if (role === 'PACKING_AGENT') {
-        navigate('/packing');
+        window.location.replace('/packing');
       } else if (role === 'DISPATCH_AGENT') {
-        navigate('/dispatch');
+        window.location.replace('/dispatch');
       } else if (role === 'DELIVERY_AGENT') {
-        navigate('/delivery');
+        window.location.replace('/delivery');
       } else {
         setFallbackError('⚠️ Please check your username and password. Role not authorized.');
       }
     }
-  }, [userInfo, navigate]);
+  }, [userInfo]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 via-green-100 to-green-50 flex items-center justify-center px-4">
@@ -66,8 +68,22 @@ function Login() {
           <span className="text-lg font-medium text-gray-500">Sales & Order Management</span>
         </h1>
 
-        {error && <p className="text-red-600 text-center font-semibold">{error}</p>}
+        {error && (
+          <p className="whitespace-pre-line rounded-lg bg-red-50 p-3 text-center text-sm font-semibold text-red-600">
+            {error}
+          </p>
+        )}
         {fallbackError && <p className="text-red-600 text-center font-semibold">{fallbackError}</p>}
+
+        {(error || fallbackError) && (
+          <button
+            type="button"
+            onClick={reloadApp}
+            className="w-full rounded-lg border border-gray-300 bg-white px-4 py-3 text-sm font-bold text-gray-700 hover:bg-gray-100"
+          >
+            Reload App
+          </button>
+        )}
 
         <input
           type="text"

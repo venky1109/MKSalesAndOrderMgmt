@@ -1,7 +1,14 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { useNavigate } from "react-router-dom";
-import { BarChart3, LogOut, Settings, User, WalletCards } from "lucide-react";
+import {
+  BarChart3,
+  LogOut,
+  RefreshCw,
+  Settings,
+  User,
+  WalletCards,
+} from "lucide-react";
 import { logout } from "../features/auth/posUserSlice";
 import {
   publishQueuedOrdersSequential,
@@ -278,10 +285,14 @@ export default function POSActionsBar() {
     openPrinterSettingsWindow();
   }, []);
 
+  const handleReloadApp = useCallback(() => {
+    window.location.reload();
+  }, []);
+
   const handleOpenFinance = useCallback(() => {
     setSettingsOpen(false);
-    navigate("/finance");
-  }, [navigate]);
+    window.location.assign("/finance");
+  }, []);
 
   const handleOpenTopProducts = useCallback(() => {
     setSettingsOpen(false);
@@ -574,6 +585,13 @@ export default function POSActionsBar() {
         <span className="min-w-0 flex-1 whitespace-nowrap">
           Printer settings
         </span>
+      </button>
+      <button
+        onClick={handleReloadApp}
+        className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold text-gray-700 hover:bg-slate-50"
+      >
+        <RefreshCw size={16} className="shrink-0" />
+        <span className="min-w-0 flex-1 whitespace-nowrap">Reload app</span>
       </button>
       <button
         onClick={handleLogout}

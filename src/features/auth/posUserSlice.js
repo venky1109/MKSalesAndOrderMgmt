@@ -1,5 +1,7 @@
 // src/features/auth/posUserSlice.js
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
+import { API_BASE_URL, getNetworkFailureMessage } from '../../utils/apiConfig';
+import { fetchWithRetry } from '../../utils/network';
 import { fetchAllProductsFresh } from '../products/productSlice'; // ⬅️ add this
 
 const userFromStorage = localStorage.getItem('posUserInfo')
@@ -18,13 +20,13 @@ export const loginPosUser = createAsyncThunk(
   'posUser/login',
   async ({ username, password, location }, thunkAPI) => {
     try {
-      const res = await fetch(`${process.env.REACT_APP_API_BASE_URL}/posusers/login`, {
+      const res = await fetchWithRetry(`${API_BASE_URL}/posusers/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password, location }),
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.message || 'Login failed');
 
       // After successful login:
@@ -34,13 +36,20 @@ export const loginPosUser = createAsyncThunk(
       // If offline, keep cache so POS still works.
       const online = typeof navigator !== 'undefined' ? navigator.onLine : true;
       if (tokenFromLogin && online) {
-        clearProductCache();
         thunkAPI.dispatch(fetchAllProductsFresh(tokenFromLogin));
       }
 
       return data;
     } catch (err) {
-      return thunkAPI.rejectWithValue(err.message);
+      if (err?.name === 'TypeError' && err?.message === 'Failed to fetch') {
+        return thunkAPI.rejectWithValue(
+          navigator.onLine
+            ? getNetworkFailureMessage('Login')
+            : 'No internet connection. Connect to the internet and try again.'
+        );
+      }
+
+      return thunkAPI.rejectWithValue(err.message || 'Login failed');
     }
   }
 );
@@ -49,7 +58,7 @@ export const adjustPosUserBalance = createAsyncThunk(
   'posUser/adjustBalance',
   async ({ id, delta, token }, { rejectWithValue }) => {
     try {
-      const res = await fetch(`${process.env.REACT_APP_API_BASE_URL}/posusers/${id}/balance/adjust`, {
+      const res = await fetch(`${API_BASE_URL}/posusers/${id}/balance/adjust`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -74,7 +83,7 @@ export const getPosUserBalance = createAsyncThunk(
       if (!_id || !token) throw new Error('User ID or token missing');
 
       const res = await fetch(
-        `${process.env.REACT_APP_API_BASE_URL}/posusers/balance/${_id}`,
+        `${API_BASE_URL}/posusers/balance/${_id}`,
         {
           method: 'GET',
           headers: {
@@ -97,7 +106,7 @@ export const setPosUserBalance = createAsyncThunk(
   'posUser/setBalance',
   async ({ id, balance, token }, { rejectWithValue }) => {
     try {
-      const res = await fetch(`${process.env.REACT_APP_API_BASE_URL}/pos_users/${id}/balance`, {
+      const res = await fetch(`${API_BASE_URL}/pos_users/${id}/balance`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',

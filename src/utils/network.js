@@ -23,3 +23,27 @@ export async function pingBackend(
     clearTimeout(t);
   }
 }
+
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+export async function fetchWithRetry(url, options = {}, retries = 2) {
+  let lastError;
+
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      return await fetch(url, { cache: 'no-store', ...options });
+    } catch (error) {
+      lastError = error;
+      const canRetry =
+        error?.name === 'TypeError' && error?.message === 'Failed to fetch';
+
+      if (!canRetry || attempt === retries) {
+        throw error;
+      }
+
+      await wait(700 * (attempt + 1));
+    }
+  }
+
+  throw lastError;
+}

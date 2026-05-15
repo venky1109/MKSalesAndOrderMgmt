@@ -69,6 +69,8 @@ export default function AccountsPage() {
   const [fromDate, setFromDate] = useState(todayValue());
   const [toDate, setToDate] = useState(todayValue());
   const [settledAt, setSettledAt] = useState("");
+  const [localError, setLocalError] = useState("");
+  const token = posUserInfo?.token;
 
   const settlementKey = useMemo(
     () =>
@@ -77,15 +79,26 @@ export default function AccountsPage() {
   );
 
   const loadAccounts = useCallback(async () => {
-    if (fromDate === todayValue() && toDate === todayValue()) {
-      await dispatch(fetchPOSOrders({ mode: "today" }));
-      return;
-    }
+    if (!token) return;
 
-    await dispatch(
-      fetchPOSOrders({ mode: "custom", from: fromDate, to: toDate })
-    );
-  }, [dispatch, fromDate, toDate]);
+    setLocalError("");
+
+    try {
+      if (fromDate === todayValue() && toDate === todayValue()) {
+        await dispatch(fetchPOSOrders({ mode: "today" })).unwrap();
+        return;
+      }
+
+      await dispatch(
+        fetchPOSOrders({ mode: "custom", from: fromDate, to: toDate })
+      ).unwrap();
+    } catch (err) {
+      setLocalError(
+        err ||
+          "Unable to load finance data. Please try Refresh."
+      );
+    }
+  }, [dispatch, fromDate, toDate, token]);
 
   useEffect(() => {
     loadAccounts();
@@ -138,9 +151,13 @@ export default function AccountsPage() {
     setSettledAt(nextSettledAt);
   };
 
+  const reloadApp = () => {
+    window.location.reload();
+  };
+
   return (
-    <div className="h-screen overflow-y-auto bg-slate-100 p-3 md:p-5">
-      <div className="mx-auto max-w-7xl">
+    <div className="fixed inset-0 overflow-y-scroll bg-slate-100 p-3 pb-24 md:p-5 md:pb-10 [-webkit-overflow-scrolling:touch]">
+      <div className="mx-auto max-w-7xl pb-8">
         <div className="flex flex-col gap-3 rounded-lg border bg-white p-4 shadow-sm md:flex-row md:items-center md:justify-between">
           <div>
             <button
@@ -166,7 +183,7 @@ export default function AccountsPage() {
           </div>
         </div>
 
-        <div className="mt-4 grid gap-3 rounded-lg border bg-white p-4 shadow-sm md:grid-cols-[1fr_1fr_auto_auto] md:items-end">
+        <div className="mt-4 grid gap-3 rounded-lg border bg-white p-4 shadow-sm md:grid-cols-[1fr_1fr_auto_auto_auto] md:items-end">
           <label className="block">
             <span className="text-sm font-bold text-gray-700">From</span>
             <input
@@ -197,6 +214,14 @@ export default function AccountsPage() {
           </button>
 
           <button
+            onClick={reloadApp}
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 text-sm font-bold text-gray-700 hover:bg-gray-100"
+          >
+            <RefreshCw size={16} />
+            Reload App
+          </button>
+
+          <button
             onClick={markSettled}
             disabled={!orders.length}
             className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-green-600 px-4 text-sm font-bold text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:bg-gray-400"
@@ -212,9 +237,9 @@ export default function AccountsPage() {
           </div>
         ) : null}
 
-        {error ? (
+        {localError || error ? (
           <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
-            {error}
+            {localError || error}
           </div>
         ) : null}
 

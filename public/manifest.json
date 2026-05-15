@@ -3,11 +3,12 @@
   "name": "ManaKirana POS",
   "description": "ManaKirana POS - Fast billing and inventory system",
 
-  "start_url": "/?source=pwa",
+  "id": "/",
+  "start_url": "/login",
   "scope": "/",
 
-  "display": "fullscreen",
-  "orientation": "landscape",
+  "display": "standalone",
+  "orientation": "any",
 
   "background_color": "#cff8cc",
   "theme_color": "#cff8cc",
@@ -29,21 +30,6 @@
       "src": "/images/logoSquare1024_v1.png",
       "sizes": "1024x1024",
       "type": "image/png"
-    }
-  ],
-
-  "screenshots": [
-    {
-      "src": "/images/mob_screen_1.jpg",
-      "sizes": "427x751",
-      "type": "image/png",
-      "form_factor": "narrow"
-    },
-    {
-      "src": "/images/desk_screen_1.jpg",
-      "sizes": "1882x857",
-      "type": "image/png",
-      "form_factor": "wide"
     }
   ],
 
