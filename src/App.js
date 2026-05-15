@@ -21,6 +21,7 @@ import StockManagerCatalogPage from './pages/StockManagerCatalogPage';
 import DispatchPage from "./pages/DispatchPage";
 import PrinterSettingsPage from "./pages/PrinterSettingsPage";  
 import AccountsPage from "./pages/AccountsPage";
+import TopProductsReportPage from "./pages/TopProductsReportPage";
 
 function App() {
   function AppBootHydrator() {
@@ -125,6 +126,14 @@ function App() {
   element={
     <ProtectedRoute role={["ADMIN", "ONLINE_CASHIER", "CASHIER", "HYBRID_CASHIER"]}>
       <AccountsPage />
+    </ProtectedRoute>
+  }
+/>
+<Route
+  path="/reports/top-products"
+  element={
+    <ProtectedRoute role={["ADMIN", "ONLINE_CASHIER", "CASHIER", "HYBRID_CASHIER"]}>
+      <TopProductsReportPage />
     </ProtectedRoute>
   }
 />

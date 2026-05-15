@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { useNavigate } from "react-router-dom";
-import { LogOut, Settings, User, WalletCards } from "lucide-react";
+import { BarChart3, LogOut, Settings, User, WalletCards } from "lucide-react";
 import { logout } from "../features/auth/posUserSlice";
 import {
   publishQueuedOrdersSequential,
@@ -283,6 +283,11 @@ export default function POSActionsBar() {
     navigate("/finance");
   }, [navigate]);
 
+  const handleOpenTopProducts = useCallback(() => {
+    setSettingsOpen(false);
+    navigate("/reports/top-products");
+  }, [navigate]);
+
   const toggleUserMenu = useCallback(() => {
     const rect = userMenuButtonRef.current?.getBoundingClientRect();
 
@@ -553,6 +558,13 @@ export default function POSActionsBar() {
       >
         <WalletCards size={16} className="shrink-0" />
         <span className="min-w-0 flex-1 whitespace-nowrap">Finance</span>
+      </button>
+      <button
+        onClick={handleOpenTopProducts}
+        className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold text-gray-700 hover:bg-yellow-50"
+      >
+        <BarChart3 size={16} className="shrink-0" />
+        <span className="min-w-0 flex-1 whitespace-nowrap">Top Products</span>
       </button>
       <button
         onClick={handleOpenPrinterSettings}

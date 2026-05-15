@@ -223,6 +223,8 @@ const ProductList = forwardRef((props, ref) => {
         onClick={() =>
           dispatch(addToCart({
             id: p._id,
+            productId: p._id,
+            product_code: p.product_code || p.productCode || "",
             productName: p.name,
             category: p.category,
             brand: d.brand,

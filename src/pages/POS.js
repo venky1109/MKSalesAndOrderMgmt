@@ -6,7 +6,7 @@ import Footer from "../components/Footer";
 
 function POS() {
   return (
-    <div className="h-screen overflow-hidden bg-[#efefef] p-1 md:p-2">
+    <div className="h-[100dvh] w-screen max-w-full overflow-hidden bg-[#efefef] p-1 md:p-2">
       <POSLayout>
         <main
           className="

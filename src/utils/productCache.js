@@ -1,5 +1,6 @@
 const PRODUCT_CACHE_KEYS = [
   'mkpos.products',
+  'mk_products_v1',
   'products',
   'allProducts',
   'catalog',

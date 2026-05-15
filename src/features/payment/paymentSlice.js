@@ -70,6 +70,7 @@ export const initiateUpiPayment = createAsyncThunk(
           image: item.image || '',
           dprice: item.dprice,
           price: item.dprice,
+          product_code: item.product_code || '',
           id: item.id,
           productId: item.id,
           brandId: item.brandId,

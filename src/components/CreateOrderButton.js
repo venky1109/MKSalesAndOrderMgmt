@@ -121,6 +121,7 @@ function CreateOrderButton() {
         qty: item.qty,
         image: item.image || '',
         price: item.dprice,
+        product_code: item.product_code || '',
         productId: item.id,
         brandId: item.brandId,
         financialId: item.financialId,

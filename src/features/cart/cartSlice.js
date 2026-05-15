@@ -86,6 +86,7 @@ const cartSlice = createSlice({
       id: product.id, // composite ID like productId-brandId-financialId
       item: product.productName,
       stock: stock - 1,
+      product_code: product.product_code || product.productCode || '',
       quantity: product.quantity,
       price: product.MRP,
       catalogQuantity: product.catalogQuantity,

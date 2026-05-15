@@ -12,16 +12,6 @@ export const fetchAllProductsFresh = createAsyncThunk(
       return thunkAPI.rejectWithValue('offline');
     }
 
-    // Drop any stale local copy before fetching (your two keys are kept;
-    // add any others you may have used in the past)
-    try {
-      localStorage.removeItem('mkpos.products');
-      localStorage.removeItem('mk_products_v1');
-      // localStorage.removeItem('products');      // (optional)
-      // localStorage.removeItem('allProducts');   // (optional)
-      // localStorage.removeItem('catalog');       // (optional)
-    } catch {}
-
     const res = await fetch(`${process.env.REACT_APP_API_BASE_URL}/products`, {
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -333,19 +323,34 @@ const productSlice = createSlice({
     state.error = action.error.message;
   }
 })
-
-    .addCase(fetchProductByBarcode.pending, (state) => {
+    .addCase(fetchAllProductsFresh.pending, (state) => {
       state.loading = true;
       state.error = '';
     })
-    .addCase(fetchProductByBarcode.fulfilled, (state, action) => {
+    .addCase(fetchAllProductsFresh.fulfilled, (state, action) => {
       state.loading = false;
+      state.all = Array.isArray(action.payload) ? action.payload : [];
+      cacheProducts(state.all);
+    })
+    .addCase(fetchAllProductsFresh.rejected, (state, action) => {
+      state.loading = false;
+      const cached = getCachedProducts();
+      if (Array.isArray(cached) && cached.length > 0) {
+        state.all = cached;
+        state.error = '';
+      } else {
+        state.error = action.payload || action.error.message || 'Failed to refresh products';
+      }
+    })
+
+    .addCase(fetchProductByBarcode.pending, (state) => {
+      state.selected = null;
+    })
+    .addCase(fetchProductByBarcode.fulfilled, (state, action) => {
       state.selected = action.payload;
     })
-    .addCase(fetchProductByBarcode.rejected, (state, action) => {
-      state.loading = false;
+    .addCase(fetchProductByBarcode.rejected, (state) => {
       state.selected = null;
-      state.error = action.error.message;
     })
 
     .addCase(suggestProducts.fulfilled, (state, action) => {

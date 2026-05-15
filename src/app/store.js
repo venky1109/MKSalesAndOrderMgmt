@@ -10,6 +10,7 @@ import productFiltersReducer from '../features/products/productFiltersSlice';
 import stockManagerInventoryReducer from '../features/inventory/stockManagerInventorySlice'
 import catalogCrudReducer from '../features/inventory/catalogCrudSlice';
 import inventoryMovementReducer from '../features/inventory/inventoryMovementSlice';
+import topProductsReportReducer from '../features/reports/topProductsReportSlice';
 const stateMutationLogger = store => next => action => {
   const result = next(action);
   const state = store.getState();
@@ -34,6 +35,7 @@ export const store = configureStore({
     stockManagerInventory: stockManagerInventoryReducer,
     catalogCrud:catalogCrudReducer,
     inventoryMovement: inventoryMovementReducer,
+    topProductsReport: topProductsReportReducer,
   },
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware().concat(stateMutationLogger),

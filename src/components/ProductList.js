@@ -9,7 +9,9 @@ import React, {
 import { useDispatch, useSelector } from "react-redux";
 import {
   fetchAllProducts,
+  fetchAllProductsFresh,
   fetchProductByBarcode,
+  clearProduct,
 } from "../features/products/productSlice";
 import { addToCart } from "../features/cart/cartSlice";
 import { FixedSizeGrid as Grid } from "react-window";
@@ -42,8 +44,9 @@ const getShortcutKey = ({
   categoryIndex,
   brandIndex,
   productIndex,
-  financialIndex,
-}) => `${categoryIndex}${brandIndex}${productIndex}${financialIndex}`;
+  quantityIndex,
+  unitIndex,
+}) => `${categoryIndex}${brandIndex}${productIndex}${quantityIndex}${unitIndex}`;
 
 const getCatalogEntryKey = (p, d, f) =>
   [
@@ -57,6 +60,40 @@ const getCatalogEntryKey = (p, d, f) =>
   ].join("::");
 
 const getProductGroupKey = (p) => p?._id || p?.id || p?.name || "";
+
+const getQuantityKey = (value) => {
+  const qty = Number(value);
+  if (Number.isFinite(qty)) return String(qty);
+  return String(value ?? "").trim().toLowerCase();
+};
+
+const getUnitKey = (value) => String(value || "unit").trim().toLowerCase();
+
+const sortQuantity = (a, b) => {
+  const qtyA = Number(a);
+  const qtyB = Number(b);
+  if (Number.isFinite(qtyA) && Number.isFinite(qtyB) && qtyA !== qtyB) {
+    return qtyA - qtyB;
+  }
+  return sortText(a, b);
+};
+
+const shouldShowTouchNumberPad = () => {
+  const width = window.innerWidth || 0;
+  const userAgent = navigator.userAgent || "";
+  const isMobileOrTablet =
+    /Android|iPad|iPhone|iPod|Mobile|Tablet/i.test(userAgent);
+  const hasTouch =
+    navigator.maxTouchPoints > 0 ||
+    window.matchMedia?.("(any-pointer: coarse)")?.matches ||
+    window.matchMedia?.("(pointer: coarse)")?.matches;
+  const desktopPointer =
+    window.matchMedia?.("(hover: hover)")?.matches &&
+    window.matchMedia?.("(pointer: fine)")?.matches;
+
+  if (isMobileOrTablet || hasTouch) return true;
+  return !(width >= 1024 && desktopPointer);
+};
 
 /** Offline catalog (store-first, localStorage fallback) + fast barcode map */
 function useOfflineCatalog() {
@@ -148,7 +185,7 @@ const SearchKeyboard = forwardRef(({ visible, onKeyPress, onClose }, ref) => {
                   onClick={() => onKeyPress("BACKSPACE")}
                   className="rounded-lg border border-yellow-300 bg-yellow-50 px-3 py-2 text-sm font-bold text-yellow-800 active:scale-95"
                 >
-                  ⌫
+                  Back
                 </button>
 
                 <button
@@ -246,7 +283,7 @@ const SearchKeyboard = forwardRef(({ visible, onKeyPress, onClose }, ref) => {
               onClick={() => onKeyPress("BACKSPACE")}
               className="flex-1 min-w-0 rounded-lg border border-yellow-300 bg-yellow-50 px-2 py-3 text-sm font-bold text-yellow-800 active:scale-95"
             >
-              ⌫
+              Back
             </button>
 
             <button
@@ -264,6 +301,60 @@ const SearchKeyboard = forwardRef(({ visible, onKeyPress, onClose }, ref) => {
   );
 });
 
+const NumberPad = ({ value, onKeyPress }) => {
+  const keys = [
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8",
+    "9",
+    "CLEAR",
+    "0",
+    "BACKSPACE",
+  ];
+  const keyClass =
+    "h-10 rounded border border-slate-300 bg-white text-base font-bold text-slate-800 shadow-sm active:scale-95";
+
+  return (
+    <div className="mt-2 grid grid-cols-4 gap-1.5 sm:gap-2">
+      {keys.map((key) => (
+        <button
+          key={key}
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => onKeyPress(key)}
+          className={
+            key === "CLEAR"
+              ? `${keyClass} text-xs text-red-700`
+              : key === "BACKSPACE"
+              ? `${keyClass} text-xs text-yellow-800`
+              : keyClass
+          }
+        >
+          {key === "CLEAR" ? "Clear" : key === "BACKSPACE" ? "Back" : key}
+        </button>
+      ))}
+
+      <button
+        type="button"
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => onKeyPress("ENTER")}
+        disabled={!value.trim()}
+        className="col-span-4 h-10 rounded bg-green-700 text-sm font-bold text-white shadow-sm active:scale-95 disabled:cursor-not-allowed disabled:bg-gray-300"
+      >
+        Add
+      </button>
+    </div>
+  );
+};
+
+const PRODUCT_REFRESH_PROMPT =
+  "Barcode not available. Click OK to refresh products.";
+
 const ProductList = forwardRef((props, ref) => {
   const dispatch = useDispatch();
 
@@ -277,6 +368,7 @@ const ProductList = forwardRef((props, ref) => {
   const [showSearchKeyboard, setShowSearchKeyboard] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(270);
   const [useCustomSearchKeyboard, setUseCustomSearchKeyboard] = useState(false);
+  const [showNumberPad, setShowNumberPad] = useState(true);
 
   const barcodeRef = useRef(null);
   const searchInputRef = useRef(null);
@@ -307,9 +399,12 @@ const ProductList = forwardRef((props, ref) => {
   useEffect(() => {
     const updateKeyboardMode = () => {
       const isTabletOrMobile = window.innerWidth < 1024;
-      setUseCustomSearchKeyboard(isTabletOrMobile);
+      const useTouchControls = shouldShowTouchNumberPad();
 
-      if (!isTabletOrMobile) {
+      setUseCustomSearchKeyboard(isTabletOrMobile || useTouchControls);
+      setShowNumberPad(useTouchControls);
+
+      if (!isTabletOrMobile && !useTouchControls) {
         setShowSearchKeyboard(false);
       }
     };
@@ -387,6 +482,8 @@ const ProductList = forwardRef((props, ref) => {
     const shortcutMap = new Map();
     const entryShortcuts = new Map();
     const categoryMap = new Map();
+    const quantitySet = new Set();
+    const unitSet = new Set();
 
     for (const p of safeProducts || []) {
       const categoryName = safeLower(p?.category) || "uncategorized";
@@ -394,7 +491,21 @@ const ProductList = forwardRef((props, ref) => {
         categoryMap.set(categoryName, { name: categoryName, products: [] });
       }
       categoryMap.get(categoryName).products.push(p);
+
+      for (const d of asArray(p?.details)) {
+        for (const f of asArray(d?.financials).filter(Boolean)) {
+          quantitySet.add(getQuantityKey(f?.quantity));
+          unitSet.add(getUnitKey(f?.units));
+        }
+      }
     }
+
+    const quantityMap = new Map(
+      [...quantitySet].sort(sortQuantity).map((qty, index) => [qty, index + 1])
+    );
+    const unitMap = new Map(
+      [...unitSet].sort(sortText).map((unit, index) => [unit, index + 1])
+    );
 
     const categories = [...categoryMap.values()].sort((a, b) =>
       sortText(a.name, b.name)
@@ -429,12 +540,16 @@ const ProductList = forwardRef((props, ref) => {
         );
 
         products.forEach((product, productIndex) => {
-          product.items.forEach((item, financialIndex) => {
+          product.items.forEach((item) => {
+            const quantityIndex =
+              quantityMap.get(getQuantityKey(item.f?.quantity)) || 1;
+            const unitIndex = unitMap.get(getUnitKey(item.f?.units)) || 1;
             const shortcutCode = getShortcutKey({
               categoryIndex: categoryIndex + 1,
               brandIndex: brandIndex + 1,
               productIndex: productIndex + 1,
-              financialIndex: financialIndex + 1,
+              quantityIndex,
+              unitIndex,
             });
 
             const entryKey = getCatalogEntryKey(item.p, item.d, item.f);
@@ -456,6 +571,7 @@ const ProductList = forwardRef((props, ref) => {
         addToCart({
           id: p._id,
           productId: p._id,
+          product_code: p.product_code || p.productCode || "",
           item: p.name,
           productName: p.name,
           category: p.category,
@@ -514,19 +630,47 @@ const ProductList = forwardRef((props, ref) => {
           if (result) {
             dispatch(addToCart(result));
           } else {
-            alert("❌ Product not found.");
+            alert(PRODUCT_REFRESH_PROMPT);
+            dispatch(clearProduct());
+            if (token) {
+              dispatch(fetchAllProductsFresh({ token }));
+            }
+            return;
           }
-        } catch (err) {
-          alert("❌ Error: " + (err?.message || err));
+        } catch {
+          alert(PRODUCT_REFRESH_PROMPT);
+          dispatch(clearProduct());
+          if (token) {
+            dispatch(fetchAllProductsFresh({ token }));
+          }
+          return;
         }
       } else {
-        alert("📴 Offline and product not found in cache.");
+        alert("Offline and product not found in cache.");
       }
 
       setBarcodeInput("");
       setTimeout(() => barcodeRef.current?.focus(), 50);
     },
     [dispatch, token, barcodeMap, shortcutCatalog, addItemToCart]
+  );
+
+  const handleNumberPadPress = useCallback(
+    (key) => {
+      if (key === "CLEAR") {
+        setBarcodeInput("");
+      } else if (key === "BACKSPACE") {
+        setBarcodeInput((prev) => prev.slice(0, -1));
+      } else if (key === "ENTER") {
+        if (barcodeInput.trim()) handleBarcode(barcodeInput.trim());
+      } else {
+        setBarcodeInput((prev) => prev + key);
+      }
+
+      setShowSearchKeyboard(false);
+      setTimeout(() => barcodeRef.current?.focus(), 50);
+    },
+    [barcodeInput, handleBarcode]
   );
 
   const handleSearchKeyPress = useCallback((key) => {
@@ -649,15 +793,25 @@ const ProductList = forwardRef((props, ref) => {
   const MIN_CARD_WIDTH = 180;
   const CARD_HEIGHT = 220;
   const CARD_GAP = 10;
+  const fallbackGridWidth =
+    gridWrapRef.current?.clientWidth ||
+    (typeof window !== "undefined" ? window.innerWidth : MIN_CARD_WIDTH);
+  const fallbackGridHeight =
+    gridWrapRef.current?.clientHeight ||
+    (typeof window !== "undefined"
+      ? Math.max(260, window.innerHeight - 260)
+      : CARD_HEIGHT * 2);
+  const effectiveGridWidth = gridSize.width || fallbackGridWidth;
+  const effectiveGridHeight = gridSize.height || fallbackGridHeight;
 
   const columnCount =
-    gridSize.width > 0
-      ? Math.max(1, Math.floor(gridSize.width / MIN_CARD_WIDTH))
+    effectiveGridWidth > 0
+      ? Math.max(1, Math.floor(effectiveGridWidth / MIN_CARD_WIDTH))
       : 1;
 
   const columnWidth =
-    gridSize.width > 0
-      ? Math.floor(gridSize.width / columnCount)
+    effectiveGridWidth > 0
+      ? Math.floor(effectiveGridWidth / columnCount)
       : MIN_CARD_WIDTH;
 
   const rowCount = Math.ceil(flatProducts.length / columnCount);
@@ -686,6 +840,9 @@ const ProductList = forwardRef((props, ref) => {
               className="w-full rounded border bg-white p-2 pl-10 pr-10 text-center text-sm text-slate-900 md:text-base"
             />
           </div>
+          {showNumberPad ? (
+            <NumberPad value={barcodeInput} onKeyPress={handleNumberPadPress} />
+          ) : null}
         </div>
 
         <div className="mb-2 hidden items-center gap-2 md:flex">
@@ -742,7 +899,7 @@ const ProductList = forwardRef((props, ref) => {
             onChange={handleDesktopSearchChange}
             onFocus={useCustomSearchKeyboard ? openSearchKeyboard : undefined}
             onClick={useCustomSearchKeyboard ? openSearchKeyboard : undefined}
-            placeholder="🔍 Search product"
+            placeholder="Search product"
             className="w-full rounded border bg-white px-3 py-2 text-sm caret-slate-900"
           />
         </div>
@@ -767,11 +924,11 @@ const ProductList = forwardRef((props, ref) => {
               : 0,
         }}
       >
-        {loading ? (
+        {loading && flatProducts.length === 0 ? (
           <div className="flex h-full items-center justify-center font-medium text-blue-500">
             Loading products...
           </div>
-        ) : error ? (
+        ) : error && flatProducts.length === 0 ? (
           <div className="flex h-full items-center justify-center text-sm text-red-600">
             {error}
           </div>
@@ -782,7 +939,7 @@ const ProductList = forwardRef((props, ref) => {
         ) : (
           <div
             ref={gridWrapRef}
-            className="h-full w-full overflow-hidden"
+            className="h-full min-h-[260px] w-full overflow-hidden"
             onMouseDown={() => {
               if (showSearchKeyboard) {
                 setShowSearchKeyboard(false);
@@ -796,14 +953,14 @@ const ProductList = forwardRef((props, ref) => {
               }
             }}
           >
-            {gridSize.width > 0 && gridSize.height > 0 ? (
+            {effectiveGridWidth > 0 && effectiveGridHeight > 0 ? (
               <Grid
                 columnCount={columnCount}
                 columnWidth={columnWidth}
-                height={gridSize.height}
+                height={effectiveGridHeight}
                 rowCount={rowCount}
                 rowHeight={CARD_HEIGHT}
-                width={gridSize.width}
+                width={effectiveGridWidth}
                 itemData={flatProducts}
               >
                 {({ columnIndex, rowIndex, style, data }) => {
@@ -870,10 +1027,10 @@ const ProductList = forwardRef((props, ref) => {
                           <div className="mt-1 flex items-end justify-between gap-2">
                             <div className="min-w-0">
                               <div className="whitespace-nowrap text-base font-bold text-green-700">
-                                ₹ {rate.toFixed(2)}
+                                Rs. {rate.toFixed(2)}
                               </div>
                               <div className="whitespace-nowrap text-[11px] text-gray-400 line-through">
-                                ₹ {mrp.toFixed(2)}
+                                Rs. {mrp.toFixed(2)}
                               </div>
                             </div>
 
