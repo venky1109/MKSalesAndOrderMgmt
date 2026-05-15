@@ -1,8 +1,14 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import html2canvas from "html2canvas";
 import WhatsAppShare from "../components/WhatsAppShare";
+import {
+  getInvoicePrinterSettings,
+  getPrinterProfile,
+  PRINTER_PROFILES,
+  saveInvoicePrinterSettings,
+} from "../utils/printerConfig";
+import { printHtmlInHiddenFrame } from "../utils/printFrame";
 
 const PaymentInvoiceSharePage = () => {
   const navigate = useNavigate();
@@ -19,7 +25,9 @@ const PaymentInvoiceSharePage = () => {
 
   const [invoiceImgUrl, setInvoiceImgUrl] = useState(null);
   const [pendingCapture, setPendingCapture] = useState(false);
-  const [printWidth, setPrintWidth] = useState(270);
+  const [printerSettings, setPrinterSettings] = useState(() =>
+    getInvoicePrinterSettings()
+  );
 
   const money = (n) => `₹ ${(Number(n || 0)).toFixed(2)}`;
 
@@ -79,15 +87,6 @@ const PaymentInvoiceSharePage = () => {
   const printImageAtWidth = (imgUrl, widthPx = 352) => {
     if (!imgUrl) return;
 
-    const iframe = document.createElement("iframe");
-    iframe.style.position = "fixed";
-    iframe.style.right = "0";
-    iframe.style.bottom = "0";
-    iframe.style.width = "0";
-    iframe.style.height = "0";
-    iframe.style.border = "0";
-    document.body.appendChild(iframe);
-
     const html = `
       <html>
         <head>
@@ -124,16 +123,7 @@ const PaymentInvoiceSharePage = () => {
       </html>
     `;
 
-    const doc = iframe.contentDocument || iframe.contentWindow.document;
-    doc.open();
-    doc.write(html);
-    doc.close();
-
-    setTimeout(() => {
-      try {
-        document.body.removeChild(iframe);
-      } catch {}
-    }, 5000);
+    printHtmlInHiddenFrame(html, 5000);
   };
 
   const handleShareWhatsApp = () => {
@@ -150,6 +140,12 @@ const PaymentInvoiceSharePage = () => {
     navigate("/");
   };
 
+  const handleProfileChange = (profileId) => {
+    const next = saveInvoicePrinterSettings({ profileId });
+    setPrinterSettings(next);
+    setPendingCapture(true);
+  };
+
   const items = order?.orderItems || [];
   const totalQty = items.reduce((sum, item) => sum + Number(item.qty || 0), 0);
   const formattedDate = order?.createdAt
@@ -158,6 +154,7 @@ const PaymentInvoiceSharePage = () => {
   const formattedTime = order?.createdAt
     ? new Date(order.createdAt).toLocaleTimeString()
     : new Date().toLocaleTimeString();
+  const printerProfile = getPrinterProfile(printerSettings.profileId);
 
   return (
     <>
@@ -182,20 +179,26 @@ const PaymentInvoiceSharePage = () => {
           <div className="mt-3">
             <label className="text-xs text-gray-500">Printer profile: </label>
             <select
-              value={printWidth}
-              onChange={(e) => setPrintWidth(Number(e.target.value))}
+              value={printerSettings.profileId}
+              onChange={(e) => handleProfileChange(e.target.value)}
               className="ml-2 rounded border px-2 py-1 text-sm"
             >
-              <option value={352}>58 mm SAFE (352 px)</option>
-              <option value={384}>58 mm Exact (384 px)</option>
-              <option value={576}>80 mm Receipt (576 px)</option>
-              <option value={812}>TSC TE244 4" Label (812 px)</option>
+              {PRINTER_PROFILES.map((profile) => (
+                <option key={profile.id} value={profile.id}>
+                  {profile.label}
+                </option>
+              ))}
             </select>
           </div>
 
           <div className="mt-4 flex flex-wrap gap-2">
             <button
-              onClick={() => printImageAtWidth(invoiceImgUrl, printWidth)}
+              onClick={() =>
+                printImageAtWidth(
+                  invoiceImgUrl,
+                  printerProfile.paymentPrintWidth
+                )
+              }
               disabled={!invoiceImgUrl}
               className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
             >
@@ -228,7 +231,8 @@ const PaymentInvoiceSharePage = () => {
           </div>
 
           <div className="mt-3 text-xs text-gray-500">
-            Tip: Print dialog → More settings → Margins: None, Scale: 100, disable headers & footers.
+            Tip: Print dialog - More settings - Margins: None, Scale: 100,
+            disable headers and footers.
           </div>
         </div>
       </div>
@@ -237,7 +241,7 @@ const PaymentInvoiceSharePage = () => {
       <div
         ref={receiptRef}
         style={{
-          width: "56mm",
+          width: printerProfile.captureWidth,
           padding: "3mm 3mm 7mm",
           background: "#fff",
           color: "#000",

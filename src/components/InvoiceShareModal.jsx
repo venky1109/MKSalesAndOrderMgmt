@@ -2,6 +2,11 @@ import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import html2canvas from "html2canvas";
 import WhatsAppShare from "./WhatsAppShare";
+import {
+  getInvoicePrinterSettings,
+  getPrinterProfile,
+} from "../utils/printerConfig";
+import { printHtmlInHiddenFrame } from "../utils/printFrame";
 
 const InvoiceShareModal = ({
   open,
@@ -15,6 +20,9 @@ const InvoiceShareModal = ({
 
   const [invoiceImgUrl, setInvoiceImgUrl] = useState(null);
   const [pendingCapture, setPendingCapture] = useState(false);
+  const [printerSettings, setPrinterSettings] = useState(() =>
+    getInvoicePrinterSettings()
+  );
 
   const money = (n) => `₹ ${Number(n || 0).toFixed(2)}`;
 
@@ -47,6 +55,7 @@ const cleanInvoiceItems = (items = []) =>
   });
   useEffect(() => {
     if (open && order) {
+      setPrinterSettings(getInvoicePrinterSettings());
       setInvoiceImgUrl(null);
       setPendingCapture(true);
     }
@@ -82,15 +91,10 @@ const cleanInvoiceItems = (items = []) =>
   const printReceiptImage = (imgUrl) => {
     if (!imgUrl) return;
 
-    const iframe = document.createElement("iframe");
-    iframe.style.position = "fixed";
-    iframe.style.right = "0";
-    iframe.style.bottom = "0";
-    iframe.style.width = "0";
-    iframe.style.height = "0";
-    iframe.style.border = "0";
-    iframe.setAttribute("aria-hidden", "true");
-    document.body.appendChild(iframe);
+    const profile = getPrinterProfile(printerSettings.profileId);
+    const pageWidthCss =
+      profile.imageWidth === "100%" ? "100%" : `${profile.imageWidth}`;
+    const pageSizeCss = profile.pageSize || "auto";
 
     const html = `
       <!DOCTYPE html>
@@ -99,14 +103,14 @@ const cleanInvoiceItems = (items = []) =>
           <meta charset="utf-8" />
           <title>Print Invoice</title>
           <style>
-            @page { size: 58mm auto; margin: 0; }
+            @page { size: ${pageSizeCss}; margin: 0; }
 
             html, body {
               margin: 0 !important;
               padding: 0 !important;
-              width: 58mm !important;
-              min-width: 58mm !important;
-              max-width: 58mm !important;
+              width: ${pageWidthCss} !important;
+              min-width: ${pageWidthCss} !important;
+              max-width: ${pageWidthCss} !important;
               background: #fff;
               overflow: hidden;
             }
@@ -114,14 +118,14 @@ const cleanInvoiceItems = (items = []) =>
             * { box-sizing: border-box; }
 
             .page {
-              width: 58mm !important;
+              width: ${pageWidthCss} !important;
               margin: 0 !important;
               padding: 0 !important;
             }
 
             .receipt-img {
               display: block !important;
-              width: 58mm !important;
+              width: ${pageWidthCss} !important;
               height: auto !important;
               margin: 0 !important;
               padding: 0 !important;
@@ -158,16 +162,7 @@ const cleanInvoiceItems = (items = []) =>
       </html>
     `;
 
-    const doc = iframe.contentDocument || iframe.contentWindow.document;
-    doc.open();
-    doc.write(html);
-    doc.close();
-
-    setTimeout(() => {
-      try {
-        document.body.removeChild(iframe);
-      } catch {}
-    }, 10000);
+    printHtmlInHiddenFrame(html);
   };
 
   const handleShareWhatsApp = () => {
@@ -193,6 +188,7 @@ const cleanInvoiceItems = (items = []) =>
   if (!open || !order) return null;
 
   const items = cleanInvoiceItems(order.items || order.orderItems || []);
+  const printerProfile = getPrinterProfile(printerSettings.profileId);
 
   const totalQty =
     order.totalQty ?? items.reduce((sum, item) => sum + Number(item.qty || 0), 0);
@@ -281,8 +277,9 @@ const cleanInvoiceItems = (items = []) =>
             </div>
 
             <div style={{ fontSize: 12, marginTop: 8, opacity: 0.75 }}>
-              Print settings: Margins = None, Scale = 100%, Headers/Footer = Off,
-              Paper size = 58mm thermal paper.
+              Printer: {printerSettings.printerName || "Choose in print dialog"}.
+              Paper: {printerProfile.label}. Keep margins none, scale 100%,
+              headers and footers off.
             </div>
           </div>
         </div>,
@@ -292,9 +289,9 @@ const cleanInvoiceItems = (items = []) =>
       <div
         ref={receiptRef}
         style={{
-          width: "54mm",
-          maxWidth: "54mm",
-          minWidth: "54mm",
+          width: printerProfile.captureWidth,
+          maxWidth: printerProfile.captureWidth,
+          minWidth: printerProfile.captureWidth,
           padding: "2mm 2mm 0.5mm 2mm",
           margin: 0,
           background: "#fff",

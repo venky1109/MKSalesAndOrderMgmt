@@ -19,6 +19,8 @@ import StockManagerInventoryPage from './pages/StockManagerInventoryPage';
 import CreatePurchaseOrderPage  from './pages/CreatePurchaseOrderPage';
 import StockManagerCatalogPage from './pages/StockManagerCatalogPage';
 import DispatchPage from "./pages/DispatchPage";
+import PrinterSettingsPage from "./pages/PrinterSettingsPage";  
+import AccountsPage from "./pages/AccountsPage";
 
 function App() {
   function AppBootHydrator() {
@@ -110,6 +112,23 @@ function App() {
 <Route path="/payment/failure" element={<PaymentFailurePage />} />
 <Route path="/payment/invoice-share" element={<PaymentInvoiceSharePage />} />
 <Route path="/inventory/dispatch" element={<DispatchPage />} />
+<Route
+  path="/printer-settings"
+  element={
+    <ProtectedRoute role={["ADMIN", "ONLINE_CASHIER", "CASHIER", "HYBRID_CASHIER"]}>
+      <PrinterSettingsPage />
+    </ProtectedRoute>
+  }
+/>
+<Route
+  path="/finance"
+  element={
+    <ProtectedRoute role={["ADMIN", "ONLINE_CASHIER", "CASHIER", "HYBRID_CASHIER"]}>
+      <AccountsPage />
+    </ProtectedRoute>
+  }
+/>
+<Route path="/accounts" element={<Navigate to="/finance" replace />} />
           {/* Catch-all fallback */}
           <Route path="*" element={<Navigate to="/login" />} />
         </Routes>

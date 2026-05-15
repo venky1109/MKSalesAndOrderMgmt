@@ -7,6 +7,7 @@ import { publishQueuedOrdersSequential } from "../features/orders/orderSlice";
 import { setSearch } from "../features/products/productFiltersSlice";
 import { addToCart } from "../features/cart/cartSlice";
 import { pingBackend } from "../utils/network";
+import { getCachedProductList } from "../utils/productCache";
 
 /**
  * Offline-friendly products helper
@@ -21,29 +22,7 @@ function useSafeProducts() {
     : (storeAll?.products || []);
 
   // 2) from localStorage (fallback)
-  const cachedList = useMemo(() => {
-    const keys = [
-      "mkpos.products",
-      "products",
-      "allProducts",
-      "catalog",
-      "mkpos.products.json",
-    ];
-    for (const k of keys) {
-      try {
-        const raw = localStorage.getItem(k);
-        if (!raw) continue;
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) return parsed;
-        if (parsed?.products && Array.isArray(parsed.products)) {
-          return parsed.products;
-        }
-      } catch {
-        /* ignore */
-      }
-    }
-    return [];
-  }, []);
+  const cachedList = useMemo(() => getCachedProductList(), []);
 
   // 3) prefer store if present, else fallback cache
   return storeList?.length ? storeList : cachedList;

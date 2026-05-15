@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
+import { useNavigate } from "react-router-dom";
+import { LogOut, Settings, User, WalletCards } from "lucide-react";
 import { logout } from "../features/auth/posUserSlice";
 import {
   publishQueuedOrdersSequential,
@@ -7,10 +9,12 @@ import {
   fetchPOSOrderDetails,
 } from "../features/orders/orderSlice";
 import { pingBackend } from "../utils/network";
+import { openPrinterSettingsWindow } from "../utils/printerConfig";
 import UpiPaymentModal from "../components/UpiPaymentModal";
 import { clearCart } from "../features/cart/cartSlice";
 import CreateOrderButton from "./CreateOrderButton";
 import logo from "../assests/ManaKiranaLogo1024x1024.png";
+import POSDispatchButtons from "./POSDispatchButtons";
 import InvoiceShareModal from "./InvoiceShareModal";
 
 function AppModal({
@@ -79,16 +83,12 @@ function AppModal({
       const firstEl = focusableEls[0];
       const lastEl = focusableEls[focusableEls.length - 1];
 
-      if (e.shiftKey) {
-        if (document.activeElement === firstEl) {
-          e.preventDefault();
-          lastEl.focus();
-        }
-      } else {
-        if (document.activeElement === lastEl) {
-          e.preventDefault();
-          firstEl.focus();
-        }
+      if (e.shiftKey && document.activeElement === firstEl) {
+        e.preventDefault();
+        lastEl.focus();
+      } else if (!e.shiftKey && document.activeElement === lastEl) {
+        e.preventDefault();
+        firstEl.focus();
       }
     }
 
@@ -98,11 +98,8 @@ function AppModal({
 
       e.preventDefault();
 
-      if (onConfirm) {
-        onConfirm();
-      } else if (onClose) {
-        onClose();
-      }
+      if (onConfirm) onConfirm();
+      else if (onClose) onClose();
     }
 
     if (e.key === "Escape") {
@@ -198,6 +195,7 @@ function formatDateTime(value) {
 
 export default function POSActionsBar() {
   const dispatch = useDispatch();
+  const navigate = useNavigate();
 
   const posUserInfo = useSelector((s) => s.posUser.userInfo);
   const token = posUserInfo?.token;
@@ -235,7 +233,6 @@ export default function POSActionsBar() {
   });
 
   const [clearCartModalOpen, setClearCartModalOpen] = useState(false);
-
   const [holdModalOpen, setHoldModalOpen] = useState(false);
   const [holdPhone, setHoldPhone] = useState("");
   const [holdError, setHoldError] = useState("");
@@ -249,6 +246,12 @@ export default function POSActionsBar() {
 
   const [showUpiModal, setShowUpiModal] = useState(false);
   const [invoiceOpen, setInvoiceOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [userMenuPosition, setUserMenuPosition] = useState({
+    right: 12,
+    bottom: 64,
+  });
+  const userMenuButtonRef = useRef(null);
 
   const showToast = useCallback((message, type = "info") => {
     setToast({ open: true, message, type });
@@ -268,6 +271,38 @@ export default function POSActionsBar() {
 
   const closeInfoModal = useCallback(() => {
     setInfoModal((prev) => ({ ...prev, open: false }));
+  }, []);
+
+  const handleOpenPrinterSettings = useCallback(() => {
+    setSettingsOpen(false);
+    openPrinterSettingsWindow();
+  }, []);
+
+  const handleOpenFinance = useCallback(() => {
+    setSettingsOpen(false);
+    navigate("/finance");
+  }, [navigate]);
+
+  const toggleUserMenu = useCallback(() => {
+    const rect = userMenuButtonRef.current?.getBoundingClientRect();
+
+    if (rect) {
+      const menuWidth = 240;
+      const gap = 10;
+      const right = Math.max(
+        8,
+        window.innerWidth - Math.min(rect.right, window.innerWidth - 8)
+      );
+      const leftSpaceRight = Math.max(8, window.innerWidth - rect.left - menuWidth);
+      const bottom = Math.max(8, window.innerHeight - rect.top + gap);
+
+      setUserMenuPosition({
+        right: right + menuWidth > window.innerWidth ? leftSpaceRight : right,
+        bottom,
+      });
+    }
+
+    setSettingsOpen((prev) => !prev);
   }, []);
 
   const handleLogout = useCallback(() => {
@@ -445,8 +480,7 @@ export default function POSActionsBar() {
 
   useEffect(() => {
     const onKeyDown = (e) => {
-      if (!e.altKey) return;
-      if (e.repeat) return;
+      if (!e.altKey || e.repeat) return;
 
       const key = e.key.toLowerCase();
 
@@ -503,6 +537,40 @@ export default function POSActionsBar() {
   const ordersTotalAmount = (posOrdersList || []).reduce(
     (sum, order) => sum + Number(order.totalPrice || 0),
     0
+  );
+
+  const UserDropdown = () => (
+    <div
+      className="fixed z-[2147483647] w-60 rounded-2xl border border-gray-200 bg-white p-2 shadow-2xl"
+      style={{
+        right: `${userMenuPosition.right}px`,
+        bottom: `${userMenuPosition.bottom}px`,
+      }}
+    >
+      <button
+        onClick={handleOpenFinance}
+        className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold text-gray-700 hover:bg-green-50"
+      >
+        <WalletCards size={16} className="shrink-0" />
+        <span className="min-w-0 flex-1 whitespace-nowrap">Finance</span>
+      </button>
+      <button
+        onClick={handleOpenPrinterSettings}
+        className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold text-gray-700 hover:bg-blue-50"
+      >
+        <Settings size={16} className="shrink-0" />
+        <span className="min-w-0 flex-1 whitespace-nowrap">
+          Printer settings
+        </span>
+      </button>
+      <button
+        onClick={handleLogout}
+        className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold text-red-600 hover:bg-red-50"
+      >
+        <LogOut size={16} className="shrink-0" />
+        <span className="min-w-0 flex-1 whitespace-nowrap">Logout</span>
+      </button>
+    </div>
   );
 
   return (
@@ -1001,17 +1069,23 @@ export default function POSActionsBar() {
               <CreateOrderButton />
             </div>
 
-            <div className="shrink-0 px-2 text-xs font-semibold text-gray-700">
-              Hi {name}
-            </div>
+            <POSDispatchButtons
+              buttonClass={[baseBtn, orangeBtn, mobileBtn].join(" ")}
+            />
 
-            <button
-              onClick={handleLogout}
-              className="shrink-0 h-10 rounded-xl bg-red-600 px-3 text-xs font-bold text-white hover:bg-red-700"
-              title="Shortcut: L"
-            >
-              Logout (L)
-            </button>
+            <div className="relative shrink-0">
+              <button
+                ref={userMenuButtonRef}
+                onClick={toggleUserMenu}
+                className="inline-flex h-10 items-center gap-2 rounded-xl bg-slate-700 px-3 text-xs font-bold text-white hover:bg-slate-800"
+                title="User menu"
+              >
+                <User size={15} />
+                {name || "User"}
+              </button>
+
+              {settingsOpen && <UserDropdown />}
+            </div>
           </div>
         </div>
 
@@ -1111,23 +1185,30 @@ export default function POSActionsBar() {
             >
               <CreateOrderButton />
             </div>
+
+            <POSDispatchButtons
+              buttonClass={[baseBtn, orangeBtn, "h-9 text-xs", desktopBtn].join(
+                " "
+              )}
+            />
           </div>
 
           <div className="shrink-0 border-t bg-white px-2 py-3">
-            <div className="truncate text-center text-[15px] font-semibold text-green-700">
-              Hi {name}
-            </div>
-            <div className="mt-1 truncate text-center text-xs text-gray-600">
-              {role || "-"} {location ? `• ${location}` : ""}
-            </div>
+            <div className="relative mt-3">
+              <button
+                ref={userMenuButtonRef}
+                onClick={toggleUserMenu}
+                className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-slate-700 px-2 text-sm font-bold text-white transition hover:bg-slate-800"
+              >
+                <User size={17} />
+                <span className="min-w-0 truncate">{name || "User"}</span>
+              </button>
+              <div className="mt-1 truncate text-center text-xs text-gray-600">
+                {role || "-"} {location ? `• ${location}` : ""}
+              </div>
 
-            <button
-              onClick={handleLogout}
-              className="mt-2 h-10 w-full rounded-xl bg-red-600 text-sm font-bold text-white transition hover:bg-red-700"
-              title="Shortcut: L"
-            >
-              Logout
-            </button>
+              {settingsOpen && <UserDropdown />}
+            </div>
           </div>
         </div>
       </div>

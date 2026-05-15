@@ -14,6 +14,7 @@ import {
 import { addToCart } from "../features/cart/cartSlice";
 import { FixedSizeGrid as Grid } from "react-window";
 import { CiBarcode } from "react-icons/ci";
+import { getCachedProductList } from "../utils/productCache";
 
 /** helpers */
 const safeLower = (v) => (typeof v === "string" ? v.toLowerCase() : "");
@@ -35,6 +36,28 @@ const normalizeScan = (raw) => {
   return s.replace(/\s+/g, "");
 };
 
+const sortText = (a, b) => String(a || "").localeCompare(String(b || ""));
+
+const getShortcutKey = ({
+  categoryIndex,
+  brandIndex,
+  productIndex,
+  financialIndex,
+}) => `${categoryIndex}${brandIndex}${productIndex}${financialIndex}`;
+
+const getCatalogEntryKey = (p, d, f) =>
+  [
+    p?._id || p?.id || p?.name || "",
+    d?._id || d?.brand || "",
+    f?._id ||
+      asArray(f?.barcode).filter(Boolean).join("|") ||
+      `${f?.quantity || ""}-${f?.units || ""}-${f?.price || ""}-${
+        f?.dprice || ""
+      }`,
+  ].join("::");
+
+const getProductGroupKey = (p) => p?._id || p?.id || p?.name || "";
+
 /** Offline catalog (store-first, localStorage fallback) + fast barcode map */
 function useOfflineCatalog() {
   const storeAll = useSelector((s) => s.products?.all);
@@ -44,26 +67,7 @@ function useOfflineCatalog() {
     ? storeAll.products
     : [];
 
-  const lsList = useMemo(() => {
-    const keys = [
-      "mkpos.products",
-      "products",
-      "allProducts",
-      "catalog",
-      "mkpos.products.json",
-    ];
-
-    for (const k of keys) {
-      try {
-        const raw = localStorage.getItem(k);
-        if (!raw) continue;
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) return parsed;
-        if (Array.isArray(parsed?.products)) return parsed.products;
-      } catch {}
-    }
-    return [];
-  }, []);
+  const lsList = useMemo(() => getCachedProductList(), []);
 
   const list = storeList?.length ? storeList : lsList;
 
@@ -379,6 +383,73 @@ const ProductList = forwardRef((props, ref) => {
     setTimeout(() => barcodeRef.current?.focus(), 50);
   }, []);
 
+  const shortcutCatalog = useMemo(() => {
+    const shortcutMap = new Map();
+    const entryShortcuts = new Map();
+    const categoryMap = new Map();
+
+    for (const p of safeProducts || []) {
+      const categoryName = safeLower(p?.category) || "uncategorized";
+      if (!categoryMap.has(categoryName)) {
+        categoryMap.set(categoryName, { name: categoryName, products: [] });
+      }
+      categoryMap.get(categoryName).products.push(p);
+    }
+
+    const categories = [...categoryMap.values()].sort((a, b) =>
+      sortText(a.name, b.name)
+    );
+
+    categories.forEach((category, categoryIndex) => {
+      const brandMap = new Map();
+
+      for (const p of category.products) {
+        for (const d of asArray(p?.details)) {
+          const brandName = safeLower(d?.brand || "unbranded") || "unbranded";
+          if (!brandMap.has(brandName)) brandMap.set(brandName, new Map());
+
+          for (const f of asArray(d?.financials).filter(Boolean)) {
+            const productKey = getProductGroupKey(p);
+            const productMap = brandMap.get(brandName);
+            if (!productMap.has(productKey)) {
+              productMap.set(productKey, { p, items: [] });
+            }
+            productMap.get(productKey).items.push({ p, d, f });
+          }
+        }
+      }
+
+      const brands = [...brandMap.entries()].sort(([a], [b]) =>
+        sortText(a, b)
+      );
+
+      brands.forEach(([, productMap], brandIndex) => {
+        const products = [...productMap.values()].sort((a, b) =>
+          sortText(a.p?.name, b.p?.name)
+        );
+
+        products.forEach((product, productIndex) => {
+          product.items.forEach((item, financialIndex) => {
+            const shortcutCode = getShortcutKey({
+              categoryIndex: categoryIndex + 1,
+              brandIndex: brandIndex + 1,
+              productIndex: productIndex + 1,
+              financialIndex: financialIndex + 1,
+            });
+
+            const entryKey = getCatalogEntryKey(item.p, item.d, item.f);
+            entryShortcuts.set(entryKey, shortcutCode);
+            if (!shortcutMap.has(shortcutCode)) {
+              shortcutMap.set(shortcutCode, item);
+            }
+          });
+        });
+      });
+    });
+
+    return { shortcutMap, entryShortcuts };
+  }, [safeProducts]);
+
   const addItemToCart = useCallback(
     (p, d, f) => {
       dispatch(
@@ -423,6 +494,7 @@ const ProductList = forwardRef((props, ref) => {
       const hit =
         barcodeMap.get(scanned) ||
         barcodeMap.get(scanned.replace(/^0+/, "")) ||
+        shortcutCatalog.shortcutMap.get(scanned) ||
         null;
 
       if (hit) {
@@ -454,7 +526,7 @@ const ProductList = forwardRef((props, ref) => {
       setBarcodeInput("");
       setTimeout(() => barcodeRef.current?.focus(), 50);
     },
-    [dispatch, token, barcodeMap, addItemToCart]
+    [dispatch, token, barcodeMap, shortcutCatalog, addItemToCart]
   );
 
   const handleSearchKeyPress = useCallback((key) => {
@@ -561,10 +633,17 @@ const ProductList = forwardRef((props, ref) => {
         asArray(p?.details).flatMap((d) =>
           asArray(d?.financials)
             .filter(Boolean)
-            .map((f) => ({ p, d, f }))
+            .map((f) => ({
+              p,
+              d,
+              f,
+              shortcutCode: shortcutCatalog.entryShortcuts.get(
+                getCatalogEntryKey(p, d, f)
+              ),
+            }))
         )
       ),
-    [filteredProducts]
+    [filteredProducts, shortcutCatalog]
   );
 
   const MIN_CARD_WIDTH = 180;
@@ -603,7 +682,7 @@ const ProductList = forwardRef((props, ref) => {
                   handleBarcode(barcodeInput.trim());
                 }
               }}
-              placeholder="Scan barcode to add"
+              placeholder="Scan barcode or type product code"
               className="w-full rounded border bg-white p-2 pl-10 pr-10 text-center text-sm text-slate-900 md:text-base"
             />
           </div>
@@ -732,7 +811,7 @@ const ProductList = forwardRef((props, ref) => {
                   const item = data[index];
                   if (!item) return null;
 
-                  const { p, d, f } = item;
+                  const { p, d, f, shortcutCode } = item;
                   const imageUrl = d?.images?.[0]?.image;
                   const mrp = Number(f?.price || 0);
                   const rate = Number(f?.dprice || 0);
@@ -755,6 +834,12 @@ const ProductList = forwardRef((props, ref) => {
                         className="h-full w-full overflow-hidden rounded-xl border border-gray-200 bg-white p-3 text-left shadow-sm transition hover:border-blue-300 hover:shadow-md active:scale-[0.99]"
                       >
                         <div className="flex h-full flex-col">
+                          {shortcutCode ? (
+                            <div className="mb-1 text-center text-xs font-bold text-blue-700">
+                              Code: {shortcutCode}
+                            </div>
+                          ) : null}
+
                           <div className="mb-2 flex h-20 w-full items-center justify-center overflow-hidden rounded-md bg-gray-50">
                             {imageUrl ? (
                               <img

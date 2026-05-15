@@ -1,7 +1,11 @@
 import React from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
-import { clearPaymentState, retryExistingUpiPayment } from '../features/payment/paymentSlice';
+import {
+  clearPaymentState,
+  retryExistingUpiPayment,
+} from '../features/payment/paymentSlice';
+import PaymentResultCard from '../components/PaymentResultCard';
 
 const PaymentFailurePage = () => {
   const navigate = useNavigate();
@@ -47,57 +51,41 @@ const PaymentFailurePage = () => {
     }
   };
 
+  const rows = [
+    { label: 'Order ID', value: orderId || '-', alignRight: true },
+    { label: 'Status', value: status, valueClassName: 'text-red-600' },
+  ];
+
+  if (reason) {
+    rows.push({ label: 'Reason', value: reason, alignRight: true });
+  }
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
-        <div className="text-center">
-          <div className="mb-2 text-5xl">❌</div>
-          <h2 className="text-xl font-bold text-red-600">Payment Failed</h2>
-          <p className="mt-1 text-sm text-gray-500">
-            The payment could not be completed
-          </p>
-        </div>
+    <PaymentResultCard
+      accent="red"
+      icon="X"
+      title="Payment Failed"
+      description="The payment could not be completed"
+      rows={rows}
+    >
+      <div className="mt-6 flex gap-3">
+        <button
+          onClick={handleHome}
+          disabled={paymentLoading}
+          className="w-full rounded-lg border border-gray-300 bg-white py-2 font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-70"
+        >
+          Home
+        </button>
 
-        <div className="mt-5 space-y-3 rounded-lg bg-red-50 p-4 text-sm">
-          <div className="flex justify-between gap-4">
-            <span className="text-gray-500">Order ID</span>
-            <span className="break-all text-right font-semibold">
-              {orderId || '-'}
-            </span>
-          </div>
-
-          <div className="flex justify-between gap-4">
-            <span className="text-gray-500">Status</span>
-            <span className="font-semibold text-red-600">{status}</span>
-          </div>
-
-          {reason ? (
-            <div className="flex justify-between gap-4">
-              <span className="text-gray-500">Reason</span>
-              <span className="text-right font-semibold">{reason}</span>
-            </div>
-          ) : null}
-        </div>
-
-        <div className="mt-6 flex gap-3">
-          <button
-            onClick={handleHome}
-            disabled={paymentLoading}
-            className="w-full rounded-lg border border-gray-300 bg-white py-2 font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-70"
-          >
-            Home
-          </button>
-
-          <button
-            onClick={handleRetry}
-            disabled={!orderId || paymentLoading}
-            className="w-full rounded-lg bg-red-600 py-2 font-semibold text-white hover:bg-red-700 disabled:opacity-70"
-          >
-            {paymentLoading ? 'Retrying...' : 'Retry Payment'}
-          </button>
-        </div>
+        <button
+          onClick={handleRetry}
+          disabled={!orderId || paymentLoading}
+          className="w-full rounded-lg bg-red-600 py-2 font-semibold text-white hover:bg-red-700 disabled:opacity-70"
+        >
+          {paymentLoading ? 'Retrying...' : 'Retry Payment'}
+        </button>
       </div>
-    </div>
+    </PaymentResultCard>
   );
 };
 

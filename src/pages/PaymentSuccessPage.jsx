@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useDispatch } from 'react-redux';
 import { clearCart } from '../features/cart/cartSlice';
 import InvoiceShareModal from '../components/InvoiceShareModal';
+import PaymentResultCard from '../components/PaymentResultCard';
 
 const PaymentSuccessPage = () => {
   const navigate = useNavigate();
@@ -90,45 +91,28 @@ const PaymentSuccessPage = () => {
   return (
     <>
       {!showInvoice && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
-            <div className="text-center">
-              <div className="mb-2 text-5xl">✅</div>
-              <h2 className="text-xl font-bold text-green-600">
-                Payment Successful
-              </h2>
-              <p className="mt-1 text-sm text-gray-500">
-                The payment was completed successfully
-              </p>
-            </div>
-
-            <div className="mt-5 space-y-3 rounded-lg bg-green-50 p-4 text-sm">
-              <div className="flex justify-between gap-4">
-                <span className="text-gray-500">Order ID</span>
-                <span className="break-all text-right font-semibold">
-                  {urlOrderId || '-'}
-                </span>
-              </div>
-
-              <div className="flex justify-between gap-4">
-                <span className="text-gray-500">Amount</span>
-                <span className="font-semibold">₹{displayAmount}</span>
-              </div>
-
-              <div className="flex justify-between gap-4">
-                <span className="text-gray-500">Status</span>
-                <span className="font-semibold text-green-600">SUCCESS</span>
-              </div>
-            </div>
-
-            <button
-              onClick={handleOk}
-              className="mt-6 w-full rounded-lg bg-green-600 py-2 font-semibold text-white hover:bg-green-700"
-            >
-              OK
-            </button>
-          </div>
-        </div>
+        <PaymentResultCard
+          accent="green"
+          icon="OK"
+          title="Payment Successful"
+          description="The payment was completed successfully"
+          rows={[
+            { label: 'Order ID', value: urlOrderId || '-', alignRight: true },
+            { label: 'Amount', value: `Rs ${displayAmount}` },
+            {
+              label: 'Status',
+              value: 'SUCCESS',
+              valueClassName: 'text-green-600',
+            },
+          ]}
+        >
+          <button
+            onClick={handleOk}
+            className="mt-6 w-full rounded-lg bg-green-600 py-2 font-semibold text-white hover:bg-green-700"
+          >
+            OK
+          </button>
+        </PaymentResultCard>
       )}
 
       <InvoiceShareModal

@@ -7,6 +7,10 @@ import {
   fetchInventoryProducts,
   fetchStockTransactions,
 } from '../features/inventory/stockManagerInventorySlice';
+import {
+  getDispatchDestinationLabel,
+  getWarehouseLabel,
+} from '../utils/dispatchDisplay';
 
 // const getDateOnly = (value) => {
 //   if (!value) return '';
@@ -110,26 +114,8 @@ const CreateDispatchOrderSection = ({
     return inventoryRows.filter((row) => row.searchText.includes(value)).slice(0, 20);
   }, [inventoryRows, search, sourceWarehouseId]);
 
-  const getSourceLabel = (item) => {
-    if (!item) return '';
-    return `${item.warehouse_code || ''} - ${item.warehouse_name || ''}`;
-  };
-
-  const getDestinationLabel = (item) => {
-    if (!item) return '';
-
-    if (destinationType === 'warehouse') {
-      return `${item.warehouse_code || ''} - ${item.warehouse_name || ''}`;
-    }
-
-    if (destinationType === 'outlet') {
-      return `${item.outlet_code || ''} - ${item.outlet_name || ''}`;
-    }
-
-    return `${item.stakeholder_code || item.stackholder_code || ''} - ${
-      item.stakeholder_name || ''
-    }`;
-  };
+  const getDestinationLabel = (item) =>
+    getDispatchDestinationLabel(item, destinationType);
 
   const getAlreadyAddedUnits = (row) => {
     return items
@@ -273,7 +259,7 @@ const CreateDispatchOrderSection = ({
     }
 
     const payload = {
-      source: `warehouse:${sourceWarehouseId}:${getSourceLabel(sourceWarehouse)}`,
+      source: `warehouse:${sourceWarehouseId}:${getWarehouseLabel(sourceWarehouse)}`,
       destination: `${destinationType}:${destinationId}:${getDestinationLabel(
         selectedDestination
       )}`,
@@ -311,7 +297,7 @@ const CreateDispatchOrderSection = ({
   return (
     <section className="rounded-xl border bg-white p-4 shadow-sm">
       <div className="mb-4 rounded-xl bg-blue-50 p-4">
-        <h2 className="text-lg font-bold text-blue-900">Create Dispatch Order</h2>
+        <h2 className="text-lg font-bold text-blue-900">CDR</h2>
         <p className="text-sm text-blue-700">
           Search only available inventory products. Available units and expiry are shown.
         </p>
@@ -565,7 +551,7 @@ const CreateDispatchOrderSection = ({
             disabled={loading}
             className="rounded-lg bg-blue-700 px-5 py-2 font-semibold text-white hover:bg-blue-800 disabled:opacity-60"
           >
-            {loading ? 'Saving...' : 'Create Dispatch Order'}
+            {loading ? 'Saving...' : 'CDR'}
           </button>
         </div>
       </form>

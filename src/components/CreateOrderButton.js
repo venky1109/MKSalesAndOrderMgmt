@@ -68,10 +68,11 @@ function CreateOrderButton() {
   const actionBtn =
     'rounded-xl font-bold transition active:translate-y-[1px] whitespace-nowrap';
 
-  const orangeBtn =
-    'bg-[#ff7400] text-white border border-[#FFD700] hover:bg-[#e66a00]';
 
-  const desktopBtn = 'w-full h-12 text-sm md:text-base';
+  const orangeBtn =
+    "bg-[#ff8a00] text-white border border-[#FFD700] hover:bg-[#e57b00]";
+ 
+  const desktopBtn = "w-full h-11 text-sm";
 
   useEffect(() => {
     if (cartItems.length === 0) setOrderCreated(false);
@@ -209,7 +210,7 @@ function CreateOrderButton() {
   className={[
     actionBtn,
     orangeBtn,
-    'h-9 text-xs',
+    'h-9 ',
     desktopBtn,
   ].join(' ')}
 >
