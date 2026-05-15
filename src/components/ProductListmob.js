@@ -2,7 +2,7 @@ import React, {
   forwardRef, useEffect, useRef, useState, useMemo, useCallback,
 } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { fetchAllProducts, fetchProductByBarcode } from '../features/products/productSlice';
+import { fetchAllProducts, fetchProductByBarcode, fetchProductByMkid } from '../features/products/productSlice';
 import { addToCart } from '../features/cart/cartSlice';
 import { FixedSizeGrid as Grid } from 'react-window';
 import { BrowserMultiFormatReader } from '@zxing/browser';
@@ -148,7 +148,17 @@ const ProductList = forwardRef((props, ref) => {
       }));
     } else {
       try {
-        const result = await dispatch(fetchProductByBarcode({ barcode: scanned, token })).unwrap();
+        let result = null;
+        const isNumericScan = /^\d+$/.test(scanned);
+        try {
+          result = isNumericScan
+            ? await dispatch(fetchProductByMkid({ mkid: scanned, token })).unwrap()
+            : await dispatch(fetchProductByBarcode({ barcode: scanned, token })).unwrap();
+        } catch {
+          result = isNumericScan
+            ? await dispatch(fetchProductByBarcode({ barcode: scanned, token })).unwrap()
+            : await dispatch(fetchProductByMkid({ mkid: scanned, token })).unwrap();
+        }
         if (result) {
           dispatch(addToCart(result));
         } else {

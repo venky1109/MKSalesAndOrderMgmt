@@ -87,6 +87,7 @@ const cartSlice = createSlice({
       item: product.productName,
       stock: stock - 1,
       product_code: product.product_code || product.productCode || '',
+      mkid: product.mkid || '',
       quantity: product.quantity,
       price: product.MRP,
       catalogQuantity: product.catalogQuantity,

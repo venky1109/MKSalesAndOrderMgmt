@@ -698,6 +698,12 @@ export default function InventoryDashboardPage() {
                       first(row.phoneNo, row.phone, row.customerPhone, "-"),
                   },
                   {
+                    key: "date",
+                    label: "Date",
+                    render: (row) =>
+                      formatDate(first(row.createdAt, row.orderDate, row.date)),
+                  },
+                  {
                     key: "amount",
                     label: "Amount",
                     align: "right",

@@ -32,7 +32,7 @@ const normalizeRows = (payload) => {
       brandId: row.brandId ?? row.brand_id ?? "",
       financialId: row.financialId ?? row.financial_id ?? "",
       productCode: row.productCode ?? row.product_code ?? row.code ?? "-",
-      generatedCode: row.generatedCode ?? row.generated_code ?? "-",
+      generatedCode: row.mkid ?? row.MKID ?? row.generatedCode ?? row.generated_code ?? "-",
       productName: row.productName ?? row.name ?? row.item ?? "-",
       brand: row.brand ?? row.brandName ?? row.brand_name ?? "-",
       packQuantity,

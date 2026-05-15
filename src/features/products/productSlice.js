@@ -119,6 +119,18 @@ export const fetchProductByBarcode = createAsyncThunk(
   }
 );
 
+export const fetchProductByMkid = createAsyncThunk(
+  'products/fetchByMkid',
+  async ({ mkid, token }) => {
+    const res = await fetchWithRetry(`${process.env.REACT_APP_API_BASE_URL}/pos-products/mkid/${mkid}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Product not found');
+    return data;
+  }
+);
+
 export const suggestProducts = createAsyncThunk(
   'products/suggest',
   async ({ query, token }) => {
@@ -351,6 +363,15 @@ const productSlice = createSlice({
       state.selected = action.payload;
     })
     .addCase(fetchProductByBarcode.rejected, (state) => {
+      state.selected = null;
+    })
+    .addCase(fetchProductByMkid.pending, (state) => {
+      state.selected = null;
+    })
+    .addCase(fetchProductByMkid.fulfilled, (state, action) => {
+      state.selected = action.payload;
+    })
+    .addCase(fetchProductByMkid.rejected, (state) => {
       state.selected = null;
     })
 

@@ -11,13 +11,13 @@ import {
   fetchAllProducts,
   fetchAllProductsFresh,
   fetchProductByBarcode,
+  fetchProductByMkid,
   clearProduct,
 } from "../features/products/productSlice";
 import { addToCart } from "../features/cart/cartSlice";
 import { FixedSizeGrid as Grid } from "react-window";
 import { CiBarcode } from "react-icons/ci";
 import { getCachedProductList } from "../utils/productCache";
-import { getProductShortcutCode } from "../utils/productShortcutCode";
 
 /** helpers */
 const safeLower = (v) => (typeof v === "string" ? v.toLowerCase() : "");
@@ -501,17 +501,11 @@ const ProductList = forwardRef((props, ref) => {
 
         products.forEach((product) => {
           product.items.forEach((item) => {
-            const shortcutCode = getProductShortcutCode({
-              category: item.p?.category,
-              brand: item.d?.brand,
-              productName: item.p?.name || item.p?.productName,
-              quantity: item.f?.quantity,
-              unit: item.f?.units,
-            });
+            const shortcutCode = String(item.f?.mkid || "").trim();
 
             const entryKey = getCatalogEntryKey(item.p, item.d, item.f);
             entryShortcuts.set(entryKey, shortcutCode);
-            if (!shortcutMap.has(shortcutCode)) {
+            if (shortcutCode && !shortcutMap.has(shortcutCode)) {
               shortcutMap.set(shortcutCode, item);
             }
           });
@@ -535,6 +529,7 @@ const ProductList = forwardRef((props, ref) => {
           brand: d?.brand,
           brandId: d?._id,
           financialId: f?._id,
+          mkid: f?.mkid || "",
           price: Number(f?.price || 0),
           MRP: Number(f?.price || 0),
           dprice: Number(f?.dprice || 0),
@@ -580,9 +575,22 @@ const ProductList = forwardRef((props, ref) => {
 
       if (navigator.onLine) {
         try {
-          const result = await dispatch(
-            fetchProductByBarcode({ barcode: scanned, token })
-          ).unwrap();
+          let result = null;
+          const isNumericScan = /^\d+$/.test(scanned);
+
+          try {
+            result = isNumericScan
+              ? await dispatch(fetchProductByMkid({ mkid: scanned, token })).unwrap()
+              : await dispatch(
+                  fetchProductByBarcode({ barcode: scanned, token })
+                ).unwrap();
+          } catch {
+            result = isNumericScan
+              ? await dispatch(
+                  fetchProductByBarcode({ barcode: scanned, token })
+                ).unwrap()
+              : await dispatch(fetchProductByMkid({ mkid: scanned, token })).unwrap();
+          }
 
           if (result) {
             dispatch(addToCart(result));
@@ -793,7 +801,7 @@ const ProductList = forwardRef((props, ref) => {
                   handleBarcode(barcodeInput.trim());
                 }
               }}
-              placeholder="Scan barcode or type product code"
+              placeholder="Scan barcode or type MKID"
               className="w-full rounded border bg-white p-2 pl-10 pr-10 text-center text-sm text-slate-900 md:text-base"
             />
           </div>
@@ -950,7 +958,7 @@ const ProductList = forwardRef((props, ref) => {
                         <div className="flex h-full flex-col">
                           {shortcutCode ? (
                             <div className="mb-1 text-center text-xs font-bold text-blue-700">
-                              Code: {shortcutCode}
+                              MKID: {shortcutCode}
                             </div>
                           ) : null}
 
