@@ -22,6 +22,7 @@ import DispatchPage from "./pages/DispatchPage";
 import PrinterSettingsPage from "./pages/PrinterSettingsPage";  
 import AccountsPage from "./pages/AccountsPage";
 import TopProductsReportPage from "./pages/TopProductsReportPage";
+import InventoryDashboardPage from "./pages/InventoryDashboardPage";
 
 function App() {
   function AppBootHydrator() {
@@ -103,6 +104,12 @@ function App() {
 
               <ProtectedRoute role={["ADMIN","STOCKMANAGER"]}>
               <StockManagerInventoryPage />
+            </ProtectedRoute>
+          } />
+          <Route path="/inventory/dashboard" element={
+
+              <ProtectedRoute role={["ADMIN","STOCKMANAGER"]}>
+              <InventoryDashboardPage />
             </ProtectedRoute>
           } />
           <Route

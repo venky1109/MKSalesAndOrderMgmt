@@ -4,6 +4,11 @@ import { useNavigate } from "react-router-dom";
 import { ArrowLeft, Download, RefreshCw } from "lucide-react";
 import { fetchTopProductsReport } from "../features/reports/topProductsReportSlice";
 import { fetchAllProducts } from "../features/products/productSlice";
+import {
+  getProductShortcutCode,
+  normalizeShortcutQuantity,
+  normalizeShortcutUnit,
+} from "../utils/productShortcutCode";
 
 const formatDate = (value) => {
   if (!value) return "-";
@@ -32,26 +37,18 @@ const asArray = (value) => (Array.isArray(value) ? value : value ? [value] : [])
 
 const firstValue = (value) => (Array.isArray(value) ? value[0] || "" : value || "");
 
-const getGeneratedCode = (index) => String(((index - 1) % 90000) + 10001);
-
 const quantityKey = (value) => {
-  const qty = Number(value);
-  return Number.isFinite(qty) ? String(qty) : safeKey(value);
+  return normalizeShortcutQuantity(value);
 };
 
 const normalizeUnit = (value) => {
-  const unit = safeKey(value).replace(/\./g, "");
-  if (["kgs", "kilogram", "kilograms"].includes(unit)) return "kg";
-  if (["grams", "gram"].includes(unit)) return "g";
-  if (["litre", "litres", "ltrs", "ltr"].includes(unit)) return "l";
-  if (["pieces", "piece"].includes(unit)) return "pcs";
-  return unit || "unit";
+  return normalizeShortcutUnit(value);
 };
 
-const limitGeneratedCode = (value, fallbackIndex) => {
+const limitGeneratedCode = (value, fallbackItem) => {
   const digits = String(value || "").replace(/\D/g, "");
   if (digits) return digits.slice(-5).padStart(5, "0");
-  return getGeneratedCode(fallbackIndex);
+  return getProductShortcutCode(fallbackItem);
 };
 
 const buildGeneratedLookup = (products = []) => {
@@ -69,7 +66,6 @@ const buildGeneratedLookup = (products = []) => {
     categoryMap.get(category).products.push(product);
   }
 
-  let generatedIndex = 1;
   [...categoryMap.values()]
     .sort((a, b) => sortText(a.name, b.name))
     .forEach((category) => {
@@ -104,8 +100,13 @@ const buildGeneratedLookup = (products = []) => {
                 const packQuantity = Number(financial?.quantity || 1);
                 const unit = financial?.units || "-";
                 const rate = Number(financial?.dprice || financial?.price || 0);
-                const generatedCode = getGeneratedCode(generatedIndex);
-                generatedIndex += 1;
+                const generatedCode = getProductShortcutCode({
+                  category: product?.category,
+                  brand,
+                  productName: product?.name || product?.productName,
+                  quantity: packQuantity,
+                  unit,
+                });
                 const productCode =
                   product?.product_code || product?.productCode || productId || "-";
                 const entry = {
@@ -218,7 +219,13 @@ export default function TopProductsReportPage() {
               : fallback.productCode || productFallback?.productCode || "-",
           generatedCode:
             fallback.generatedCode ||
-            limitGeneratedCode(row.generatedCode, index + 1),
+            limitGeneratedCode(row.generatedCode, {
+              category: row.category,
+              brand: row.brand,
+              productName: row.productName,
+              quantity: row.packQuantity,
+              unit: row.unit,
+            }),
         };
       }),
     [generatedLookup, rows]

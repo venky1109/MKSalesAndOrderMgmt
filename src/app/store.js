@@ -10,6 +10,7 @@ import productFiltersReducer from '../features/products/productFiltersSlice';
 import stockManagerInventoryReducer from '../features/inventory/stockManagerInventorySlice'
 import catalogCrudReducer from '../features/inventory/catalogCrudSlice';
 import inventoryMovementReducer from '../features/inventory/inventoryMovementSlice';
+import inventoryDashboardReducer from '../features/inventory/inventoryDashboardSlice';
 import topProductsReportReducer from '../features/reports/topProductsReportSlice';
 const stateMutationLogger = store => next => action => {
   const result = next(action);
@@ -35,6 +36,7 @@ export const store = configureStore({
     stockManagerInventory: stockManagerInventoryReducer,
     catalogCrud:catalogCrudReducer,
     inventoryMovement: inventoryMovementReducer,
+    inventoryDashboard: inventoryDashboardReducer,
     topProductsReport: topProductsReportReducer,
   },
   middleware: (getDefaultMiddleware) =>

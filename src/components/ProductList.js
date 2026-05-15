@@ -17,6 +17,7 @@ import { addToCart } from "../features/cart/cartSlice";
 import { FixedSizeGrid as Grid } from "react-window";
 import { CiBarcode } from "react-icons/ci";
 import { getCachedProductList } from "../utils/productCache";
+import { getProductShortcutCode } from "../utils/productShortcutCode";
 
 /** helpers */
 const safeLower = (v) => (typeof v === "string" ? v.toLowerCase() : "");
@@ -39,8 +40,6 @@ const normalizeScan = (raw) => {
 };
 
 const sortText = (a, b) => String(a || "").localeCompare(String(b || ""));
-
-const getShortcutKey = (index) => String(((index - 1) % 90000) + 10001);
 
 const getCatalogEntryKey = (p, d, f) =>
   [
@@ -471,7 +470,6 @@ const ProductList = forwardRef((props, ref) => {
     const categories = [...categoryMap.values()].sort((a, b) =>
       sortText(a.name, b.name)
     );
-    let shortcutIndex = 1;
 
     categories.forEach((category) => {
       const brandMap = new Map();
@@ -503,8 +501,13 @@ const ProductList = forwardRef((props, ref) => {
 
         products.forEach((product) => {
           product.items.forEach((item) => {
-            const shortcutCode = getShortcutKey(shortcutIndex);
-            shortcutIndex += 1;
+            const shortcutCode = getProductShortcutCode({
+              category: item.p?.category,
+              brand: item.d?.brand,
+              productName: item.p?.name || item.p?.productName,
+              quantity: item.f?.quantity,
+              unit: item.f?.units,
+            });
 
             const entryKey = getCatalogEntryKey(item.p, item.d, item.f);
             entryShortcuts.set(entryKey, shortcutCode);
