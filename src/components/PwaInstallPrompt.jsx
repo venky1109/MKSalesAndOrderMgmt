@@ -38,9 +38,16 @@ function PwaInstallPrompt() {
   const [installed, setInstalled] = useState(() => isStandaloneDisplay());
   const [installing, setInstalling] = useState(false);
   const platform = useMemo(() => getPlatform(), []);
+  const currentHost = typeof window === 'undefined' ? 'this site' : window.location.host;
 
   useEffect(() => {
     if (installed || isSnoozed()) return undefined;
+
+    const fallbackTimer = window.setTimeout(() => {
+      if (!isStandaloneDisplay()) {
+        setVisible(true);
+      }
+    }, 2500);
 
     const showInstallPrompt = (event) => {
       event.preventDefault();
@@ -63,6 +70,7 @@ function PwaInstallPrompt() {
     }
 
     return () => {
+      window.clearTimeout(fallbackTimer);
       window.removeEventListener('beforeinstallprompt', showInstallPrompt);
       window.removeEventListener('appinstalled', markInstalled);
     };
@@ -130,6 +138,13 @@ function PwaInstallPrompt() {
               </div>
             ) : null}
 
+            {platform !== 'ios' && !canInstall ? (
+              <div className="mt-3 rounded-md bg-gray-50 p-3 text-sm text-gray-700">
+                Open {currentHost} directly in Chrome. If install is missing from the menu,
+                update Chrome, close private browsing, and reopen the site from a normal tab.
+              </div>
+            ) : null}
+
             <div className="mt-4 flex items-center justify-end gap-2">
               <button
                 type="button"
@@ -138,15 +153,17 @@ function PwaInstallPrompt() {
               >
                 Later
               </button>
-              <button
-                type="button"
-                onClick={installApp}
-                disabled={!canInstall || installing}
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 text-sm font-bold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-gray-300"
-              >
-                <Download size={17} aria-hidden="true" />
-                {installing ? 'Opening...' : 'Install'}
-              </button>
+              {canInstall ? (
+                <button
+                  type="button"
+                  onClick={installApp}
+                  disabled={installing}
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 text-sm font-bold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+                >
+                  <Download size={17} aria-hidden="true" />
+                  {installing ? 'Opening...' : 'Install'}
+                </button>
+              ) : null}
             </div>
           </div>
         </div>
