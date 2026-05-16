@@ -25,6 +25,7 @@ import TopProductsReportPage from "./pages/TopProductsReportPage";
 import InventoryDashboardPage from "./pages/InventoryDashboardPage";
 import PwaLinkPage from "./pages/PwaLinkPage";
 import OrderManagementPage from "./pages/OrderManagementPage";
+import PwaInstallPrompt from "./components/PwaInstallPrompt";
 
 function App() {
   function AppBootHydrator() {
@@ -53,6 +54,7 @@ function App() {
     <AuthProvider>
        <AppBootHydrator />
       <BrowserRouter>
+        <PwaInstallPrompt />
         <Routes>
           {/* Public Login Route */}
           <Route path="/login" element={<Login />} />
