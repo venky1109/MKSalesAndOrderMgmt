@@ -213,7 +213,7 @@ const OrderManagementPage = () => {
   const loadOrders = useCallback(async () => {
     await dispatch(
       fetchPOSOrders({
-        mode: 'custom',
+        mode: 'filter',
         date: filters.date,
         customerNumber: filters.customerNumber,
         phone: filters.customerNumber,

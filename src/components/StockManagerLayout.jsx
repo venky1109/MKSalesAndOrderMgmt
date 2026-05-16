@@ -28,6 +28,78 @@ const navItemClass = 'flex items-center gap-2 font-medium';
 const navGroupClass =
   'px-2 pt-2 text-[11px] font-bold uppercase tracking-wide text-gray-400';
 
+const navSections = [
+  {
+    items: [
+      { to: '/inventory/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    ],
+  },
+  {
+    title: 'Catalog',
+    items: [{ to: '/ecosystem/catalog', label: 'Catalog', icon: BookImage }],
+  },
+  {
+    title: 'Inventory',
+    items: [
+      { to: '/ecosystem', label: 'Ecosystem', icon: Package, end: true },
+      {
+        to: '/ecosystem/purchase-orders/create',
+        label: 'Purchase Orders',
+        icon: ClipboardList,
+      },
+      { to: '/ecosystem/dispatch', label: 'Dispatch', icon: Truck },
+    ],
+  },
+  {
+    title: 'Accounts',
+    items: [
+      {
+        to: { pathname: '/accounts/finance', search: '?from=inventory' },
+        label: 'Finance',
+        icon: CircleDollarSign,
+      },
+    ],
+  },
+  {
+    title: 'Applications',
+    items: [
+      {
+        to: { pathname: '/pos', search: '?from=inventory' },
+        label: 'POS',
+        icon: ShoppingCart,
+      },
+      { to: '/orders/manage', label: 'Order Management', icon: ShoppingBag },
+      { to: '/packing', label: 'Packing', icon: Package },
+      { to: '/dispatch', label: 'Dispatch', icon: Truck },
+      { to: '/delivery', label: 'Delivery', icon: Truck },
+      { to: '/applications/pwa', label: 'PWA', icon: ExternalLink },
+    ],
+  },
+];
+
+const NavigationLinks = ({ onNavigate }) => (
+  <nav className="space-y-2 text-sm">
+    {navSections.map((section, sectionIndex) => (
+      <React.Fragment key={section.title || sectionIndex}>
+        {section.title ? <div className={navGroupClass}>{section.title}</div> : null}
+        {section.items.map(({ to, label, icon: Icon, end }) => (
+          <NavLink
+            key={`${section.title || 'main'}-${label}`}
+            to={to}
+            end={end}
+            onClick={onNavigate}
+            className={navLinkClass}
+          >
+            <div className={navItemClass}>
+              <Icon size={18} /> {label}
+            </div>
+          </NavLink>
+        ))}
+      </React.Fragment>
+    ))}
+  </nav>
+);
+
 const StockManagerLayout = ({ children }) => {
   const dispatch = useDispatch();
   const userInfo = useSelector((state) => state.posUser?.userInfo);
@@ -40,7 +112,7 @@ const StockManagerLayout = ({ children }) => {
 
   return (
     <main className="h-screen overflow-hidden bg-gray-100">
-      <section className="bg-white border-b px-6 py-4">
+      <section className="relative z-[100] bg-white border-b px-6 py-4">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <img
@@ -70,7 +142,7 @@ const StockManagerLayout = ({ children }) => {
             </button>
 
             {profileOpen ? (
-              <div className="absolute right-0 z-20 mt-2 w-56 rounded-lg border border-gray-200 bg-white p-2 shadow-lg">
+              <div className="absolute right-0 z-[110] mt-2 max-h-[calc(100vh-92px)] w-72 overflow-y-auto rounded-lg border border-gray-200 bg-white p-2 shadow-lg">
                 <div className="border-b px-3 py-2">
                   <div className="truncate text-sm font-bold text-gray-900">
                     {userInfo?.username || 'User'}
@@ -78,6 +150,9 @@ const StockManagerLayout = ({ children }) => {
                   <div className="truncate text-xs text-gray-500">
                     {userInfo?.role || '-'} {userInfo?.location ? `| ${userInfo.location}` : ''}
                   </div>
+                </div>
+                <div className="border-b py-2 md:hidden">
+                  <NavigationLinks onNavigate={() => setProfileOpen(false)} />
                 </div>
                 <button
                   type="button"
@@ -95,91 +170,7 @@ const StockManagerLayout = ({ children }) => {
 
       <section className="grid h-[calc(100vh-73px)] grid-cols-1 md:grid-cols-[230px_1fr]">
         <aside className="hidden overflow-y-auto bg-white border-r p-4 md:block">
-          <nav className="space-y-2 text-sm">
-            <NavLink to="/inventory/dashboard" className={navLinkClass}>
-              <div className={navItemClass}>
-                <LayoutDashboard size={18} /> Dashboard
-              </div>
-            </NavLink>
-
-            <div className={navGroupClass}>Catalog</div>
-            <NavLink to="/ecosystem/catalog" className={navLinkClass}>
-              <div className={navItemClass}>
-                <BookImage size={18} /> Catalog
-              </div>
-            </NavLink>
-
-            <div className={navGroupClass}>Inventory</div>
-            <NavLink to="/ecosystem" end className={navLinkClass}>
-              <div className={navItemClass}>
-                <Package size={18} /> Ecosystem
-              </div>
-            </NavLink>
-            <NavLink to="/ecosystem/purchase-orders/create" className={navLinkClass}>
-              <div className={navItemClass}>
-                <ClipboardList size={18} />
-                Purchase Orders
-              </div>
-            </NavLink>
-            <NavLink to="/ecosystem/dispatch" className={navLinkClass}>
-              <div className={navItemClass}>
-                <Truck size={18} />
-                Dispatch
-              </div>
-            </NavLink>
-
-            <div className={navGroupClass}>Accounts</div>
-            <NavLink
-              to={{ pathname: '/accounts/finance', search: '?from=inventory' }}
-              className={navLinkClass}
-            >
-              <div className={navItemClass}>
-                <CircleDollarSign size={18} />
-                Finance
-              </div>
-            </NavLink>
-
-            <div className={navGroupClass}>Applications</div>
-            <NavLink
-              to={{ pathname: '/pos', search: '?from=inventory' }}
-              className={navLinkClass}
-            >
-              <div className={navItemClass}>
-                <ShoppingCart size={18} />
-                POS
-              </div>
-            </NavLink>
-            <NavLink to="/orders/manage" className={navLinkClass}>
-              <div className={navItemClass}>
-                <ShoppingBag size={18} />
-                Order Management
-              </div>
-            </NavLink>
-            <NavLink to="/packing" className={navLinkClass}>
-              <div className={navItemClass}>
-                <Package size={18} />
-                Packing
-              </div>
-            </NavLink>
-            <NavLink to="/dispatch" className={navLinkClass}>
-              <div className={navItemClass}>
-                <Truck size={18} />
-                Dispatch
-              </div>
-            </NavLink>
-            <NavLink to="/delivery" className={navLinkClass}>
-              <div className={navItemClass}>
-                <Truck size={18} />
-                Delivery
-              </div>
-            </NavLink>
-            <NavLink to="/applications/pwa" className={navLinkClass}>
-              <div className={navItemClass}>
-                <ExternalLink size={18} />
-                PWA
-              </div>
-            </NavLink>
-          </nav>
+          <NavigationLinks />
         </aside>
 
         <section className="overflow-y-auto p-4 pb-10 md:p-6 md:pb-12">{children}</section>
