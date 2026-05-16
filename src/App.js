@@ -27,6 +27,9 @@ import PwaLinkPage from "./pages/PwaLinkPage";
 import OrderManagementPage from "./pages/OrderManagementPage";
 import PwaInstallPrompt from "./components/PwaInstallPrompt";
 
+const ALL_MANAGER_ROLES = ["ADMIN", "STOCKMANAGER", "DIRECTOR", "SUPERVISOR"];
+const POS_ROLES = ["ADMIN", "ONLINE_CASHIER", "CASHIER", "HYBRID_CASHIER", "STOCKMANAGER", "DIRECTOR", "SUPERVISOR"];
+
 function App() {
   function AppBootHydrator() {
   const dispatch = useDispatch();
@@ -63,7 +66,7 @@ function App() {
           <Route
             path="/pos"
             element={
-              <ProtectedRoute role={["ADMIN", "ONLINE_CASHIER", "CASHIER", "HYBRID_CASHIER", "STOCKMANAGER", "DIRECTOR"]}>
+              <ProtectedRoute role={POS_ROLES}>
                 <POS />
               </ProtectedRoute>
             }
@@ -73,53 +76,53 @@ function App() {
           <Route
             path="/cashier"
             element={
-              <ProtectedRoute role={["CASHIER", "ONLINE_CASHIER", "HYBRID_CASHIER"]}>
+              <ProtectedRoute role={["CASHIER", "ONLINE_CASHIER", "HYBRID_CASHIER", "SUPERVISOR"]}>
                 <Cashier />
               </ProtectedRoute>
             }
           />
            {/* Order Lifecycle Pages */}
           <Route path="/packing" element={
-               <ProtectedRoute role={["ADMIN","STOCKMANAGER","DIRECTOR","PACKING_AGENT"]}>
+               <ProtectedRoute role={[...ALL_MANAGER_ROLES,"PACKING_AGENT"]}>
               <PackingOrdersPage />
             </ProtectedRoute>
           } />
           <Route path="/dispatch" element={
             // <ProtectedRoute role="DISPATCH_AGENT">
-               <ProtectedRoute role={["ADMIN","STOCKMANAGER","DIRECTOR","DISPATCH_AGENT"]}>
+               <ProtectedRoute role={[...ALL_MANAGER_ROLES,"DISPATCH_AGENT"]}>
               <DispatchOrdersPage />
             </ProtectedRoute>
           } />
           <Route path="/delivery" element={
 
-              <ProtectedRoute role={["ADMIN","STOCKMANAGER","DIRECTOR","DELIVERY_AGENT"]}>
+              <ProtectedRoute role={[...ALL_MANAGER_ROLES,"DELIVERY_AGENT"]}>
               <DeliveryPage />
             </ProtectedRoute>
           } />
           <Route
   path="/ecosystem/catalog"
   element={
-     <ProtectedRoute role={["ADMIN","STOCKMANAGER","DIRECTOR"]}>
+     <ProtectedRoute role={ALL_MANAGER_ROLES}>
       <StockManagerCatalogPage />
     </ProtectedRoute>
   }
 />
           <Route path="/ecosystem" element={
 
-              <ProtectedRoute role={["ADMIN","STOCKMANAGER","DIRECTOR"]}>
+              <ProtectedRoute role={ALL_MANAGER_ROLES}>
               <StockManagerInventoryPage />
             </ProtectedRoute>
           } />
           <Route path="/inventory/dashboard" element={
 
-              <ProtectedRoute role={["ADMIN","STOCKMANAGER","DIRECTOR"]}>
+              <ProtectedRoute role={ALL_MANAGER_ROLES}>
               <InventoryDashboardPage />
             </ProtectedRoute>
           } />
           <Route
   path="/ecosystem/purchase-orders/create"
   element={
-    <ProtectedRoute role={["ADMIN","STOCKMANAGER","DIRECTOR"]}>
+    <ProtectedRoute role={ALL_MANAGER_ROLES}>
       <CreatePurchaseOrderPage />
     </ProtectedRoute>
   }
@@ -130,7 +133,7 @@ function App() {
 <Route
   path="/ecosystem/dispatch"
   element={
-    <ProtectedRoute role={["ADMIN","STOCKMANAGER","DIRECTOR"]}>
+    <ProtectedRoute role={ALL_MANAGER_ROLES}>
       <DispatchPage />
     </ProtectedRoute>
   }
@@ -138,7 +141,7 @@ function App() {
 <Route
   path="/printer-settings"
   element={
-    <ProtectedRoute role={["ADMIN", "ONLINE_CASHIER", "CASHIER", "HYBRID_CASHIER"]}>
+    <ProtectedRoute role={["ADMIN", "ONLINE_CASHIER", "CASHIER", "HYBRID_CASHIER", "SUPERVISOR"]}>
       <PrinterSettingsPage />
     </ProtectedRoute>
   }
@@ -146,7 +149,7 @@ function App() {
 <Route
   path="/accounts/finance"
   element={
-    <ProtectedRoute role={["ADMIN", "ONLINE_CASHIER", "CASHIER", "HYBRID_CASHIER", "STOCKMANAGER", "DIRECTOR"]}>
+    <ProtectedRoute role={POS_ROLES}>
       <AccountsPage />
     </ProtectedRoute>
   }
@@ -154,7 +157,7 @@ function App() {
 <Route
   path="/reports/top-products"
   element={
-    <ProtectedRoute role={["ADMIN", "ONLINE_CASHIER", "CASHIER", "HYBRID_CASHIER", "STOCKMANAGER", "DIRECTOR"]}>
+    <ProtectedRoute role={POS_ROLES}>
       <TopProductsReportPage />
     </ProtectedRoute>
   }
@@ -162,7 +165,7 @@ function App() {
 <Route
   path="/orders/manage"
   element={
-    <ProtectedRoute role={["ADMIN", "ONLINE_CASHIER", "CASHIER", "HYBRID_CASHIER", "STOCKMANAGER", "DIRECTOR"]}>
+    <ProtectedRoute role={POS_ROLES}>
       <OrderManagementPage />
     </ProtectedRoute>
   }
@@ -170,7 +173,7 @@ function App() {
 <Route
   path="/applications/pwa"
   element={
-    <ProtectedRoute role={["ADMIN", "ONLINE_CASHIER", "CASHIER", "HYBRID_CASHIER", "STOCKMANAGER", "DIRECTOR", "PACKING_AGENT", "DISPATCH_AGENT", "DELIVERY_AGENT"]}>
+    <ProtectedRoute role={[...POS_ROLES, "PACKING_AGENT", "DISPATCH_AGENT", "DELIVERY_AGENT"]}>
       <PwaLinkPage />
     </ProtectedRoute>
   }

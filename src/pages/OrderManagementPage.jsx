@@ -18,6 +18,13 @@ import {
   updatePOSOrder,
 } from '../features/orders/orderSlice';
 import { fetchAllProducts } from '../features/products/productSlice';
+import {
+  APPROVED_DISCOUNT_MESSAGE,
+  calculateOrderDiscount,
+  getOrderDiscountSummary,
+  MAX_ORDER_DISCOUNT_PERCENT,
+  ORDER_DISCOUNT_ROLES,
+} from '../utils/orderDiscount';
 
 const asArray = (value) => (Array.isArray(value) ? value : []);
 const money = (value) => `Rs. ${Number(value || 0).toFixed(2)}`;
@@ -168,6 +175,7 @@ const flattenProducts = (products) =>
 
 const OrderManagementPage = () => {
   const dispatch = useDispatch();
+  const userInfo = useSelector((state) => state.posUser?.userInfo);
   const token = useSelector((state) => state.posUser?.userInfo?.token);
   const orders = useSelector((state) => state.orders?.posOrdersList || []);
   const ordersLoading = useSelector((state) => state.orders?.posOrdersListLoading);
@@ -185,7 +193,12 @@ const OrderManagementPage = () => {
   });
   const [draftItems, setDraftItems] = useState([]);
   const [remarks, setRemarks] = useState('');
+  const [discountPercentage, setDiscountPercentage] = useState('0');
+  const [discountMessage, setDiscountMessage] = useState('');
   const [productSearch, setProductSearch] = useState('');
+  const canApplyOrderDiscount = ORDER_DISCOUNT_ROLES.includes(
+    String(userInfo?.role || '').toUpperCase()
+  );
 
   const catalog = useMemo(() => flattenProducts(products), [products]);
   const catalogMatches = useMemo(() => {
@@ -208,6 +221,14 @@ const OrderManagementPage = () => {
         0
       ),
     [draftItems]
+  );
+  const selectedDiscount = useMemo(
+    () => calculateOrderDiscount(selectedTotal, discountPercentage),
+    [discountPercentage, selectedTotal]
+  );
+  const getDisplayedOrderDiscount = useCallback(
+    (order) => getOrderDiscountSummary(order),
+    []
   );
 
   const loadOrders = useCallback(async () => {
@@ -234,6 +255,8 @@ const OrderManagementPage = () => {
   useEffect(() => {
     setDraftItems(normalizeDetailItems(selectedOrder, catalog));
     setRemarks('');
+    setDiscountPercentage(String(selectedOrder?.discountPercentage || 0));
+    setDiscountMessage('');
   }, [selectedOrder, catalog]);
 
   const openOrder = async (id) => {
@@ -297,16 +320,46 @@ const OrderManagementPage = () => {
       alert('Order must have at least one item.');
       return;
     }
+    if (
+      canApplyOrderDiscount &&
+      (Number.isNaN(Number(discountPercentage || 0)) ||
+        Number(discountPercentage || 0) < 0 ||
+        Number(discountPercentage || 0) > MAX_ORDER_DISCOUNT_PERCENT)
+    ) {
+      setDiscountPercentage(String(MAX_ORDER_DISCOUNT_PERCENT));
+      setDiscountMessage(APPROVED_DISCOUNT_MESSAGE);
+      return;
+    }
 
     await dispatch(
       updatePOSOrder({
         id: selectedOrder._id,
         orderItems: buildPayloadItems(draftItems),
         remarks,
+        ...(canApplyOrderDiscount
+          ? {
+              discountPercentage: selectedDiscount.discountPercentage,
+              discountAmount: selectedDiscount.discountAmount,
+              totalPrice: selectedDiscount.totalAfterDiscount,
+            }
+          : {}),
       })
     ).unwrap();
-    await dispatch(fetchPOSOrderDetails(selectedOrder._id)).unwrap();
     await loadOrders();
+    await dispatch(fetchPOSOrderDetails(selectedOrder._id)).unwrap();
+  };
+
+  const handleDiscountChange = (value) => {
+    const nextDiscount = calculateOrderDiscount(selectedTotal, value);
+
+    if (nextDiscount.clamped) {
+      setDiscountPercentage(String(MAX_ORDER_DISCOUNT_PERCENT));
+      setDiscountMessage(APPROVED_DISCOUNT_MESSAGE);
+      return;
+    }
+
+    setDiscountPercentage(value);
+    setDiscountMessage('');
   };
 
   const deleteOrder = async () => {
@@ -418,8 +471,13 @@ const OrderManagementPage = () => {
                         </div>
                         <div className="text-right">
                           <p className="font-bold text-gray-900">
-                            {money(order.totalPrice)}
+                            {money(getDisplayedOrderDiscount(order).totalAfterDiscount)}
                           </p>
+                          {getDisplayedOrderDiscount(order).discountAmount > 0 ? (
+                            <p className="mt-1 text-xs font-semibold text-green-700">
+                              Disc {money(getDisplayedOrderDiscount(order).discountAmount)}
+                            </p>
+                          ) : null}
                           <p className="mt-1 text-xs text-gray-500">
                             {order.posUserName || '-'}
                           </p>
@@ -493,11 +551,51 @@ const OrderManagementPage = () => {
                   </label>
 
                   <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
-                    <p className="text-sm font-semibold text-gray-500">Current total</p>
-                    <p className="mt-1 text-2xl font-bold text-gray-900">
+                    <p className="text-sm font-semibold text-gray-500">Items total</p>
+                    <p className="mt-1 text-xl font-bold text-gray-900">
                       {money(selectedTotal)}
                     </p>
-                    <p className="text-sm text-gray-500">{draftItems.length} item(s)</p>
+                    {canApplyOrderDiscount ? (
+                      <div className="mt-3 space-y-2 border-t border-gray-200 pt-3">
+                        <label className="block">
+                          <span className="text-xs font-bold uppercase text-gray-500">
+                            Discount %
+                          </span>
+                          <input
+                            type="number"
+                            min="0"
+                            max={MAX_ORDER_DISCOUNT_PERCENT}
+                            step="0.01"
+                            value={discountPercentage}
+                            onChange={(event) => handleDiscountChange(event.target.value)}
+                            className="mt-1 h-9 w-full rounded-lg border border-gray-300 px-2 text-right text-sm outline-none focus:border-blue-500"
+                          />
+                        </label>
+                        <div className="space-y-1 text-sm">
+                          <div className="flex justify-between text-green-700">
+                            <span>Discount</span>
+                            <strong>{money(selectedDiscount.discountAmount)}</strong>
+                          </div>
+                          <div className="flex justify-between text-gray-900">
+                            <span>Payable</span>
+                            <strong>{money(selectedDiscount.totalAfterDiscount)}</strong>
+                          </div>
+                          {discountMessage ? (
+                            <p className="rounded-md bg-orange-50 px-2 py-1 text-xs font-semibold text-orange-700">
+                              {discountMessage}
+                            </p>
+                          ) : null}
+                          <p className="text-xs font-semibold text-gray-500">
+                            Max {MAX_ORDER_DISCOUNT_PERCENT}%. Rounded down to rupees.
+                          </p>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="mt-1 text-sm text-gray-500">
+                        Payable: {money(selectedOrder.totalPrice || selectedTotal)}
+                      </p>
+                    )}
+                    <p className="mt-2 text-sm text-gray-500">{draftItems.length} item(s)</p>
                   </div>
                 </div>
 

@@ -119,7 +119,7 @@ function Login() {
 
       if (['ADMIN', 'DIRECTOR'].includes(role)) {
         window.location.replace('/inventory/dashboard');
-      } else if (['CASHIER', 'ONLINE_CASHIER', 'HYBRID_CASHIER'].includes(role)) {
+      } else if (['CASHIER', 'ONLINE_CASHIER', 'HYBRID_CASHIER', 'SUPERVISOR'].includes(role)) {
         window.location.replace('/pos');
       } else if (role === 'STOCKMANAGER') {
         window.location.replace('/inventory');

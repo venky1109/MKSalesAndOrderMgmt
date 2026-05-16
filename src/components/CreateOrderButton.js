@@ -8,6 +8,13 @@ import CashModal from './CashModal';
 import PhoneModal from './PhoneModal';
 import InvoiceShareModal from './InvoiceShareModal';
 import OrderFulfillmentModal from './OrderFulfillmentModal';
+import {
+  APPROVED_DISCOUNT_MESSAGE,
+  calculateOrderDiscount,
+  MAX_ORDER_DISCOUNT_PERCENT,
+  ORDER_DISCOUNT_ROLES,
+  toWholeRupees,
+} from '../utils/orderDiscount';
 
 const PAYMENT_OPTIONS = [
   {
@@ -42,6 +49,122 @@ const PAYMENT_OPTIONS = [
   },
 ];
 
+function DiscountModal({ total, onCancel, onConfirm }) {
+  const [discountText, setDiscountText] = useState('');
+  const [error, setError] = useState('');
+
+  const discount = calculateOrderDiscount(total, discountText);
+
+  const handleChange = (e) => {
+    const value = e.target.value.replace(/[^\d.]/g, '');
+    const parts = value.split('.');
+    const normalized = parts.length > 2 ? `${parts[0]}.${parts.slice(1).join('')}` : value;
+    const nextDiscount = calculateOrderDiscount(total, normalized);
+
+    if (nextDiscount.clamped) {
+      setDiscountText(String(MAX_ORDER_DISCOUNT_PERCENT));
+      setError(APPROVED_DISCOUNT_MESSAGE);
+    } else {
+      setDiscountText(normalized);
+      setError('');
+    }
+  };
+
+  const handleConfirm = () => {
+    const nextDiscount = calculateOrderDiscount(total, discountText);
+
+    if (Number.isNaN(Number(discountText || 0)) || Number(discountText || 0) < 0) {
+      setError('Enter a valid discount percentage.');
+      return;
+    }
+
+    if (nextDiscount.clamped) {
+      setDiscountText(String(MAX_ORDER_DISCOUNT_PERCENT));
+      setError(APPROVED_DISCOUNT_MESSAGE);
+      return;
+    }
+
+    onConfirm({
+      discountPercentage: nextDiscount.discountPercentage,
+      discountAmount: nextDiscount.discountAmount,
+      totalAfterDiscount: nextDiscount.totalAfterDiscount,
+    });
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40 px-4"
+      onClick={onCancel}
+    >
+      <div
+        className="w-full max-w-sm overflow-hidden rounded-2xl border bg-white shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="bg-[#ff7400] px-4 py-3 text-center text-sm font-bold text-white">
+          Order Discount
+        </div>
+
+        <div className="space-y-3 p-4">
+          <div className="rounded-xl border bg-gray-50 p-3 text-sm">
+            <div className="flex justify-between">
+              <span>Order Total</span>
+              <strong>Rs. {Number(total || 0).toFixed(2)}</strong>
+            </div>
+            <div className="mt-1 flex justify-between text-green-700">
+              <span>Discount</span>
+              <strong>Rs. {discount.discountAmount.toFixed(2)}</strong>
+            </div>
+            <div className="mt-1 flex justify-between text-base">
+              <span>Payable</span>
+              <strong>Rs. {discount.totalAfterDiscount.toFixed(2)}</strong>
+            </div>
+          </div>
+
+          <label className="block text-sm font-semibold text-gray-700">
+            Discount Percentage
+          </label>
+          <input
+            autoFocus
+            type="text"
+            inputMode="decimal"
+            value={discountText}
+            onChange={handleChange}
+            placeholder={`0 to ${MAX_ORDER_DISCOUNT_PERCENT}`}
+            className="h-11 w-full rounded-xl border border-gray-300 px-3 text-center text-sm outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-200"
+          />
+          <p className="text-xs font-semibold text-gray-500">
+            Max allowed: {MAX_ORDER_DISCOUNT_PERCENT}%
+          </p>
+          {error ? <p className="text-sm font-semibold text-red-600">{error}</p> : null}
+
+          <div className="flex gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() =>
+                onConfirm({
+                  discountPercentage: 0,
+                  discountAmount: 0,
+                  totalAfterDiscount: toWholeRupees(total),
+                })
+              }
+              className="flex-1 rounded-xl bg-gray-500 px-4 py-2 font-semibold text-white hover:bg-gray-600"
+            >
+              No Discount
+            </button>
+            <button
+              type="button"
+              onClick={handleConfirm}
+              className="flex-1 rounded-xl bg-green-600 px-4 py-2 font-semibold text-white hover:bg-green-700"
+            >
+              Continue
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function CreateOrderButton() {
   const dispatch = useDispatch();
 
@@ -56,6 +179,12 @@ function CreateOrderButton() {
   const [pendingPhone, setPendingPhone] = useState(null);
 
   const [showCashModal, setShowCashModal] = useState(false);
+  const [showDiscountModal, setShowDiscountModal] = useState(false);
+  const [orderDiscount, setOrderDiscount] = useState({
+    discountPercentage: 0,
+    discountAmount: 0,
+    totalAfterDiscount: 0,
+  });
   const [showFulfillmentModal, setShowFulfillmentModal] = useState(false);
   const [fulfillmentOptions, setFulfillmentOptions] = useState(null);
 
@@ -67,6 +196,9 @@ function CreateOrderButton() {
   );
 
   const [showPaymentOptions, setShowPaymentOptions] = useState(false);
+  const canApplyOrderDiscount = ORDER_DISCOUNT_ROLES.includes(
+    String(posUserInfo?.role || '').toUpperCase()
+  );
 
   const actionBtn =
     'rounded-xl font-bold transition active:translate-y-[1px] whitespace-nowrap';
@@ -80,6 +212,13 @@ function CreateOrderButton() {
   useEffect(() => {
     if (cartItems.length === 0) setOrderCreated(false);
   }, [cartItems.length]);
+
+  useEffect(() => {
+    setOrderDiscount((prev) => ({
+      ...prev,
+      ...calculateOrderDiscount(total, prev.discountPercentage),
+    }));
+  }, [total]);
 
   const createAndShowInvoice = useCallback((order) => {
     setLastFullOrder(order);
@@ -106,6 +245,22 @@ function CreateOrderButton() {
   const handleFulfillmentConfirm = (options) => {
     setFulfillmentOptions(options);
     setShowFulfillmentModal(false);
+    setOrderDiscount({
+      discountPercentage: 0,
+      discountAmount: 0,
+      totalAfterDiscount: toWholeRupees(total),
+    });
+
+    if (canApplyOrderDiscount) {
+      setShowDiscountModal(true);
+    } else {
+      setShowCashModal(true);
+    }
+  };
+
+  const handleDiscountConfirm = (discount) => {
+    setOrderDiscount(discount);
+    setShowDiscountModal(false);
     setShowCashModal(true);
   };
 
@@ -118,6 +273,11 @@ function CreateOrderButton() {
     const posLocation = packingWarehouseLocation
       ? [basePosLocation, packingWarehouseLocation].filter(Boolean).join('|')
       : basePosLocation;
+
+    const discountPercentage = Number(orderDiscount.discountPercentage || 0);
+    const calculatedDiscount = calculateOrderDiscount(total, discountPercentage);
+    const discountAmount = calculatedDiscount.discountAmount;
+    const payableTotal = calculatedDiscount.totalAfterDiscount;
 
     const orderPayload = {
       shippingAddress: {
@@ -143,7 +303,9 @@ function CreateOrderButton() {
         financialId: item.financialId,
       })),
 
-      totalPrice: total,
+      totalPrice: payableTotal,
+      discountPercentage,
+      discountAmount,
       posUserName: posUserInfo?.username || '',
       posLocation,
       ...(fulfillmentOptions || {}),
@@ -177,10 +339,10 @@ function CreateOrderButton() {
 
         items: cartItems,
 
-        total: result?.total || result?.totalPrice || total,
+        total: result?.total || result?.totalPrice || payableTotal,
 
         totalPrice:
-          result?.totalPrice || result?.total || total,
+          result?.totalPrice || result?.total || payableTotal,
 
         totalQty:
           result?.totalQty ||
@@ -189,11 +351,13 @@ function CreateOrderButton() {
             0
           ),
 
-        totalDiscount: result?.totalDiscount || 0,
+        totalDiscount: Number(result?.totalDiscount || 0) + discountAmount,
+        discountPercentage,
+        discountAmount,
 
         cashGiven,
 
-        change: cashGiven - total,
+        change: cashGiven - payableTotal,
 
         datetime:
           result?.createdAt || new Date().toISOString(),
@@ -213,6 +377,11 @@ function CreateOrderButton() {
       setOrderCreated(true);
       setPendingPhone(null);
       setFulfillmentOptions(null);
+      setOrderDiscount({
+        discountPercentage: 0,
+        discountAmount: 0,
+        totalAfterDiscount: 0,
+      });
     } catch (err) {
       alert(
         '❌ Order failed: ' +
@@ -287,10 +456,21 @@ function CreateOrderButton() {
       {showCashModal && pendingPhone && (
         <CashModal
           title={selectedPayment.header}
-          total={total}
+          total={orderDiscount.totalAfterDiscount || total}
           paymentMethod={selectedPayment.key}
           onCancel={() => setShowCashModal(false)}
           onConfirm={handleConfirmCash}
+        />
+      )}
+
+      {showDiscountModal && (
+        <DiscountModal
+          total={total}
+          onCancel={() => {
+            setShowDiscountModal(false);
+            setPendingPhone(null);
+          }}
+          onConfirm={handleDiscountConfirm}
         />
       )}
 

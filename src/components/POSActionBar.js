@@ -22,6 +22,7 @@ import CreateOrderButton from "./CreateOrderButton";
 import logo from "../assests/ManaKiranaLogo1024x1024.png";
 import POSDispatchButtons from "./POSDispatchButtons";
 import InvoiceShareModal from "./InvoiceShareModal";
+import { getOrderDiscountSummary } from "../utils/orderDiscount";
 
 function AppModal({
   open,
@@ -545,8 +546,16 @@ export default function POSActionsBar() {
   const desktopBtn = "w-full h-11 text-sm";
 
   const ordersTotalAmount = (posOrdersList || []).reduce(
-    (sum, order) => sum + Number(order.totalPrice || 0),
+    (sum, order) => sum + getOrderDiscountSummary(order).totalAfterDiscount,
     0
+  );
+  const posOrderDetailsItemsTotal = (posOrderDetails?.items || []).reduce(
+    (sum, item) => sum + Number(item.amount || 0),
+    0
+  );
+  const posOrderDetailsDiscount = getOrderDiscountSummary(
+    posOrderDetails || {},
+    posOrderDetailsItemsTotal || undefined
   );
 
   const UserDropdown = () => (
@@ -797,7 +806,10 @@ export default function POSActionsBar() {
                       </td>
                     </tr>
                   ) : (
-                    posOrdersList.map((order, index) => (
+                    posOrdersList.map((order, index) => {
+                      const discount = getOrderDiscountSummary(order);
+
+                      return (
                       <tr
                         key={order._id}
                         onClick={() => handleOpenOrderDetails(order._id)}
@@ -839,10 +851,16 @@ export default function POSActionsBar() {
                           {order.paymentMethod || "-"}
                         </td>
                         <td className="px-3 py-2 text-right">
-                          ₹{Number(order.totalPrice || 0).toFixed(2)}
+                          ₹{discount.totalAfterDiscount.toFixed(2)}
+                          {discount.discountAmount > 0 ? (
+                            <div className="text-xs font-semibold text-green-700">
+                              Disc ₹{discount.discountAmount.toFixed(2)}
+                            </div>
+                          ) : null}
                         </td>
                       </tr>
-                    ))
+                      );
+                    })
                   )}
                 </tbody>
 
@@ -949,12 +967,22 @@ export default function POSActionsBar() {
                     </tbody>
 
                     <tfoot>
+                      {posOrderDetailsDiscount.discountAmount > 0 ? (
+                        <tr className="border-t bg-green-50 font-semibold text-green-700">
+                          <td colSpan="5" className="px-3 py-2 text-right">
+                            Discount
+                          </td>
+                          <td className="px-3 py-2 text-right">
+                            ₹{posOrderDetailsDiscount.discountAmount.toFixed(2)}
+                          </td>
+                        </tr>
+                      ) : null}
                       <tr className="border-t bg-yellow-50 font-bold">
                         <td colSpan="5" className="px-3 py-3 text-right">
                           Total Amount
                         </td>
                         <td className="px-3 py-3 text-right">
-                          ₹{Number(posOrderDetails.totalPrice || 0).toFixed(2)}
+                          ₹{posOrderDetailsDiscount.totalAfterDiscount.toFixed(2)}
                         </td>
                       </tr>
                     </tfoot>
@@ -976,8 +1004,10 @@ export default function POSActionsBar() {
         order={{
           ...(posOrderDetails || {}),
           items: posOrderDetails?.items || [],
-          total: posOrderDetails?.totalPrice || 0,
-          totalPrice: posOrderDetails?.totalPrice || 0,
+          total: posOrderDetailsDiscount.totalAfterDiscount,
+          totalPrice: posOrderDetailsDiscount.totalAfterDiscount,
+          discountAmount: posOrderDetailsDiscount.discountAmount,
+          discountPercentage: posOrderDetailsDiscount.discountPercentage,
           phone: posOrderDetails?.phoneNo || "",
           paymentMethod: posOrderDetails?.paymentMethod || "-",
         }}

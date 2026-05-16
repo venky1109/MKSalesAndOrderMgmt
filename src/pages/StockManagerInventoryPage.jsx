@@ -159,13 +159,13 @@ const StockManagerInventoryPage = () => {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <p className="font-semibold text-red-600">
-          Please login as ADMIN, STOCKMANAGER, or DIRECTOR
+          Please login as ADMIN, STOCKMANAGER, DIRECTOR, or SUPERVISOR
         </p>
       </div>
     );
   }
 
-  if (!['ADMIN', 'STOCKMANAGER', 'DIRECTOR'].includes(userInfo.role)) {
+  if (!['ADMIN', 'STOCKMANAGER', 'DIRECTOR', 'SUPERVISOR'].includes(userInfo.role)) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <p className="font-semibold text-red-600">

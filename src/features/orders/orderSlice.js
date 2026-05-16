@@ -495,9 +495,15 @@ export const fetchPOSOrderDetails = createAsyncThunk(
 
 export const updatePOSOrder = createAsyncThunk(
   'orders/updatePOSOrder',
-  async ({ id, orderItems, remarks = '' }, thunkAPI) => {
+  async ({ id, orderItems, remarks = '', discountPercentage, discountAmount, totalPrice }, thunkAPI) => {
     try {
       const token = thunkAPI.getState().posUser?.userInfo?.token || getStoredToken();
+      const payload = { remarks };
+
+      if (orderItems !== undefined) payload.orderItems = orderItems;
+      if (discountPercentage !== undefined) payload.discountPercentage = discountPercentage;
+      if (discountAmount !== undefined) payload.discountAmount = discountAmount;
+      if (totalPrice !== undefined) payload.totalPrice = totalPrice;
 
       const response = await fetch(`${API_BASE_URL}/orders/pos/${id}`, {
         method: 'PUT',
@@ -505,7 +511,7 @@ export const updatePOSOrder = createAsyncThunk(
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ orderItems, remarks }),
+        body: JSON.stringify(payload),
       });
 
       const data = await response.json().catch(() => ({}));
@@ -743,6 +749,16 @@ const orderSlice = createSlice({
       .addCase(fetchPOSOrderDetails.fulfilled, (state, action) => {
         state.posOrderDetailsLoading = false;
         state.posOrderDetails = action.payload;
+        const fetchedOrder = action.payload;
+        const fetchedId = fetchedOrder?._id || fetchedOrder?.id;
+
+        if (fetchedId) {
+          state.posOrdersList = (state.posOrdersList || []).map((order) =>
+            order._id === fetchedId || order.id === fetchedId
+              ? { ...order, ...fetchedOrder }
+              : order
+          );
+        }
       })
       .addCase(fetchPOSOrderDetails.rejected, (state, action) => {
         state.posOrderDetailsLoading = false;
@@ -754,7 +770,17 @@ const orderSlice = createSlice({
       })
       .addCase(updatePOSOrder.fulfilled, (state, action) => {
         state.posOrderMutationLoading = false;
-        state.posOrderDetails = action.payload?.order || action.payload;
+        const updatedOrder = action.payload?.order || action.payload;
+        state.posOrderDetails = updatedOrder;
+        const updatedId = updatedOrder?._id || updatedOrder?.id;
+
+        if (updatedId) {
+          state.posOrdersList = (state.posOrdersList || []).map((order) =>
+            order._id === updatedId || order.id === updatedId
+              ? { ...order, ...updatedOrder }
+              : order
+          );
+        }
       })
       .addCase(updatePOSOrder.rejected, (state, action) => {
         state.posOrderMutationLoading = false;
