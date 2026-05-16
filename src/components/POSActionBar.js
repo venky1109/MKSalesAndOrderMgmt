@@ -7,7 +7,6 @@ import {
   RefreshCw,
   Settings,
   User,
-  WalletCards,
 } from "lucide-react";
 import { logout } from "../features/auth/posUserSlice";
 import {
@@ -289,11 +288,6 @@ export default function POSActionsBar() {
     window.location.reload();
   }, []);
 
-  const handleOpenFinance = useCallback(() => {
-    setSettingsOpen(false);
-    window.location.assign("/finance");
-  }, []);
-
   const handleOpenTopProducts = useCallback(() => {
     setSettingsOpen(false);
     navigate("/reports/top-products");
@@ -563,13 +557,6 @@ export default function POSActionsBar() {
         bottom: `${userMenuPosition.bottom}px`,
       }}
     >
-      <button
-        onClick={handleOpenFinance}
-        className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold text-gray-700 hover:bg-green-50"
-      >
-        <WalletCards size={16} className="shrink-0" />
-        <span className="min-w-0 flex-1 whitespace-nowrap">Finance</span>
-      </button>
       <button
         onClick={handleOpenTopProducts}
         className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold text-gray-700 hover:bg-yellow-50"

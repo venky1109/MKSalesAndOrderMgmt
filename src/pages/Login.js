@@ -2,40 +2,124 @@
 import { useState, useEffect } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { loginPosUser } from '../features/auth/posUserSlice';
+import { API_BASE_URL } from '../utils/apiConfig';
 import logo from '../assests/ManaKiranaLogo1024x1024.png';
 
 const LOCATIONS = ['YANAM','MURAMULLA','GOLLAVELLI','VADAPARRU','UPPALAGUPTHAM'];
+
+const normalizeRole = (role) => String(role || '').trim().toUpperCase();
+const normalizeUsername = (value) => String(value || '').trim().toLowerCase();
+
+const readRoleFromPayload = (payload, username) => {
+  const normalizedUsername = normalizeUsername(username);
+  const users =
+    (Array.isArray(payload) && payload) ||
+    (Array.isArray(payload?.posUsers) && payload.posUsers) ||
+    (Array.isArray(payload?.users) && payload.users) ||
+    (Array.isArray(payload?.data) && payload.data) ||
+    null;
+
+  if (users) {
+    const matchedUser = users.find((user) => normalizeUsername(user?.username) === normalizedUsername);
+    return matchedUser?.role || null;
+  }
+
+  return (
+    payload?.role ||
+    payload?.user?.role ||
+    payload?.posUser?.role ||
+    payload?.data?.role ||
+    null
+  );
+};
+
+const fetchPosUserRole = async (username, signal) => {
+  const trimmedUsername = username.trim();
+  const encodedUsername = encodeURIComponent(trimmedUsername);
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/posusers/role/${encodedUsername}`, {
+      cache: 'no-store',
+      signal,
+    });
+    if (!response.ok) return null;
+
+    const data = await response.json().catch(() => null);
+    const role = readRoleFromPayload(data, trimmedUsername);
+    if (role) return normalizeRole(role);
+  } catch (error) {
+    if (error?.name === 'AbortError') throw error;
+  }
+
+  return null;
+};
 
 function Login() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [location, setLocation] = useState('');
   const [fallbackError, setFallbackError] = useState('');
+  const [usernameRole, setUsernameRole] = useState(null);
   const dispatch = useDispatch();
 
   const { userInfo, loading, error } = useSelector((state) => state.posUser);
+  const isDirectorLogin = normalizeRole(usernameRole) === 'DIRECTOR';
 
   const reloadApp = () => {
     window.location.reload();
   };
 
+  useEffect(() => {
+    const trimmedUsername = username.trim();
+    if (!trimmedUsername) {
+      setUsernameRole(null);
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    const lookupTimer = setTimeout(() => {
+      fetchPosUserRole(trimmedUsername, controller.signal)
+        .then((role) => {
+          setUsernameRole(role);
+        })
+        .catch((lookupError) => {
+          if (lookupError?.name !== 'AbortError') {
+            setUsernameRole(null);
+          }
+        });
+    }, 300);
+
+    return () => {
+      clearTimeout(lookupTimer);
+      controller.abort();
+    };
+  }, [username]);
+
+  useEffect(() => {
+    if (isDirectorLogin) {
+      setLocation('');
+    }
+  }, [isDirectorLogin]);
+
   const handleSubmit = (e) => {
     e.preventDefault();
     setFallbackError('');
 
-    if (!location) {
+    if (!isDirectorLogin && !location) {
       setFallbackError('Please select a location.');
       return;
     }
 
-    dispatch(loginPosUser({ username, password, location }));
+    dispatch(loginPosUser({ username, password, location: isDirectorLogin ? '' : location }));
   };
 
   useEffect(() => {
     if (userInfo?.token) {
       const role = userInfo.role;
 
-      if (['CASHIER', 'ONLINE_CASHIER', 'HYBRID_CASHIER','ADMIN'].includes(role)) {
+      if (['ADMIN', 'DIRECTOR'].includes(role)) {
+        window.location.replace('/inventory/dashboard');
+      } else if (['CASHIER', 'ONLINE_CASHIER', 'HYBRID_CASHIER'].includes(role)) {
         window.location.replace('/pos');
       } else if (role === 'STOCKMANAGER') {
         window.location.replace('/inventory');
@@ -103,18 +187,19 @@ function Login() {
           required
         />
 
-        {/* Location Dropdown */}
-        <select
-          value={location}
-          onChange={(e) => setLocation(e.target.value)}
-          className="w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-green-400 text-sm bg-white text-gray-400"
-          required
-        >
-          <option value="" disabled >Select Location</option>
-          {LOCATIONS.map((loc) => (
-            <option key={loc} value={loc}>{loc} </option>
-          ))}
-        </select>
+        {!isDirectorLogin && (
+          <select
+            value={location}
+            onChange={(e) => setLocation(e.target.value)}
+            className="w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-green-400 text-sm bg-white text-gray-400"
+            required
+          >
+            <option value="" disabled >Select Location</option>
+            {LOCATIONS.map((loc) => (
+              <option key={loc} value={loc}>{loc} </option>
+            ))}
+          </select>
+        )}
 
         <button
           type="submit"

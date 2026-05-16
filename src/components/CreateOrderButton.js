@@ -7,6 +7,7 @@ import { fetchAllProducts } from '../features/products/productSlice';
 import CashModal from './CashModal';
 import PhoneModal from './PhoneModal';
 import InvoiceShareModal from './InvoiceShareModal';
+import OrderFulfillmentModal from './OrderFulfillmentModal';
 
 const PAYMENT_OPTIONS = [
   {
@@ -55,6 +56,8 @@ function CreateOrderButton() {
   const [pendingPhone, setPendingPhone] = useState(null);
 
   const [showCashModal, setShowCashModal] = useState(false);
+  const [showFulfillmentModal, setShowFulfillmentModal] = useState(false);
+  const [fulfillmentOptions, setFulfillmentOptions] = useState(null);
 
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
   const [lastFullOrder, setLastFullOrder] = useState(null);
@@ -97,11 +100,24 @@ function CreateOrderButton() {
   const handlePhoneConfirm = (digits) => {
     setShowPhoneModal(false);
     setPendingPhone(digits);
+    setShowFulfillmentModal(true);
+  };
+
+  const handleFulfillmentConfirm = (options) => {
+    setFulfillmentOptions(options);
+    setShowFulfillmentModal(false);
     setShowCashModal(true);
   };
 
   const handleConfirmCash = async (cashGiven) => {
     setShowCashModal(false);
+
+    const packingWarehouseLocation =
+      fulfillmentOptions?.packingWarehouseLocation || '';
+    const basePosLocation = posUserInfo?.location || '';
+    const posLocation = packingWarehouseLocation
+      ? [basePosLocation, packingWarehouseLocation].filter(Boolean).join('|')
+      : basePosLocation;
 
     const orderPayload = {
       shippingAddress: {
@@ -129,7 +145,8 @@ function CreateOrderButton() {
 
       totalPrice: total,
       posUserName: posUserInfo?.username || '',
-      posLocation: posUserInfo?.location || '',
+      posLocation,
+      ...(fulfillmentOptions || {}),
     };
 
     try {
@@ -184,6 +201,7 @@ function CreateOrderButton() {
         phone: pendingPhone,
 
         paymentMethod: selectedPayment.key,
+        fulfillment: fulfillmentOptions,
       };
 
       createAndShowInvoice(fullOrder);
@@ -194,6 +212,7 @@ function CreateOrderButton() {
 
       setOrderCreated(true);
       setPendingPhone(null);
+      setFulfillmentOptions(null);
     } catch (err) {
       alert(
         '❌ Order failed: ' +
@@ -274,6 +293,16 @@ function CreateOrderButton() {
           onConfirm={handleConfirmCash}
         />
       )}
+
+      <OrderFulfillmentModal
+        open={showFulfillmentModal}
+        onCancel={() => {
+          setShowFulfillmentModal(false);
+          setPendingPhone(null);
+        }}
+        onConfirm={handleFulfillmentConfirm}
+        confirmLabel="Continue"
+      />
 
       <InvoiceShareModal
         open={showInvoiceModal}

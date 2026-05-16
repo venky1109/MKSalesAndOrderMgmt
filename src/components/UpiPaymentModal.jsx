@@ -6,6 +6,7 @@ import {
 } from '../features/payment/paymentSlice';
 import generateMKOrderId from '../utils/generateMKOrderId';
 import { fetchCustomerByPhone } from '../features/customers/customerSlice';
+import OrderFulfillmentModal from './OrderFulfillmentModal';
 
 const UpiPaymentModal = ({ onClose, cartItems = [], totals = {} }) => {
   const dispatch = useDispatch();
@@ -19,6 +20,7 @@ const UpiPaymentModal = ({ onClose, cartItems = [], totals = {} }) => {
   const paymentUrl = useSelector((state) => state.payment?.paymentUrl);
 
   const [phoneNumber, setPhoneNumber] = useState('');
+  const [showFulfillmentModal, setShowFulfillmentModal] = useState(false);
 
   const amount = useMemo(
     () => Number(totals?.totalPrice || 0).toFixed(2),
@@ -37,7 +39,7 @@ const UpiPaymentModal = ({ onClose, cartItems = [], totals = {} }) => {
     };
   }, [dispatch]);
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (fulfillmentOptions) => {
     if (cartItems.length === 0) return;
     if (!/^\d{10}$/.test(phoneNumber)) return;
 
@@ -67,6 +69,13 @@ const UpiPaymentModal = ({ onClose, cartItems = [], totals = {} }) => {
         financialId: item.financialId,
       }));
 
+      const packingWarehouseLocation =
+        fulfillmentOptions?.packingWarehouseLocation || '';
+      const basePosLocation = posUserInfo?.location || '';
+      const posLocation = packingWarehouseLocation
+        ? [basePosLocation, packingWarehouseLocation].filter(Boolean).join('|')
+        : basePosLocation;
+
       const payload = {
         MK_order_id: mkOrderId,
         user: customerId,
@@ -81,9 +90,10 @@ const UpiPaymentModal = ({ onClose, cartItems = [], totals = {} }) => {
         totalPrice: Number(totals?.totalPrice || 0),
         phoneNo: phoneNumber,
         posUserName: posUserInfo?.username || '',
-        posLocation: posUserInfo?.location || '',
+        posLocation,
         source: 'POS',
         isPaid: false,
+        ...(fulfillmentOptions || {}),
       };
 
       await dispatch(
@@ -201,7 +211,7 @@ const UpiPaymentModal = ({ onClose, cartItems = [], totals = {} }) => {
 
           <button
             type="button"
-            onClick={handleSubmit}
+            onClick={() => setShowFulfillmentModal(true)}
             disabled={!canSubmit}
             className="rounded-xl border border-[#FFD700] bg-[#ff8a00] px-5 py-2.5 text-sm font-bold text-white transition hover:bg-[#e57b00] disabled:cursor-not-allowed disabled:bg-orange-300"
           >
@@ -209,6 +219,16 @@ const UpiPaymentModal = ({ onClose, cartItems = [], totals = {} }) => {
           </button>
         </div>
       </div>
+
+      <OrderFulfillmentModal
+        open={showFulfillmentModal}
+        onCancel={() => setShowFulfillmentModal(false)}
+        onConfirm={(options) => {
+          setShowFulfillmentModal(false);
+          handleSubmit(options);
+        }}
+        confirmLabel="Pay via UPI"
+      />
     </div>
   );
 };

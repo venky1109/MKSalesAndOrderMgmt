@@ -159,13 +159,13 @@ const StockManagerInventoryPage = () => {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <p className="font-semibold text-red-600">
-          Please login as STOCK_MANAGER
+          Please login as ADMIN, STOCKMANAGER, or DIRECTOR
         </p>
       </div>
     );
   }
 
-  if (!['ADMIN', 'STOCK_MANAGER', 'CASHIER'].includes(userInfo.role)) {
+  if (!['ADMIN', 'STOCKMANAGER', 'DIRECTOR'].includes(userInfo.role)) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <p className="font-semibold text-red-600">
@@ -180,7 +180,7 @@ const StockManagerInventoryPage = () => {
       <section className="space-y-5 p-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">
-            Stock Manager Inventory
+            ManaKirana Ecosystem
           </h1>
           <p className="text-sm text-gray-500">
             Manage warehouse stock, outlet stock, dispatches, purchases, and

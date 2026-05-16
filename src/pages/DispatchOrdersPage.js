@@ -1,8 +1,8 @@
 import React, { useEffect, useCallback } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { fetchDispatchOrders } from '../features/orders/orderSlice';
-import HeaderPOS from '../components/HeaderPOS';
 import DispatchOrdersTable from '../components/DispatchOrdersTable';
+import StockManagerLayout from '../components/StockManagerLayout';
 
 const DispatchOrdersPage = () => {
   const dispatch = useDispatch();
@@ -31,10 +31,11 @@ const DispatchOrdersPage = () => {
   }, [refetch]);
 
   return (
-    <div className="p-6">
-      <HeaderPOS />
+    <StockManagerLayout>
+    <main className="space-y-4">
       <DispatchOrdersTable orders={orders} title="ORDERS TO DISPATCH" refetch={refetch} />
-    </div>
+    </main>
+    </StockManagerLayout>
   );
 };
 

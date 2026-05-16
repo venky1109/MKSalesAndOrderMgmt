@@ -2,7 +2,7 @@ import React, { useEffect,useCallback } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { fetchPackingOrders } from '../features/orders/orderSlice';
 import OrdersTable from '../components/OrdersTable';
-import HeaderPOS from '../components/HeaderPOS'
+import StockManagerLayout from '../components/StockManagerLayout';
 
 const PackingOrdersPage = () => {
   const dispatch = useDispatch();
@@ -35,13 +35,14 @@ useEffect(() => {
 
 
   return (
-    <div className="p-6">
-        <HeaderPOS />
+    <StockManagerLayout>
+    <main className="space-y-4">
       {/* <h2 className="text-2xl font-bold mb-4">Orders For Packing</h2> */}
       {/* {loading && <p className="text-gray-500">Loading...</p>} */}
       {/* {error && <p className="text-red-500">{error}</p>} */}
       { <OrdersTable orders={orders} title="ORDERS TO PACK" refetch={refetch} />}
-    </div>
+    </main>
+    </StockManagerLayout>
   );
 };
 

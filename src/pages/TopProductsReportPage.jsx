@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { ArrowLeft, Download, RefreshCw } from "lucide-react";
 import { fetchTopProductsReport } from "../features/reports/topProductsReportSlice";
 import { fetchAllProducts } from "../features/products/productSlice";
+import StockManagerLayout from "../components/StockManagerLayout";
 
 const formatDate = (value) => {
   if (!value) return "-";
@@ -264,13 +265,14 @@ export default function TopProductsReportPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-100 p-3 md:p-5">
+    <StockManagerLayout>
+    <div className="bg-slate-100">
       <div className="mx-auto max-w-7xl">
         <div className="rounded-lg border bg-white p-4 shadow-sm">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
               <button
-                onClick={() => navigate("/pos")}
+                onClick={() => navigate("/pos?from=inventory")}
                 className="mb-3 inline-flex h-9 items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-semibold text-gray-700 hover:bg-gray-50"
               >
                 <ArrowLeft size={16} />
@@ -408,5 +410,6 @@ export default function TopProductsReportPage() {
         </div>
       </div>
     </div>
+    </StockManagerLayout>
   );
 }

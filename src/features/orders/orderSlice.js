@@ -16,6 +16,58 @@ const getStoredToken = () => {
 };
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const normalizeArray = (payload) => {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.data)) return payload.data;
+  if (Array.isArray(payload?.users)) return payload.users;
+  if (Array.isArray(payload?.posUsers)) return payload.posUsers;
+  if (Array.isArray(payload?.rows)) return payload.rows;
+  return [];
+};
+
+const isDeliveryRole = (user) =>
+  String(user?.role || user?.userRole || user?.type || '')
+    .toLowerCase()
+    .includes('delivery');
+
+export const fetchDeliveryPosUsers = createAsyncThunk(
+  'orders/fetchDeliveryPosUsers',
+  async (_, thunkAPI) => {
+    const token = thunkAPI.getState().posUser?.userInfo?.token || getStoredToken();
+
+    const urls = [
+      `${API_BASE_URL}/posusers?role=delivery`,
+      `${API_BASE_URL}/posusers`,
+      `${API_BASE_URL}/pos_users?role=delivery`,
+      `${API_BASE_URL}/pos_users`,
+    ];
+
+    let lastError = 'Failed to fetch delivery users';
+
+    for (const url of urls) {
+      try {
+        const response = await fetch(url, {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: 'no-store',
+        });
+
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          lastError = data.message || lastError;
+          continue;
+        }
+
+        const users = normalizeArray(data);
+        return users.filter(isDeliveryRole);
+      } catch (error) {
+        lastError = error.message || lastError;
+      }
+    }
+
+    return thunkAPI.rejectWithValue(lastError);
+  }
+);
 // -----------------------------
 // Save order offline (no network)
 // -----------------------------
@@ -360,7 +412,16 @@ export const markOrderAsPaid = createAsyncThunk(
 );
 export const fetchPOSOrders = createAsyncThunk(
   'orders/fetchPOSOrders',
-  async ({ mode = 'latest', phone = '', from = '', to = '' }, thunkAPI) => {
+  async ({
+    mode = 'latest',
+    phone = '',
+    customerNumber = '',
+    from = '',
+    to = '',
+    date = '',
+    posUser = '',
+    location = '',
+  } = {}, thunkAPI) => {
     try {
       const token = thunkAPI.getState().posUser?.userInfo?.token || getStoredToken();
 
@@ -368,8 +429,12 @@ export const fetchPOSOrders = createAsyncThunk(
       params.set('mode', mode);
 
       if (phone) params.set('phone', phone);
+      if (customerNumber) params.set('customerNumber', customerNumber);
       if (from) params.set('from', from);
       if (to) params.set('to', to);
+      if (date) params.set('date', date);
+      if (posUser) params.set('posUser', posUser);
+      if (location) params.set('location', location);
 
       const url = `${API_BASE_URL}/orders/pos/orders/search?${params.toString()}`;
       const requestOptions = {
@@ -428,6 +493,77 @@ export const fetchPOSOrderDetails = createAsyncThunk(
   }
 );
 
+export const updatePOSOrder = createAsyncThunk(
+  'orders/updatePOSOrder',
+  async ({ id, orderItems, remarks = '' }, thunkAPI) => {
+    try {
+      const token = thunkAPI.getState().posUser?.userInfo?.token || getStoredToken();
+
+      const response = await fetch(`${API_BASE_URL}/orders/pos/${id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ orderItems, remarks }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.message || 'Failed to update order');
+      return data;
+    } catch (error) {
+      return thunkAPI.rejectWithValue(error.message || 'Failed to update order');
+    }
+  }
+);
+
+export const deletePOSOrderItem = createAsyncThunk(
+  'orders/deletePOSOrderItem',
+  async ({ orderId, itemId, remarks = '' }, thunkAPI) => {
+    try {
+      const token = thunkAPI.getState().posUser?.userInfo?.token || getStoredToken();
+
+      const response = await fetch(
+        `${API_BASE_URL}/orders/pos/${orderId}/items/${itemId}`,
+        {
+          method: 'DELETE',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ remarks }),
+        }
+      );
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.message || 'Failed to delete item');
+      return { orderId, itemId, order: data };
+    } catch (error) {
+      return thunkAPI.rejectWithValue(error.message || 'Failed to delete item');
+    }
+  }
+);
+
+export const deletePOSOrder = createAsyncThunk(
+  'orders/deletePOSOrder',
+  async (id, thunkAPI) => {
+    try {
+      const token = thunkAPI.getState().posUser?.userInfo?.token || getStoredToken();
+
+      const response = await fetch(`${API_BASE_URL}/orders/pos/${id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.message || 'Failed to delete order');
+      return { id, data };
+    } catch (error) {
+      return thunkAPI.rejectWithValue(error.message || 'Failed to delete order');
+    }
+  }
+);
+
 // -----------------------------
 // Slice
 // -----------------------------
@@ -451,9 +587,14 @@ const orderSlice = createSlice({
       posOrdersList: [],
   posOrdersListLoading: false,
   posOrdersListError: '',
-  posOrderDetails: null,
+    posOrderDetails: null,
   posOrderDetailsLoading: false,
   posOrderDetailsError: '',
+  posOrderMutationLoading: false,
+  posOrderMutationError: '',
+  deliveryPosUsers: [],
+  deliveryPosUsersLoading: false,
+  deliveryPosUsersError: '',
   },
   reducers: {},
   extraReducers: (builder) => {
@@ -606,6 +747,60 @@ const orderSlice = createSlice({
       .addCase(fetchPOSOrderDetails.rejected, (state, action) => {
         state.posOrderDetailsLoading = false;
         state.posOrderDetailsError = action.payload || 'Failed to fetch order details';
+      })
+      .addCase(updatePOSOrder.pending, (state) => {
+        state.posOrderMutationLoading = true;
+        state.posOrderMutationError = '';
+      })
+      .addCase(updatePOSOrder.fulfilled, (state, action) => {
+        state.posOrderMutationLoading = false;
+        state.posOrderDetails = action.payload?.order || action.payload;
+      })
+      .addCase(updatePOSOrder.rejected, (state, action) => {
+        state.posOrderMutationLoading = false;
+        state.posOrderMutationError = action.payload || 'Failed to update order';
+      })
+      .addCase(deletePOSOrderItem.pending, (state) => {
+        state.posOrderMutationLoading = true;
+        state.posOrderMutationError = '';
+      })
+      .addCase(deletePOSOrderItem.fulfilled, (state, action) => {
+        state.posOrderMutationLoading = false;
+        state.posOrderDetails = action.payload?.order?.order || action.payload?.order;
+      })
+      .addCase(deletePOSOrderItem.rejected, (state, action) => {
+        state.posOrderMutationLoading = false;
+        state.posOrderMutationError = action.payload || 'Failed to delete item';
+      })
+      .addCase(deletePOSOrder.pending, (state) => {
+        state.posOrderMutationLoading = true;
+        state.posOrderMutationError = '';
+      })
+      .addCase(deletePOSOrder.fulfilled, (state, action) => {
+        state.posOrderMutationLoading = false;
+        state.posOrdersList = (state.posOrdersList || []).filter(
+          (order) => order._id !== action.payload.id
+        );
+        if (state.posOrderDetails?._id === action.payload.id) {
+          state.posOrderDetails = null;
+        }
+      })
+      .addCase(deletePOSOrder.rejected, (state, action) => {
+        state.posOrderMutationLoading = false;
+        state.posOrderMutationError = action.payload || 'Failed to delete order';
+      })
+      .addCase(fetchDeliveryPosUsers.pending, (state) => {
+        state.deliveryPosUsersLoading = true;
+        state.deliveryPosUsersError = '';
+      })
+      .addCase(fetchDeliveryPosUsers.fulfilled, (state, action) => {
+        state.deliveryPosUsersLoading = false;
+        state.deliveryPosUsers = action.payload || [];
+      })
+      .addCase(fetchDeliveryPosUsers.rejected, (state, action) => {
+        state.deliveryPosUsersLoading = false;
+        state.deliveryPosUsersError =
+          action.payload || 'Failed to fetch delivery users';
       });
   },
 });

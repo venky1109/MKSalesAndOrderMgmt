@@ -3,10 +3,15 @@ import BillingSection from "../components/BillingSection";
 import ProductList from "../components/ProductList";
 import POSActionsBar from "../components/POSActionBar";
 import Footer from "../components/Footer";
+import StockManagerLayout from "../components/StockManagerLayout";
+import { useLocation } from "react-router-dom";
 
 function POS() {
-  return (
-    <div className="h-[100dvh] w-screen max-w-full overflow-hidden bg-[#efefef] p-1 md:p-2">
+  const location = useLocation();
+  const isInventoryView = new URLSearchParams(location.search).get("from") === "inventory";
+
+  const content = (
+    <div className={`${isInventoryView ? "h-full w-full" : "h-[100dvh] w-screen"} max-w-full overflow-hidden bg-[#efefef] p-1 md:p-2`}>
       <POSLayout>
         <main
           className="
@@ -55,6 +60,12 @@ function POS() {
       </POSLayout>
     </div>
   );
+
+  if (isInventoryView) {
+    return <StockManagerLayout>{content}</StockManagerLayout>;
+  }
+
+  return content;
 }
 
 export default POS;
