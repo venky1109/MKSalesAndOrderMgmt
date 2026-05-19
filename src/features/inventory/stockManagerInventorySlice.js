@@ -64,6 +64,24 @@ export const fetchStockTransactions = createAsyncThunk(
   }
 );
 
+export const fetchTransitProducts = createAsyncThunk(
+  'stockManagerInventory/fetchTransitProducts',
+  async (_, thunkAPI) => {
+    try {
+      const { data } = await axios.get(
+        apiUrl('/inventory-pg/transit-products'),
+        authConfig(thunkAPI.getState)
+      );
+
+      return data;
+    } catch (error) {
+      return thunkAPI.rejectWithValue(
+        error.response?.data?.message || error.message
+      );
+    }
+  }
+);
+
 /* =========================
    CATALOG
 ========================= */
@@ -523,6 +541,7 @@ const initialState = {
   products: [], // keep separate for old purchase/product usage
   inventoryProducts: [], // inventory.inventory_products rows only
   transactions: [],
+  transitProducts: [],
   purchaseOrders: [],
 
   catalogProducts: [],
@@ -538,6 +557,8 @@ const initialState = {
   inventoryDispatchLoading: false,
   inventoryDispatchError: null,
   inventoryDispatchSuccess: null,
+  transitLoading: false,
+  transitError: null,
 
   loading: false,
   receiving: false,
@@ -558,6 +579,7 @@ const stockManagerInventorySlice = createSlice({
       state.successMessage = null;
       state.inventoryDispatchError = null;
       state.inventoryDispatchSuccess = null;
+      state.transitError = null;
     },
   },
   extraReducers: (builder) => {
@@ -583,6 +605,21 @@ const stockManagerInventorySlice = createSlice({
       /* STOCK TRANSACTIONS */
       .addCase(fetchStockTransactions.fulfilled, (state, action) => {
         state.transactions = normalizeArray(action.payload);
+      })
+
+      /* TRANSIT PRODUCTS */
+      .addCase(fetchTransitProducts.pending, (state) => {
+        state.transitLoading = true;
+        state.transitError = null;
+      })
+      .addCase(fetchTransitProducts.fulfilled, (state, action) => {
+        state.transitLoading = false;
+        state.transitProducts = normalizeArray(action.payload);
+      })
+      .addCase(fetchTransitProducts.rejected, (state, action) => {
+        state.transitLoading = false;
+        state.transitError =
+          action.payload || 'Failed to fetch transit products';
       })
 
       /* CATALOG */

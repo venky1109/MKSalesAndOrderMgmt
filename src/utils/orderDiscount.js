@@ -100,3 +100,41 @@ export const getOrderDiscountSummary = (order = {}, totalBeforeDiscount) => {
     clamped: discountPercentage > MAX_ORDER_DISCOUNT_PERCENT,
   };
 };
+
+export const normalizeOrderDiscountPayload = (payload = {}, totalBeforeDiscount) => {
+  const hasDiscountFields =
+    Object.prototype.hasOwnProperty.call(payload, 'discountPercentage') ||
+    Object.prototype.hasOwnProperty.call(payload, 'discountAmount');
+
+  if (!hasDiscountFields) {
+    return payload;
+  }
+
+  const discountPercentage = Number(payload.discountPercentage || 0);
+
+  if (!discountPercentage) {
+    return {
+      ...payload,
+      discountPercentage: 0,
+      discountAmount: 0,
+    };
+  }
+
+  const payloadItemsTotal = getOrderItemsTotal(payload.orderItems || payload.items || []);
+  const explicitBaseTotal =
+    totalBeforeDiscount ??
+    payload.itemsPrice ??
+    (payloadItemsTotal || undefined);
+  const baseTotal =
+    explicitBaseTotal ||
+    Number(payload.totalPrice || 0) + Number(payload.discountAmount || 0);
+  const discount = calculateOrderDiscount(baseTotal, discountPercentage);
+
+  return {
+    ...payload,
+    itemsPrice: discount.orderTotal,
+    discountPercentage: discount.discountPercentage,
+    discountAmount: discount.discountAmount,
+    totalPrice: discount.totalAfterDiscount,
+  };
+};

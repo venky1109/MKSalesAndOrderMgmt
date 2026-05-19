@@ -186,7 +186,8 @@ const OrderManagementPage = () => {
   const products = useSelector((state) => state.products?.all || []);
 
   const [filters, setFilters] = useState({
-    date: '',
+    fromDate: '',
+    toDate: '',
     customerNumber: '',
     posUser: '',
     location: '',
@@ -232,17 +233,35 @@ const OrderManagementPage = () => {
   );
 
   const loadOrders = useCallback(async () => {
+    const hasDateRange = filters.fromDate || filters.toDate;
+    const hasOtherFilters =
+      filters.customerNumber.trim() || filters.posUser.trim() || filters.location.trim();
+
+    if (hasDateRange && (!filters.fromDate || !filters.toDate)) {
+      alert('Select both From Date and To Date.');
+      return;
+    }
+
+    const mode = hasDateRange ? 'custom' : hasOtherFilters ? 'filter' : 'today';
+
     await dispatch(
       fetchPOSOrders({
-        mode: 'filter',
-        date: filters.date,
-        customerNumber: filters.customerNumber,
-        phone: filters.customerNumber,
-        posUser: filters.posUser,
-        location: filters.location,
+        mode,
+        from: filters.fromDate,
+        to: filters.toDate,
+        customerNumber: filters.customerNumber.trim(),
+        phone: filters.customerNumber.trim(),
+        posUser: filters.posUser.trim(),
+        location: filters.location.trim(),
       })
     ).unwrap();
   }, [dispatch, filters]);
+
+  const ordersHeading = useMemo(() => {
+    if (filters.fromDate || filters.toDate) return 'Orders by date range';
+    if (filters.customerNumber || filters.posUser || filters.location) return 'Filtered orders';
+    return "Today's orders";
+  }, [filters]);
 
   useEffect(() => {
     dispatch(fetchPOSOrders({ mode: 'today' }));
@@ -379,16 +398,22 @@ const OrderManagementPage = () => {
             <div>
               <h1 className="text-2xl font-bold text-gray-900">Order Management</h1>
               <p className="text-sm text-gray-500">
-                Search, edit items, record remarks, and remove orders.
+                Starts with current-day orders. Use filters when you need older orders.
               </p>
             </div>
 
-            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-[150px_170px_170px_170px_auto]">
+            <div className="grid items-end gap-2 sm:grid-cols-2 xl:grid-cols-[150px_150px_170px_170px_170px_auto]">
               <FilterInput
-                label="Date"
+                label="From date"
                 type="date"
-                value={filters.date}
-                onChange={(value) => setFilters((prev) => ({ ...prev, date: value }))}
+                value={filters.fromDate}
+                onChange={(value) => setFilters((prev) => ({ ...prev, fromDate: value }))}
+              />
+              <FilterInput
+                label="To date"
+                type="date"
+                value={filters.toDate}
+                onChange={(value) => setFilters((prev) => ({ ...prev, toDate: value }))}
               />
               <FilterInput
                 label="Customer number"
@@ -412,7 +437,7 @@ const OrderManagementPage = () => {
               <button
                 type="button"
                 onClick={loadOrders}
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-blue-700 px-4 text-sm font-semibold text-white hover:bg-blue-800"
+                className="inline-flex h-10 items-center justify-center gap-2 self-end rounded-lg bg-blue-700 px-4 text-sm font-semibold text-white hover:bg-blue-800"
               >
                 <Search size={16} />
                 Search
@@ -430,7 +455,12 @@ const OrderManagementPage = () => {
         <section className="grid gap-4 xl:grid-cols-[420px_1fr]">
           <div className="rounded-lg border border-gray-200 bg-white shadow-sm">
             <div className="flex items-center justify-between border-b px-4 py-3">
-              <h2 className="font-bold text-gray-900">Orders</h2>
+              <div>
+                <h2 className="font-bold text-gray-900">{ordersHeading}</h2>
+                <p className="text-xs text-gray-500">
+                  Empty filters load current-day orders only.
+                </p>
+              </div>
               <button
                 type="button"
                 onClick={loadOrders}

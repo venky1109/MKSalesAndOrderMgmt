@@ -303,6 +303,7 @@ function CreateOrderButton() {
         financialId: item.financialId,
       })),
 
+      itemsPrice: calculatedDiscount.orderTotal,
       totalPrice: payableTotal,
       discountPercentage,
       discountAmount,

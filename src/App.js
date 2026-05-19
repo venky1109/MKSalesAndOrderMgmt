@@ -16,15 +16,18 @@ import { useDispatch, useSelector } from 'react-redux';
 import PaymentSuccessPage from './pages/PaymentSuccessPage';
 import PaymentFailurePage from './pages/PaymentFailurePage';
 import StockManagerInventoryPage from './pages/StockManagerInventoryPage';
+import StockPage from './pages/StockPage';
 import CreatePurchaseOrderPage  from './pages/CreatePurchaseOrderPage';
 import StockManagerCatalogPage from './pages/StockManagerCatalogPage';
 import DispatchPage from "./pages/DispatchPage";
 import PrinterSettingsPage from "./pages/PrinterSettingsPage";  
 import AccountsPage from "./pages/AccountsPage";
+import AccountsBillsPage from "./pages/AccountsBillsPage";
 import TopProductsReportPage from "./pages/TopProductsReportPage";
 import InventoryDashboardPage from "./pages/InventoryDashboardPage";
 import PwaLinkPage from "./pages/PwaLinkPage";
 import OrderManagementPage from "./pages/OrderManagementPage";
+import ApplicationMigrationHelperPage from "./pages/ApplicationMigrationHelperPage";
 import PwaInstallPrompt from "./components/PwaInstallPrompt";
 
 const ALL_MANAGER_ROLES = ["ADMIN", "STOCKMANAGER", "DIRECTOR", "SUPERVISOR"];
@@ -127,6 +130,14 @@ function App() {
     </ProtectedRoute>
   }
 />
+          <Route
+  path="/ecosystem/stock"
+  element={
+    <ProtectedRoute role={ALL_MANAGER_ROLES}>
+      <StockPage />
+    </ProtectedRoute>
+  }
+/>
           <Route path="/payment/success" element={<PaymentSuccessPage />} />
 <Route path="/payment/failure" element={<PaymentFailurePage />} />
 <Route path="/payment/invoice-share" element={<PaymentInvoiceSharePage />} />
@@ -155,6 +166,14 @@ function App() {
   }
 />
 <Route
+  path="/accounts/bills"
+  element={
+    <ProtectedRoute role={POS_ROLES}>
+      <AccountsBillsPage />
+    </ProtectedRoute>
+  }
+/>
+<Route
   path="/reports/top-products"
   element={
     <ProtectedRoute role={POS_ROLES}>
@@ -178,11 +197,20 @@ function App() {
     </ProtectedRoute>
   }
 />
+<Route
+  path="/applications/migration-helper"
+  element={
+    <ProtectedRoute role={ALL_MANAGER_ROLES}>
+      <ApplicationMigrationHelperPage />
+    </ProtectedRoute>
+  }
+/>
 <Route path="/finance" element={<Navigate to="/accounts/finance" replace />} />
 <Route path="/accounts" element={<Navigate to="/accounts/finance" replace />} />
 <Route path="/inventory" element={<Navigate to="/ecosystem" replace />} />
 <Route path="/stock-manager/catalog" element={<Navigate to="/ecosystem/catalog" replace />} />
 <Route path="/stock-manager/purchase-orders/create" element={<Navigate to="/ecosystem/purchase-orders/create" replace />} />
+<Route path="/inventory/stock" element={<Navigate to="/ecosystem/stock" replace />} />
 <Route path="/inventory/dispatch" element={<Navigate to="/ecosystem/dispatch" replace />} />
           {/* Catch-all fallback */}
           <Route path="*" element={<Navigate to="/login" />} />

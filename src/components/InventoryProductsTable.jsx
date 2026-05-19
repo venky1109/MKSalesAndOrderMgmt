@@ -1,6 +1,12 @@
 import React, { useMemo, useState } from 'react';
 
-const InventoryProductsTable = ({ products = [], loading }) => {
+const InventoryProductsTable = ({
+  products = [],
+  loading,
+  warehouses = [],
+  selectedWarehouseId = '',
+  onWarehouseChange,
+}) => {
   const [search, setSearch] = useState('');
 
   const filteredProducts = useMemo(() => {
@@ -21,12 +27,29 @@ const InventoryProductsTable = ({ products = [], loading }) => {
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
         <h2 className="font-bold text-lg">Inventory Products</h2>
 
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search product / SKU / barcode"
-          className="border rounded-lg px-3 py-2 w-full md:w-80"
-        />
+        <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row">
+          {onWarehouseChange ? (
+            <select
+              value={selectedWarehouseId}
+              onChange={(e) => onWarehouseChange(e.target.value)}
+              className="w-full rounded-lg border px-3 py-2 md:w-56"
+            >
+              <option value="">All inventory</option>
+              {warehouses.map((warehouse) => (
+                <option key={warehouse.id} value={warehouse.id}>
+                  {warehouse.warehouse_name || warehouse.warehouse_code || warehouse.id}
+                </option>
+              ))}
+            </select>
+          ) : null}
+
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search product / SKU / barcode"
+            className="border rounded-lg px-3 py-2 w-full md:w-80"
+          />
+        </div>
       </div>
 
       {loading ? (

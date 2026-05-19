@@ -4,6 +4,7 @@ import { updateProductStockOnly } from '../products/productSlice';
 import { enqueueOrder, peekOrdersQueue, setOrdersQueue } from '../../utils/offlineStorage';
 import { fetchCustomerByPhone, createCustomer } from '../customers/customerSlice'; 
 import { API_BASE_URL, getNetworkFailureMessage } from '../../utils/apiConfig';
+import { normalizeOrderDiscountPayload } from '../../utils/orderDiscount';
 const generateMKOrderId = () => Number(`${Date.now()}${Math.floor(Math.random() * 90 + 10)}`);
 
 const getStoredToken = () => {
@@ -76,11 +77,13 @@ export const queueOrder = createAsyncThunk(
   async ({ payload, token, cartItems, phone, customerMeta }, thunkAPI) => {
     const mkOrderId = payload?.MK_order_id ?? generateMKOrderId();
 
+    const normalizedPayload = normalizeOrderDiscountPayload(payload);
+
     const localOrder = {
       _localId: `OFF-${mkOrderId}`,
       queuedAt: new Date().toISOString(),
       payload: {
-        ...payload,
+        ...normalizedPayload,
         MK_order_id: mkOrderId,
       },
       cartItems: cartItems || [],
@@ -100,6 +103,8 @@ export const createOrder = createAsyncThunk(
   "orders/create",
   async ({ payload, token, cartItems }, thunkAPI) => {
     try {
+      const normalizedPayload = normalizeOrderDiscountPayload(payload);
+
       const response = await fetch(
         `${process.env.REACT_APP_API_BASE_URL}/orders/pos`,
         {
@@ -108,7 +113,7 @@ export const createOrder = createAsyncThunk(
             "Content-Type": "application/json",
             Authorization: `Bearer ${token}`,
           },
-          body: JSON.stringify(payload),
+          body: JSON.stringify(normalizedPayload),
         }
       );
 
@@ -505,13 +510,15 @@ export const updatePOSOrder = createAsyncThunk(
       if (discountAmount !== undefined) payload.discountAmount = discountAmount;
       if (totalPrice !== undefined) payload.totalPrice = totalPrice;
 
+      const normalizedPayload = normalizeOrderDiscountPayload(payload);
+
       const response = await fetch(`${API_BASE_URL}/orders/pos/${id}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(normalizedPayload),
       });
 
       const data = await response.json().catch(() => ({}));

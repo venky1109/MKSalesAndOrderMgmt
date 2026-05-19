@@ -4,6 +4,7 @@ import { useDispatch, useSelector } from 'react-redux';
 import {
   CircleDollarSign,
   ClipboardList,
+  ReceiptText,
   LogOut,
   LayoutDashboard,
   Package,
@@ -13,6 +14,8 @@ import {
   Truck,
   UserCircle,
   ExternalLink,
+  PackagePlus,
+  Warehouse,
 } from 'lucide-react';
 import { logout } from '../features/auth/posUserSlice';
 import logo from '../assests/ManaKiranaLogo1024x1024.png';
@@ -47,6 +50,7 @@ const navSections = [
         label: 'Purchase Orders',
         icon: ClipboardList,
       },
+      { to: '/ecosystem/stock', label: 'Stock', icon: Warehouse },
       { to: '/ecosystem/dispatch', label: 'Dispatch', icon: Truck },
     ],
   },
@@ -57,6 +61,11 @@ const navSections = [
         to: { pathname: '/accounts/finance', search: '?from=inventory' },
         label: 'Finance',
         icon: CircleDollarSign,
+      },
+      {
+        to: '/accounts/bills',
+        label: 'Bills & Expenses',
+        icon: ReceiptText,
       },
     ],
   },
@@ -72,6 +81,7 @@ const navSections = [
       { to: '/packing', label: 'Packing', icon: Package },
       { to: '/dispatch', label: 'Dispatch', icon: Truck },
       { to: '/delivery', label: 'Delivery', icon: Truck },
+      { to: '/applications/migration-helper', label: 'Migration Helper', icon: PackagePlus },
       { to: '/applications/pwa', label: 'PWA', icon: ExternalLink },
     ],
   },
@@ -118,7 +128,7 @@ const StockManagerLayout = ({ children }) => {
             <img
               src={logo}
               alt="ManaKirana"
-              className="h-9 w-9 rounded-full object-cover"
+              className="h-11 w-11 rounded-full object-cover"
               draggable="false"
             />
             <div>

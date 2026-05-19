@@ -166,7 +166,7 @@ export const updateProduct = createAsyncThunk(
 
 export const updateProductStockOnly = createAsyncThunk(
   'products/updateStockOnly',
-  async ({ productID, brandID, financialID, newQuantity, token }, thunkAPI) => {
+  async ({ productID, brandID, financialID, newQuantity, token, ...updates }, thunkAPI) => {
     // console.log(productID);
     // console.log(brandID);
     // console.log(financialID);
@@ -178,7 +178,7 @@ export const updateProductStockOnly = createAsyncThunk(
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ brandID, financialID, newQuantity }),
+      body: JSON.stringify({ brandID, financialID, newQuantity, ...updates }),
     });
 
     const data = await response.json();

@@ -99,6 +99,7 @@ const catalogSections = [
     title: 'Stakeholders',
     entity: 'stakeholders',
     fields: [
+      { name: 'stackholder_code', label: 'Stakeholder Code', required: true },
       { name: 'stakeholder_name', label: 'Stakeholder Name', required: true },
       { name: 'stakeholder_type', label: 'Type' },
       { name: 'phone', label: 'Phone' },

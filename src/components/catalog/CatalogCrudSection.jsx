@@ -25,7 +25,7 @@ const entityCodeConfig = {
   brands: { field: 'brand_code', prefix: 'MKB' },
   categories: { field: 'category_code', prefix: 'MKC' },
   outlets: { field: 'unit_code', prefix: 'MKO' },
-  Stakeholders: { field: 'unit_code', prefix: 'MKS' },
+  stakeholders: { field: 'stackholder_code', prefix: 'MKS' },
   units: { field: 'unit_code', prefix: 'MKU' },
   employees: { field: 'emp_code', prefix: 'MKE' },
 };
