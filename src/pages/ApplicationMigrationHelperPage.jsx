@@ -2732,6 +2732,15 @@ const ApplicationMigrationHelperPage = () => {
         selectedBarcode.category ||
         selectedBarcode.category_name ||
         "";
+      const selectedBarcodeProductName =
+        getProductName(selectedBarcode) ||
+        selectedBarcode.product_name_eng ||
+        selectedBarcode.product_name ||
+        "";
+      const selectedVendorBarcode = selectedBarcode.barcode || "";
+      const hasSelectedNameMismatch =
+        Boolean(selectedBarcode.product_id && selectedBarcodeProductName && productName) &&
+        !sameNormalizedText(selectedBarcodeProductName, productName);
       const missingCatalogFields = [
         !productName ? "product name" : "",
         !brandName ? "brand" : "",
@@ -2780,7 +2789,19 @@ const ApplicationMigrationHelperPage = () => {
         categoryName,
         inventorySearch
       );
+      if (hasSelectedNameMismatch) {
+        markMigrationStage(
+          "inventory",
+          "catalog",
+          "running",
+          `Selected barcode belongs to "${selectedBarcodeProductName}". Creating catalog path for "${productName}" instead.`
+        );
+      }
       setStatus("Checking catalog records for inventory migration.");
+      const vendorBarcodeForBase =
+        hasSelectedNameMismatch && sameNormalizedText(inventoryForm.vendor_barcode, selectedVendorBarcode)
+          ? ""
+          : inventoryForm.vendor_barcode || selectedVendorBarcode;
       const base = await ensureSupplyChainBase({
         productName,
         productTeluguName:
@@ -2795,11 +2816,10 @@ const ApplicationMigrationHelperPage = () => {
         gstRate: taxFallback.gst_rate,
         pack,
         mkBarcode: "",
-        vendorBarcode: inventoryForm.vendor_barcode || selectedBarcode.barcode,
-        existingProductId: pickId(
-          selectedBarcode.product_id,
-          selectedBarcode.catalogProductId
-        ),
+        vendorBarcode: vendorBarcodeForBase,
+        existingProductId: hasSelectedNameMismatch
+          ? null
+          : pickId(selectedBarcode.product_id, selectedBarcode.catalogProductId),
         existingBrandId: pickId(
           selectedBarcode.brand_id,
           selectedBarcode.catalogBrandId
@@ -2861,7 +2881,7 @@ const ApplicationMigrationHelperPage = () => {
               expected_unit_price: migrationPurchaseUnitPrice,
               actual_unit_price: migrationPurchaseUnitPrice,
               product_name: productName,
-              product_code: selectedBarcode.product_code,
+              product_code: hasSelectedNameMismatch ? "" : selectedBarcode.product_code,
               category_name: categoryName,
               brand_name: brandName,
               unit_name: pack.units,
@@ -2902,7 +2922,7 @@ const ApplicationMigrationHelperPage = () => {
           sku_id:
             inventoryForm.sku_id ||
             makeSkuId({
-              productCode: selectedBarcode.product_code || productName,
+              productCode: hasSelectedNameMismatch ? productName : selectedBarcode.product_code || productName,
               batchId: inventoryForm.batch_id,
               expDate: inventoryForm.exp_date,
             }),
