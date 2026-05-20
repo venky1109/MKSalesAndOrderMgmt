@@ -34,6 +34,7 @@ import {
   fetchInventoryDispatchOrders,
   fetchInventoryProducts,
   fetchPurchaseOrders,
+  fetchStockTransactions,
   receiveDispatchToOutlet,
   updateInventoryDispatchStatus,
 } from "../features/inventory/stockManagerInventorySlice";
@@ -429,6 +430,78 @@ const getStepId = (step) => pickId(step?.id, step?._id, step?.step_id, step?.ste
 const getStepStatus = (step) =>
   String(step?.status || step?.step_status || step?.state || "").toLowerCase();
 
+const getRollbackRows = (payload) => [
+  ...asArray(payload?.affected_products),
+  ...asArray(payload?.stock_before_after),
+];
+
+const getRollbackPreviewProblems = (payload) => {
+  const problems = [];
+
+  getRollbackRows(payload).forEach((row) => {
+    const productName = row?.product_name || row?.product_id || row?.inventory_product_id || "product";
+    const stockAfter = Number(row?.stock_after);
+    const purchaseQtyAfter = Number(row?.purchase_qty_after);
+
+    if (Number.isFinite(stockAfter) && stockAfter < 0) {
+      problems.push(`${productName}: stock after rollback becomes ${stockAfter}.`);
+    }
+
+    if (Number.isFinite(purchaseQtyAfter) && purchaseQtyAfter < 0) {
+      problems.push(`${productName}: purchase quantity after rollback becomes ${purchaseQtyAfter}.`);
+    }
+  });
+
+  if (payload?.can_rollback === false) {
+    problems.push("Backend marked this rollback as not allowed.");
+  }
+
+  return problems;
+};
+
+const getTransactionId = (transaction) =>
+  pickId(
+    transaction?.id,
+    transaction?._id,
+    transaction?.transaction_id,
+    transaction?.stock_transaction_id,
+    transaction?.stockTransactionId
+  );
+
+const getTransactionProductId = (transaction) =>
+  pickId(
+    transaction?.product_id,
+    transaction?.productId,
+    transaction?.catalog_product_id,
+    transaction?.catalogProductId,
+    transaction?.inventory_product_id,
+    transaction?.inventoryProductId
+  );
+
+const getTransactionProductBarcodeId = (transaction) =>
+  pickId(
+    transaction?.product_barcode_id,
+    transaction?.productBarcodeId,
+    transaction?.product_barcode_id_fk,
+    transaction?.catalog_product_barcode_id
+  );
+
+const getTransactionRequestId = (transaction) =>
+  pickId(
+    transaction?.request_id,
+    transaction?.requestId,
+    transaction?.migration_request_id,
+    transaction?.migrationRequestId,
+    transaction?.request_tracking_id,
+    transaction?.requestTrackingId,
+    transaction?.tracking_request_id,
+    transaction?.trackingRequestId,
+    transaction?.metadata?.request_id,
+    transaction?.metadata?.requestTrackingId,
+    transaction?.rollback_context?.request_id,
+    transaction?.request?.id
+  );
+
 const isFailedStatus = (status) =>
   ["failed", "error", "retry_failed"].includes(String(status || "").toLowerCase());
 
@@ -594,6 +667,9 @@ const ApplicationMigrationHelperPage = () => {
     (state) => state.catalogCrud || {}
   );
   const productLoading = useSelector((state) => state.products?.loading);
+  const stockTransactions = useSelector((state) =>
+    asArray(state.stockManagerInventory?.transactions)
+  );
   const productsList = useSelector((state) => {
     const all = state.products?.all;
     if (Array.isArray(all)) return all;
@@ -681,6 +757,27 @@ const ApplicationMigrationHelperPage = () => {
   const [trackingMessage, setTrackingMessage] = useState("");
   const [reinitiatingStepId, setReinitiatingStepId] = useState("");
   const [resumingStepId, setResumingStepId] = useState("");
+  const [rollbackBusy, setRollbackBusy] = useState(false);
+  const [rollbackPreview, setRollbackPreview] = useState(null);
+  const [rollbackMessage, setRollbackMessage] = useState("");
+  const [rollbackProductSearch, setRollbackProductSearch] = useState("");
+  const [rollbackProductLookupOpen, setRollbackProductLookupOpen] = useState(false);
+  const [rollbackTransactionLookupOpen, setRollbackTransactionLookupOpen] = useState(false);
+  const [rollbackSelectedProduct, setRollbackSelectedProduct] = useState(null);
+  const [rollbackSelectedTransaction, setRollbackSelectedTransaction] = useState(null);
+  const [rollbackTransactionsLoading, setRollbackTransactionsLoading] = useState(false);
+  const [rollbackForm, setRollbackForm] = useState({
+    request_id: "",
+    transaction_id: "",
+    product_id: "",
+    product_barcode_id: "",
+    mk_barcode: "",
+    outlet_id: "",
+    warehouse_id: "",
+    rollback_quantity: "",
+    rollback_scope: "single_transaction",
+    reason: "Rollback incorrect product migration",
+  });
   const [migrationStages, setMigrationStages] = useState({
     outlet: createStageState("outlet"),
     inventory: createStageState("inventory"),
@@ -696,7 +793,10 @@ const ApplicationMigrationHelperPage = () => {
     dispatch(fetchCatalogEntity("outlets"));
     dispatch(fetchCatalogEntity("stakeholders"));
     if (token) dispatch(fetchAllProductsFresh({ token }));
-    if (token) dispatch(fetchInventoryProducts());
+    if (token) {
+      dispatch(fetchInventoryProducts());
+      dispatch(fetchStockTransactions());
+    }
   }, [dispatch, token]);
 
   const catalogProducts = useMemo(
@@ -862,6 +962,134 @@ const ApplicationMigrationHelperPage = () => {
       .slice(0, 12);
   }, [catalogBarcodes, inventorySearch]);
 
+  const getRollbackProductOptionText = useCallback((item) =>
+    [
+      item?.product_name_eng,
+      item?.product_name_tel,
+      item?.product_name,
+      item?.name,
+      item?.product_code,
+      item?.brand_name_english,
+      item?.brand,
+      item?.category_name_english,
+      item?.category,
+      item?.mk_barcode,
+      item?.barcode,
+      item?.id,
+      item?._id,
+      item?.product_id,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase(), []);
+
+  const rollbackProductMatches = useMemo(() => {
+    const q = normalizeText(rollbackProductSearch);
+    if (!q || q.length < 2) return [];
+
+    const options = [
+      ...catalogBarcodes.map((item) => ({ ...item, __rollbackSource: "barcode" })),
+      ...catalogProducts.map((item) => ({ ...item, __rollbackSource: "catalog" })),
+      ...productsList.map((item) => ({ ...item, __rollbackSource: "pos" })),
+    ];
+    const seen = new Set();
+
+    return options
+      .filter((item) => getRollbackProductOptionText(item).includes(q))
+      .filter((item) => {
+        const key = [
+          item.__rollbackSource,
+          pickId(item.id, item._id, item.product_id, item.mk_barcode, item.barcode),
+        ].join("-");
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .slice(0, 12);
+  }, [
+    catalogBarcodes,
+    catalogProducts,
+    getRollbackProductOptionText,
+    productsList,
+    rollbackProductSearch,
+  ]);
+
+  const getRollbackTransactionSearchText = useCallback((transaction) => {
+    const productId = getTransactionProductId(transaction);
+    const productBarcodeId = getTransactionProductBarcodeId(transaction);
+    const barcodeMatch = catalogBarcodes.find(
+      (item) =>
+        String(item.id) === String(productBarcodeId) ||
+        String(item.product_id) === String(productId)
+    );
+
+    return [
+      getTransactionId(transaction),
+      getTransactionRequestId(transaction),
+      productId,
+      productBarcodeId,
+      transaction?.product_name,
+      transaction?.product_name_eng,
+      transaction?.product_code,
+      transaction?.mk_barcode,
+      transaction?.barcode,
+      transaction?.ref_type,
+      transaction?.reference_type,
+      transaction?.source,
+      transaction?.destination,
+      barcodeMatch?.product_name_eng,
+      barcodeMatch?.product_code,
+      barcodeMatch?.mk_barcode,
+      barcodeMatch?.barcode,
+      barcodeMatch?.brand_name_english,
+      barcodeMatch?.category_name_english,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+  }, [catalogBarcodes]);
+
+  const rollbackTransactionMatches = useMemo(() => {
+    const productId =
+      rollbackForm.product_id || getTransactionProductId(rollbackSelectedProduct);
+    const productBarcodeId =
+      rollbackForm.product_barcode_id || getTransactionProductBarcodeId(rollbackSelectedProduct);
+    const barcode = normalizeText(rollbackForm.mk_barcode || rollbackProductSearch);
+    const q = normalizeText(rollbackProductSearch);
+    const transactionQuery = normalizeText(rollbackForm.transaction_id);
+
+    return stockTransactions
+      .filter((transaction) => {
+        const txProductId = getTransactionProductId(transaction);
+        const txProductBarcodeId = getTransactionProductBarcodeId(transaction);
+        const txText = getRollbackTransactionSearchText(transaction);
+
+        if (productBarcodeId && String(txProductBarcodeId) === String(productBarcodeId)) {
+          return true;
+        }
+        if (productId && String(txProductId) === String(productId)) {
+          return true;
+        }
+        if (barcode && barcode.length >= 2 && txText.includes(barcode)) {
+          return true;
+        }
+        if (transactionQuery && transactionQuery.length >= 2 && txText.includes(transactionQuery)) {
+          return true;
+        }
+        return q.length >= 2 && txText.includes(q);
+      })
+      .slice(0, 20);
+  }, [
+    getRollbackTransactionSearchText,
+    rollbackForm.mk_barcode,
+    rollbackForm.product_barcode_id,
+    rollbackForm.product_id,
+    rollbackForm.transaction_id,
+    rollbackProductSearch,
+    rollbackSelectedProduct,
+    stockTransactions,
+  ]);
+
   useEffect(() => {
     const q = inventorySearch.trim();
 
@@ -963,7 +1191,11 @@ const ApplicationMigrationHelperPage = () => {
       const modeRows =
         migrationMode === "inventory"
           ? allRows.filter((item) => getRequestType(item) === "inventory_migration")
-          : allRows.filter((item) => getRequestType(item) !== "inventory_migration");
+          : migrationMode === "rollback"
+            ? allRows.filter(
+                (item) => getRequestType(item) !== "inventory_dispatch_to_outlet"
+              )
+            : allRows.filter((item) => getRequestType(item) !== "inventory_migration");
       const rows = clientStatusFilter
         ? modeRows.filter((item) => getRequestStatus(item) === clientStatusFilter)
         : modeRows;
@@ -1928,6 +2160,236 @@ const ApplicationMigrationHelperPage = () => {
     setStatus("Legacy product selected. Create catalog/product barcode details before inventory save if needed.");
   };
 
+  const handleRollbackFormChange = (field, value) => {
+    setRollbackForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const refreshRollbackTransactions = async () => {
+    setRollbackTransactionsLoading(true);
+    setRollbackMessage("");
+
+    try {
+      await dispatch(fetchStockTransactions()).unwrap();
+      setRollbackTransactionLookupOpen(true);
+      setRollbackMessage("Transactions refreshed. Choose the matching transaction id.");
+    } catch (error) {
+      setRollbackMessage(error?.message || "Unable to refresh stock transactions.");
+    } finally {
+      setRollbackTransactionsLoading(false);
+    }
+  };
+
+  const selectRollbackProduct = async (product) => {
+    const productId = pickId(product?.product_id, product?.id, product?._id);
+    const productBarcodeId = pickId(product?.product_barcode_id, product?.barcode_id, product?.id);
+    const mkBarcode = pickId(product?.mk_barcode, product?.barcode, getProductBarcodes(product)[0]);
+    const name = pickId(
+      product?.product_name_eng,
+      product?.product_name,
+      product?.name,
+      getProductName(product),
+      product?.product_code
+    );
+
+    setRollbackSelectedProduct(product);
+    setRollbackSelectedTransaction(null);
+    setRollbackProductSearch(name || mkBarcode || productId || "");
+    setRollbackProductLookupOpen(false);
+    setRollbackTransactionLookupOpen(true);
+    setRollbackForm((prev) => ({
+      ...prev,
+      product_id: productId || prev.product_id,
+      product_barcode_id:
+        product?.__rollbackSource === "barcode" ? productBarcodeId || prev.product_barcode_id : prev.product_barcode_id,
+      mk_barcode: mkBarcode || prev.mk_barcode,
+    }));
+    setRollbackMessage("Product selected. Choose the matching transaction id below.");
+    await refreshRollbackTransactions();
+  };
+
+  const selectRollbackTransaction = (transaction) => {
+    const transactionId = getTransactionId(transaction);
+    const requestId = getTransactionRequestId(transaction);
+    const productId = getTransactionProductId(transaction);
+    const productBarcodeId = getTransactionProductBarcodeId(transaction);
+    const quantity = pickId(
+      transaction?.qty_in,
+      transaction?.qty_out,
+      transaction?.quantity,
+      transaction?.no_of_units,
+      transaction?.qty
+    );
+    const mkBarcode = pickId(transaction?.mk_barcode, transaction?.barcode, rollbackForm.mk_barcode);
+
+    setRollbackSelectedTransaction(transaction);
+    setRollbackTransactionLookupOpen(false);
+    setRollbackForm((prev) => ({
+      ...prev,
+      request_id: requestId || prev.request_id,
+      transaction_id: transactionId || prev.transaction_id,
+      product_id: productId || prev.product_id,
+      product_barcode_id: productBarcodeId || prev.product_barcode_id,
+      mk_barcode: mkBarcode || prev.mk_barcode,
+      warehouse_id: pickId(transaction?.warehouse_id, transaction?.source_warehouse_id, prev.warehouse_id) || "",
+      outlet_id: pickId(transaction?.outlet_id, transaction?.destination_outlet_id, prev.outlet_id) || "",
+      rollback_quantity: quantity ? String(quantity) : prev.rollback_quantity,
+    }));
+    setRollbackMessage(
+      requestId
+        ? "Transaction selected. Rollback fields have been filled."
+        : "Transaction selected. Request ID was not available on this transaction row."
+    );
+  };
+
+  const applySelectedTrackingRequestToRollback = () => {
+    const payload = getRequestPayload(trackingSelectedRequest);
+    const firstItem = asArray(payload.items || payload.dispatch_items || payload.products)[0] || {};
+    const next = {
+      request_id: getRequestId(trackingSelectedRequest) || rollbackForm.request_id,
+      transaction_id:
+        pickId(
+          trackingSelectedRequest?.reference_id,
+          payload.transaction_id,
+          payload.stock_transaction_id,
+          payload.dispatch_order_id,
+          firstItem.transaction_id
+        ) || rollbackForm.transaction_id,
+      product_id:
+        pickId(firstItem.product_id, payload.product_id, trackingSelectedRequest?.product_id) ||
+        rollbackForm.product_id,
+      product_barcode_id:
+        pickId(firstItem.product_barcode_id, payload.product_barcode_id) ||
+        rollbackForm.product_barcode_id,
+      mk_barcode:
+        pickId(firstItem.mk_barcode, firstItem.barcode, payload.mk_barcode, payload.barcode) ||
+        rollbackForm.mk_barcode,
+      outlet_id:
+        pickId(payload.outlet_id, trackingSelectedRequest?.outlet_id, outletPostingForm.outlet_id) ||
+        rollbackForm.outlet_id,
+      warehouse_id:
+        pickId(payload.warehouse_id, trackingSelectedRequest?.warehouse_id, outletPostingForm.warehouse_id) ||
+        rollbackForm.warehouse_id,
+      rollback_quantity:
+        pickId(firstItem.quantity, firstItem.no_of_units, payload.quantity, rollbackForm.rollback_quantity) ||
+        "",
+    };
+
+    setRollbackForm((prev) => ({ ...prev, ...next }));
+    setRollbackMessage("Selected migration request details copied into rollback.");
+  };
+
+  const buildRollbackPayload = () => {
+    const quantity = rollbackForm.rollback_quantity
+      ? Number(rollbackForm.rollback_quantity)
+      : null;
+
+    if (!rollbackForm.request_id && !rollbackForm.transaction_id) {
+      throw new Error("Enter a request id or transaction id to rollback.");
+    }
+
+    if (
+      !rollbackForm.product_id &&
+      !rollbackForm.product_barcode_id &&
+      !rollbackForm.mk_barcode
+    ) {
+      throw new Error("Enter product id, product barcode id, or MK barcode.");
+    }
+
+    if (quantity !== null && (!Number.isFinite(quantity) || quantity <= 0)) {
+      throw new Error("Rollback quantity must be greater than zero.");
+    }
+
+    return {
+      request_id: rollbackForm.request_id || null,
+      transaction_id: rollbackForm.transaction_id || null,
+      product_id: rollbackForm.product_id || null,
+      product_barcode_id: rollbackForm.product_barcode_id || null,
+      mk_barcode: rollbackForm.mk_barcode || null,
+      outlet_id: rollbackForm.outlet_id || null,
+      warehouse_id: rollbackForm.warehouse_id || null,
+      rollback_quantity: quantity,
+      rollback_scope: rollbackForm.rollback_scope,
+      reason: rollbackForm.reason || "Product migration rollback",
+    };
+  };
+
+  const requestRollbackApi = async (path, payload) => {
+    const response = await fetch(`${API_BASE_URL}${path}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(payload),
+    });
+    const text = await response.text();
+    const data = text ? JSON.parse(text) : null;
+
+    if (!response.ok) {
+      throw new Error(data?.message || data?.error || `Rollback failed (${response.status})`);
+    }
+
+    return data;
+  };
+
+  const handleRollbackPreview = async () => {
+    setRollbackBusy(true);
+    setRollbackMessage("");
+
+    try {
+      const payload = buildRollbackPayload();
+      const data = await requestRollbackApi("/migration/product-rollback/preview", payload);
+      setRollbackPreview(data);
+      setRollbackMessage("Rollback preview loaded. Check the impact before submitting.");
+    } catch (error) {
+      setRollbackPreview(null);
+      setRollbackMessage(error?.message || "Unable to preview rollback.");
+    } finally {
+      setRollbackBusy(false);
+    }
+  };
+
+  const handleRollbackSubmit = async () => {
+    let payload;
+    const previewProblems = getRollbackPreviewProblems(rollbackPreview);
+
+    if (previewProblems.length > 0) {
+      setRollbackMessage(
+        `Rollback blocked because preview has invalid values: ${previewProblems.join(" ")}`
+      );
+      return;
+    }
+
+    try {
+      payload = buildRollbackPayload();
+    } catch (error) {
+      setRollbackMessage(error?.message || "Rollback details are incomplete.");
+      return;
+    }
+
+    const ok = window.confirm(
+      "Rollback this product migration transaction? This should reverse only the selected product movement."
+    );
+    if (!ok) return;
+
+    setRollbackBusy(true);
+    setRollbackMessage("");
+
+    try {
+      const data = await requestRollbackApi("/migration/product-rollback", payload);
+      setRollbackPreview(data);
+      setRollbackMessage(data?.message || "Product migration rollback completed.");
+      dispatch(fetchInventoryProducts());
+      dispatch(fetchInventoryDispatchOrders());
+      if (token) dispatch(fetchAllProductsFresh({ token }));
+      await loadTrackingRequests({ preserveSelection: false });
+    } catch (error) {
+      setRollbackMessage(error?.message || "Unable to rollback this product migration.");
+    } finally {
+      setRollbackBusy(false);
+    }
+  };
+
   const handleInventorySearchSubmit = async (event) => {
     event.preventDefault();
 
@@ -2530,7 +2992,9 @@ const ApplicationMigrationHelperPage = () => {
                   ?.outlet_name ||
                 outletPostingForm.outlet_id ||
                 "All outlets"
-              : "Inventory migration"}
+              : migrationMode === "rollback"
+                ? "Inventory / product requests"
+                : "Inventory migration"}
           </div>
         </div>
       </div>
@@ -2711,7 +3175,7 @@ const ApplicationMigrationHelperPage = () => {
         <section className="rounded-lg border bg-white p-4 shadow-sm">
           <h1 className="text-xl font-bold text-gray-900">Application Migration Helper</h1>
           <p className="mt-1 text-sm text-gray-500">
-            Move stock into outlet Mongo or migrate scanned catalog barcode items into inventory.
+            Move stock into outlet Mongo, migrate catalog barcode items into inventory, or rollback a selected product transaction.
           </p>
         </section>
 
@@ -2739,6 +3203,18 @@ const ApplicationMigrationHelperPage = () => {
           >
             <Barcode size={17} />
             Inventory Migration
+          </button>
+          <button
+            type="button"
+            onClick={() => setMigrationMode("rollback")}
+            className={`${buttonClass} ${
+              migrationMode === "rollback"
+                ? "bg-blue-600 text-white"
+                : "border bg-white text-gray-700 hover:bg-gray-50"
+            }`}
+          >
+            <RotateCcw size={17} />
+            Product Rollback
           </button>
         </section>
 
@@ -3655,7 +4131,7 @@ const ApplicationMigrationHelperPage = () => {
             ) : null}
           </section>
         </section>
-        ) : (
+        ) : migrationMode === "inventory" ? (
         <section className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(360px,0.9fr)_minmax(460px,1.25fr)]">
           <div className="space-y-4">
             <section className="rounded-lg border bg-white p-4 shadow-sm">
@@ -4155,6 +4631,357 @@ const ApplicationMigrationHelperPage = () => {
               <p className="mt-4 rounded-lg bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-800">
                 {status}
               </p>
+            ) : null}
+          </section>
+        </section>
+        ) : (
+        <section className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(360px,0.85fr)_minmax(460px,1.15fr)]">
+          <div className="space-y-4">
+            {renderTrackingMonitor()}
+
+            <section className="rounded-lg border border-amber-200 bg-amber-50 p-4 shadow-sm">
+              <div className="mb-2 flex items-center gap-2">
+                <AlertTriangle size={18} className="text-amber-700" />
+                <h2 className="font-bold text-gray-900">Rollback Guardrails</h2>
+              </div>
+              <div className="space-y-2 text-sm font-medium text-amber-900">
+                <p>Rollback should be used only for a wrong product, quantity, outlet, or transaction created during migration.</p>
+                <p>Use preview first. Submit only after the affected product and transaction match exactly.</p>
+              </div>
+            </section>
+          </div>
+
+          <section className="rounded-lg border bg-white p-4 shadow-sm">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h2 className="font-bold text-gray-900">Product Rollback For Transaction</h2>
+                <p className="mt-1 text-sm text-gray-500">
+                  Reverse one migrated product movement by stock transaction. Request ID is optional for inventory-only migration.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={applySelectedTrackingRequestToRollback}
+                disabled={!trackingSelectedRequest}
+                className={`${buttonClass} border bg-white text-gray-700 hover:bg-gray-50 disabled:text-gray-300`}
+              >
+                <RotateCcw size={16} />
+                Use Selected Request
+              </button>
+            </div>
+
+            <div className="mb-4 rounded-lg border border-blue-100 bg-blue-50/40 p-3">
+              <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                <label className="relative text-sm font-medium text-gray-700">
+                  Search Product
+                  <input
+                    value={rollbackProductSearch}
+                    onChange={(event) => {
+                      setRollbackProductSearch(event.target.value);
+                      setRollbackProductLookupOpen(true);
+                      setRollbackTransactionLookupOpen(false);
+                    }}
+                    onFocus={() => {
+                      if (rollbackProductMatches.length > 0) setRollbackProductLookupOpen(true);
+                    }}
+                    className={`${fieldClass} mt-1 bg-white`}
+                    placeholder="Type product name, code, or barcode"
+                  />
+                  {rollbackProductLookupOpen && rollbackProductMatches.length > 0 ? (
+                    <div className="absolute z-50 mt-1 max-h-72 w-full overflow-auto rounded-lg border bg-white shadow-lg">
+                      {rollbackProductMatches.map((item) => {
+                        const productId = pickId(item.product_id, item.id, item._id);
+                        const productBarcodeId =
+                          item.__rollbackSource === "barcode"
+                            ? pickId(item.id, item.product_barcode_id)
+                            : pickId(item.product_barcode_id, item.barcode_id);
+                        const title = pickId(
+                          item.product_name_eng,
+                          item.product_name,
+                          item.name,
+                          getProductName(item),
+                          "Product"
+                        );
+                        const subtitle = [
+                          item.product_code,
+                          item.brand_name_english || item.brand,
+                          item.category_name_english || item.category,
+                          item.mk_barcode || item.barcode,
+                        ]
+                          .filter(Boolean)
+                          .join(" | ");
+
+                        return (
+                          <button
+                            key={`${item.__rollbackSource}-${productId || productBarcodeId || title}`}
+                            type="button"
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => selectRollbackProduct(item)}
+                            className="block w-full px-3 py-2 text-left hover:bg-blue-50"
+                          >
+                            <span className="block truncate text-sm font-bold text-gray-900">
+                              {title}
+                            </span>
+                            <span className="mt-0.5 block truncate text-xs text-gray-500">
+                              {subtitle || `Product ID: ${productId || "-"}`}
+                            </span>
+                            <span className="mt-0.5 block text-xs font-semibold text-blue-700">
+                              Product ID: {productId || "-"} | Barcode ID: {productBarcodeId || "-"}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                </label>
+
+                <label className="relative text-sm font-medium text-gray-700">
+                  <span className="flex items-center justify-between gap-2">
+                    Select Transaction ID
+                    <button
+                      type="button"
+                      onClick={refreshRollbackTransactions}
+                      disabled={rollbackTransactionsLoading}
+                      className="inline-flex min-h-7 items-center gap-1 rounded-lg border border-blue-200 bg-white px-2 text-xs font-bold text-blue-700 hover:bg-blue-50 disabled:text-gray-300"
+                    >
+                      <RefreshCw
+                        size={13}
+                        className={rollbackTransactionsLoading ? "animate-spin" : ""}
+                      />
+                      Refresh
+                    </button>
+                  </span>
+                  <input
+                    value={rollbackForm.transaction_id}
+                    onChange={(event) => {
+                      handleRollbackFormChange("transaction_id", event.target.value);
+                      setRollbackTransactionLookupOpen(true);
+                    }}
+                    onFocus={() => {
+                      if (rollbackTransactionMatches.length > 0) {
+                        setRollbackTransactionLookupOpen(true);
+                      }
+                    }}
+                    className={`${fieldClass} mt-1 bg-white`}
+                    placeholder="Choose transaction after product selection"
+                  />
+                  {rollbackTransactionLookupOpen && rollbackTransactionMatches.length > 0 ? (
+                    <div className="absolute z-50 mt-1 max-h-80 w-full overflow-auto rounded-lg border bg-white shadow-lg">
+                      {rollbackTransactionMatches.map((transaction) => {
+                        const transactionId = getTransactionId(transaction);
+                        const productId = getTransactionProductId(transaction);
+                        const productBarcodeId = getTransactionProductBarcodeId(transaction);
+                        const qtyIn = Number(transaction.qty_in || 0);
+                        const qtyOut = Number(transaction.qty_out || 0);
+                        const qtyLabel =
+                          qtyIn > 0 ? `In: ${qtyIn}` : qtyOut > 0 ? `Out: ${qtyOut}` : "Qty: -";
+                        const createdAt = formatTrackingDate(
+                          transaction.created_at || transaction.createdAt || transaction.transaction_date
+                        );
+
+                        return (
+                          <button
+                            key={transactionId || `${productId}-${productBarcodeId}-${createdAt}`}
+                            type="button"
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => selectRollbackTransaction(transaction)}
+                            className="block w-full border-b px-3 py-2 text-left last:border-b-0 hover:bg-blue-50"
+                          >
+                            <span className="flex items-center justify-between gap-2">
+                              <span className="truncate text-sm font-bold text-gray-900">
+                                Tx {transactionId || "-"}
+                              </span>
+                              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-bold uppercase text-slate-700">
+                                {transaction.ref_type || transaction.reference_type || "stock"}
+                              </span>
+                            </span>
+                            <span className="mt-1 block truncate text-xs text-gray-500">
+                              Request: {getTransactionRequestId(transaction) || "-"} | Product: {productId || "-"} | Barcode ID: {productBarcodeId || "-"} | {qtyLabel}
+                            </span>
+                            <span className="mt-0.5 block truncate text-xs text-gray-500">
+                              {transaction.source || "-"} to {transaction.destination || "-"} | {createdAt}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                  {rollbackProductSearch && rollbackTransactionMatches.length === 0 ? (
+                    <span className="mt-1 block text-xs font-semibold text-amber-700">
+                      No local transaction suggestions found for this product. Refresh after a new migration.
+                    </span>
+                  ) : null}
+                </label>
+              </div>
+
+              {rollbackSelectedTransaction ? (
+                <div className="mt-3 grid grid-cols-1 gap-2 rounded-lg border border-white bg-white p-3 text-xs font-semibold text-gray-700 md:grid-cols-3">
+                  <div>Selected Tx: {getTransactionId(rollbackSelectedTransaction) || "-"}</div>
+                  <div>
+                    Product: {getTransactionProductId(rollbackSelectedTransaction) || "-"}
+                  </div>
+                  <div>
+                    Balance: {rollbackSelectedTransaction.balance_qty ?? "-"}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <label className="text-sm font-medium text-gray-700">
+                Migration Request ID
+                <input
+                  value={rollbackForm.request_id}
+                  onChange={(event) => handleRollbackFormChange("request_id", event.target.value)}
+                  className={`${fieldClass} mt-1`}
+                  placeholder="Optional for inventory-only migration"
+                />
+              </label>
+              <label className="text-sm font-medium text-gray-700">
+                Transaction ID
+                <input
+                  value={rollbackForm.transaction_id}
+                  onChange={(event) => handleRollbackFormChange("transaction_id", event.target.value)}
+                  className={`${fieldClass} mt-1`}
+                  placeholder="stock transaction / dispatch / purchase id"
+                />
+              </label>
+              <label className="text-sm font-medium text-gray-700">
+                Product ID
+                <input
+                  value={rollbackForm.product_id}
+                  onChange={(event) => handleRollbackFormChange("product_id", event.target.value)}
+                  className={`${fieldClass} mt-1`}
+                  placeholder="catalog product id"
+                />
+              </label>
+              <label className="text-sm font-medium text-gray-700">
+                Product Barcode ID
+                <input
+                  value={rollbackForm.product_barcode_id}
+                  onChange={(event) => handleRollbackFormChange("product_barcode_id", event.target.value)}
+                  className={`${fieldClass} mt-1`}
+                  placeholder="catalog product_barcode id"
+                />
+              </label>
+              <label className="text-sm font-medium text-gray-700">
+                MK Barcode
+                <input
+                  value={rollbackForm.mk_barcode}
+                  onChange={(event) => handleRollbackFormChange("mk_barcode", event.target.value)}
+                  className={`${fieldClass} mt-1`}
+                  placeholder="Scan or enter barcode"
+                />
+              </label>
+              <label className="text-sm font-medium text-gray-700">
+                Rollback Quantity
+                <input
+                  type="number"
+                  value={rollbackForm.rollback_quantity}
+                  onChange={(event) => handleRollbackFormChange("rollback_quantity", event.target.value)}
+                  className={`${fieldClass} mt-1`}
+                  placeholder="Blank means full transaction quantity"
+                />
+              </label>
+              <label className="text-sm font-medium text-gray-700">
+                Outlet
+                <select
+                  value={rollbackForm.outlet_id}
+                  onChange={(event) => handleRollbackFormChange("outlet_id", event.target.value)}
+                  className={`${fieldClass} mt-1`}
+                >
+                  <option value="">Optional outlet</option>
+                  {outlets.map((outlet) => (
+                    <option key={outlet.id} value={outlet.id}>
+                      {outlet.outlet_name || outlet.unit_code || outlet.id}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-sm font-medium text-gray-700">
+                Warehouse
+                <select
+                  value={rollbackForm.warehouse_id}
+                  onChange={(event) => handleRollbackFormChange("warehouse_id", event.target.value)}
+                  className={`${fieldClass} mt-1`}
+                >
+                  <option value="">Optional warehouse</option>
+                  {warehouses.map((warehouse) => (
+                    <option key={warehouse.id} value={warehouse.id}>
+                      {warehouse.warehouse_name || warehouse.warehouse_code || warehouse.id}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-sm font-medium text-gray-700">
+                Rollback Scope
+                <select
+                  value={rollbackForm.rollback_scope}
+                  onChange={(event) => handleRollbackFormChange("rollback_scope", event.target.value)}
+                  className={`${fieldClass} mt-1`}
+                >
+                  <option value="single_transaction">Only this transaction</option>
+                  <option value="request_product">This product in request</option>
+                  <option value="full_request">Full request</option>
+                </select>
+              </label>
+              <label className="text-sm font-medium text-gray-700 md:col-span-2">
+                Reason
+                <input
+                  value={rollbackForm.reason}
+                  onChange={(event) => handleRollbackFormChange("reason", event.target.value)}
+                  className={`${fieldClass} mt-1`}
+                />
+              </label>
+            </div>
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={handleRollbackPreview}
+                disabled={rollbackBusy}
+                className={`${buttonClass} border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 disabled:text-gray-300`}
+              >
+                <Search size={17} />
+                Preview Impact
+              </button>
+              <button
+                type="button"
+                onClick={handleRollbackSubmit}
+                disabled={rollbackBusy}
+                className={`${buttonClass} bg-red-600 text-white hover:bg-red-700 disabled:bg-gray-300`}
+              >
+                <RotateCcw size={17} />
+                Rollback Product
+              </button>
+            </div>
+
+            {rollbackMessage ? (
+              <p className="mt-4 rounded-lg bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-800">
+                {rollbackMessage}
+              </p>
+            ) : null}
+
+            {rollbackPreview ? (
+              <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-3">
+                {getRollbackPreviewProblems(rollbackPreview).length > 0 ? (
+                  <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-800">
+                    <div className="mb-1 flex items-center gap-2">
+                      <AlertTriangle size={16} />
+                      Rollback blocked until backend preview values are corrected.
+                    </div>
+                    {getRollbackPreviewProblems(rollbackPreview).map((problem) => (
+                      <div key={problem}>{problem}</div>
+                    ))}
+                  </div>
+                ) : null}
+                <div className="mb-2 text-xs font-bold uppercase text-gray-500">
+                  Backend Response / Preview
+                </div>
+                <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words text-xs text-gray-800">
+                  {JSON.stringify(rollbackPreview, null, 2)}
+                </pre>
+              </div>
             ) : null}
           </section>
         </section>
