@@ -1386,7 +1386,7 @@ const ApplicationMigrationHelperPage = () => {
       }
 
       const inventoryUnitPrice = Number(outletPostingForm.unit_price || financialForm.price || 0);
-      const migrationPurchaseUnitPrice = toWholeRupees(inventoryUnitPrice * 0.9);
+      const migrationPurchaseUnitPrice = toWholeRupees(inventoryUnitPrice);
       currentStage = "purchase";
       markMigrationStage("outlet", "purchase", "running", "Creating verified migration purchase request.");
       const purchaseOrder = await dispatch(
@@ -1725,11 +1725,17 @@ const ApplicationMigrationHelperPage = () => {
     });
   };
 
+  const getActiveImageProductName = () =>
+    migrationMode === "inventory"
+      ? inventoryForm.product_name_eng || inventorySearch || productName
+      : productName || productForm.product_name_eng;
+
   const handleImageNameSearch = async () => {
     setBusy(true);
     setStatus("");
     try {
-      const image = await findProductImageByName(imageName || productName, token);
+      const activeProductName = getActiveImageProductName();
+      const image = await findProductImageByName(imageName || activeProductName, token);
       if (image?.url) {
         setResolvedImageUrl(image.url);
         setStatus("Image found in Firebase storage.");
@@ -1760,13 +1766,14 @@ const ApplicationMigrationHelperPage = () => {
     try {
       let uploaded = null;
       let compressedSizeKb = "";
+      const activeProductName = getActiveImageProductName();
 
       try {
-        const compressedFile = await downloadAndCompressImage(imageUrl, undefined, productName);
-        uploaded = await uploadProductImage(compressedFile, productName, token);
+        const compressedFile = await downloadAndCompressImage(imageUrl, undefined, activeProductName);
+        uploaded = await uploadProductImage(compressedFile, activeProductName, token);
         compressedSizeKb = Math.round(compressedFile.size / 1024);
       } catch (downloadError) {
-        uploaded = await uploadProductImageFromUrl(imageUrl, productName, token);
+        uploaded = await uploadProductImageFromUrl(imageUrl, activeProductName, token);
         compressedSizeKb = uploaded?.size ? Math.round(uploaded.size / 1024) : "";
       }
 
@@ -1822,8 +1829,13 @@ const ApplicationMigrationHelperPage = () => {
       inventoryForm.brand_name ||
       "";
     const categoryName = getCategoryName(item) || inventoryForm.category_name || "";
+    const image = getProductImageUrl(item);
 
     setSelectedInventoryBarcode(item);
+    setExistingImageUrl(image);
+    setResolvedImageUrl("");
+    setImageUrl(image);
+    if (name) resolveProductImageFromName(name);
     setInventorySearch(
       item.mk_barcode ||
         item.barcode ||
@@ -1868,6 +1880,7 @@ const ApplicationMigrationHelperPage = () => {
   const selectLegacyInventoryProduct = (legacyProduct) => {
     const name = getProductName(legacyProduct);
     const barcodeValue = getLegacyBarcode(legacyProduct);
+    const image = getProductImageUrl(legacyProduct);
 
     setSelectedInventoryBarcode({
       ...legacyProduct,
@@ -1883,6 +1896,9 @@ const ApplicationMigrationHelperPage = () => {
     });
     const legacyPack = splitWeightPack(getLegacyWeightPack(legacyProduct));
     const unitMatch = findCatalogUnit(units, legacyPack.units);
+    setExistingImageUrl(image);
+    setResolvedImageUrl(image);
+    setImageUrl(image);
     setInventorySearch(String(barcodeValue || name || ""));
     setInventoryLookupOpen(false);
     setLegacyInventoryMatches([]);
@@ -1908,6 +1924,7 @@ const ApplicationMigrationHelperPage = () => {
         inventorySearch
       )
     );
+    resolveProductImageFromName(name);
     setStatus("Legacy product selected. Create catalog/product barcode details before inventory save if needed.");
   };
 
@@ -2232,7 +2249,7 @@ const ApplicationMigrationHelperPage = () => {
           }
         : splitWeightPack(inventoryForm.qty);
       const inventoryUnitPrice = Number(inventoryForm.unit_price || 0);
-      const migrationPurchaseUnitPrice = toWholeRupees(inventoryUnitPrice * 0.9);
+      const migrationPurchaseUnitPrice = toWholeRupees(inventoryUnitPrice);
       const productName =
         inventoryForm.product_name_eng ||
         getProductName(selectedBarcode) ||
@@ -2336,6 +2353,25 @@ const ApplicationMigrationHelperPage = () => {
         ...prev,
         vendor_barcode: prev.vendor_barcode || base.vendorBarcode,
       }));
+      const inventoryImageUrl = resolvedImageUrl || existingImageUrl || imageUrl || "";
+
+      if (inventoryImageUrl) {
+        await dispatch(
+          updateCatalogEntity({
+            entity: "product-barcodes",
+            id: base.productBarcodeId,
+            payload: {
+              image_url: inventoryImageUrl,
+            },
+          })
+        ).unwrap();
+        markMigrationStage(
+          "inventory",
+          "barcode",
+          "updated",
+          `Catalog barcode image updated: ${base.productBarcodeId}.`
+        );
+      }
 
       currentStage = "purchase";
       markMigrationStage("inventory", "purchase", "running", "Creating verified migration purchase request.");
@@ -2349,6 +2385,7 @@ const ApplicationMigrationHelperPage = () => {
           bill_details: {
             created_from: "migration",
             source: "migration",
+            image_url: inventoryImageUrl || null,
           },
           items: [
             {
@@ -2368,6 +2405,7 @@ const ApplicationMigrationHelperPage = () => {
               unit_name: pack.units,
               mk_barcode: base.mkBarcode,
               barcode: base.vendorBarcode,
+              image_url: inventoryImageUrl || null,
             },
           ],
         })
@@ -2417,6 +2455,7 @@ const ApplicationMigrationHelperPage = () => {
           mfg_date: inventoryForm.mfg_date || null,
           exp_date: inventoryForm.exp_date,
           source: "migration",
+          image_url: inventoryImageUrl || null,
           remarks: inventoryForm.remarks || "Inventory migration",
         })
       ).unwrap();
@@ -3994,6 +4033,109 @@ const ApplicationMigrationHelperPage = () => {
                   className={`${fieldClass} mt-1`}
                 />
               </label>
+            </div>
+
+            <div className="mt-4 rounded-lg border p-3">
+              <div className="mb-3 flex items-center gap-2">
+                <ImagePlus size={18} className="text-cyan-700" />
+                <h3 className="font-bold text-gray-900">Product Image</h3>
+              </div>
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_auto]">
+                <div className="relative">
+                  <input
+                    value={imageName}
+                    onChange={(event) => {
+                      setImageName(event.target.value);
+                      setImageSuggestionsOpen(true);
+                    }}
+                    onFocus={() => {
+                      if (imageSuggestions.length > 0) setImageSuggestionsOpen(true);
+                    }}
+                    className={fieldClass}
+                    placeholder="Search Firebase by image name"
+                  />
+                  {imageSuggestionsOpen && imageSuggestions.length > 0 ? (
+                    <div className="absolute z-50 mt-1 max-h-64 w-full overflow-auto rounded-lg border bg-white shadow-lg">
+                      {imageSuggestions.map((item) => (
+                        <button
+                          key={`${item.name || ""}-${item.imageUrl || item.url || ""}`}
+                          type="button"
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => handleImageSuggestionSelect(item)}
+                          className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-blue-50"
+                        >
+                          {item.imageUrl || item.url ? (
+                            <img
+                              src={item.imageUrl || item.url}
+                              alt={item.name || "Product"}
+                              className="h-10 w-10 rounded border object-cover"
+                            />
+                          ) : (
+                            <span className="h-10 w-10 rounded border bg-gray-50" />
+                          )}
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-sm font-semibold text-gray-900">
+                              {item.name || "Unnamed image"}
+                            </span>
+                            <span className="block truncate text-xs text-gray-500">
+                              {item.imageUrl || item.url || "-"}
+                            </span>
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+                <button
+                  type="button"
+                  onClick={handleImageNameSearch}
+                  disabled={busy}
+                  className={`${buttonClass} bg-gray-800 text-white hover:bg-gray-900 disabled:bg-gray-300`}
+                >
+                  <Search size={17} />
+                  Find
+                </button>
+                <input
+                  value={imageUrl}
+                  onChange={(event) => setImageUrl(event.target.value)}
+                  className={fieldClass}
+                  placeholder="Image URL"
+                />
+                <button
+                  type="button"
+                  onClick={handleDownloadAndUploadImage}
+                  disabled={busy}
+                  className={`${buttonClass} bg-green-600 text-white hover:bg-green-700 disabled:bg-gray-300`}
+                >
+                  <UploadCloud size={17} />
+                  Upload
+                </button>
+              </div>
+              {resolvedImageUrl ? (
+                <div className="mt-3 flex items-center gap-3">
+                  <img
+                    src={resolvedImageUrl}
+                    alt={inventoryForm.product_name_eng || "Product"}
+                    className="h-16 w-16 rounded-lg border object-cover"
+                  />
+                  <input value={resolvedImageUrl} readOnly className={fieldClass} />
+                </div>
+              ) : null}
+              {!resolvedImageUrl && existingImageUrl ? (
+                <div className="mt-3 flex items-center gap-3">
+                  <img
+                    src={existingImageUrl}
+                    alt={inventoryForm.product_name_eng || "Existing product"}
+                    className="h-16 w-16 rounded-lg border object-cover"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xs font-bold uppercase text-gray-400">
+                      Existing Image
+                    </div>
+                    <input value={existingImageUrl} readOnly className={fieldClass} />
+                  </div>
+                </div>
+              ) : null}
             </div>
 
             <MigrationStagePanel mode="inventory" stages={migrationStages.inventory} />
