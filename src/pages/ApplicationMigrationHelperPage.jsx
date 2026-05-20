@@ -121,6 +121,22 @@ const getProductSearchText = (product) =>
 const sameNormalizedText = (left, right) =>
   normalizeText(left).replace(/\s+/g, " ") === normalizeText(right).replace(/\s+/g, " ");
 
+const getCatalogImageName = (image) =>
+  image?.image_name || image?.name || image?.fileName || "";
+
+const getCatalogImageUrl = (image) =>
+  image?.url || image?.imageUrl || image?.downloadURL || "";
+
+const isFirebaseAdminCredentialError = (error) =>
+  /firebase admin credentials|FIREBASE_SERVICE_ACCOUNT/i.test(
+    String(error?.message || error || "")
+  );
+
+const getOptionalImageErrorMessage = (error) =>
+  isFirebaseAdminCredentialError(error)
+    ? "Image storage is not configured on the backend. Continuing without product image."
+    : `Product image skipped: ${error?.message || error || "Unable to update image."}`;
+
 const getLegacyBarcode = (item) =>
   asArray(item?.barcode)[0] ||
   item?.bar_code ||
@@ -792,6 +808,7 @@ const ApplicationMigrationHelperPage = () => {
     dispatch(fetchCatalogEntity("warehouses"));
     dispatch(fetchCatalogEntity("outlets"));
     dispatch(fetchCatalogEntity("stakeholders"));
+    dispatch(fetchCatalogEntity("images"));
     if (token) dispatch(fetchAllProductsFresh({ token }));
     if (token) {
       dispatch(fetchInventoryProducts());
@@ -831,6 +848,7 @@ const ApplicationMigrationHelperPage = () => {
     [catalogData.stakeholders]
   );
   const units = useMemo(() => asArray(catalogData.units), [catalogData.units]);
+  const catalogImages = useMemo(() => asArray(catalogData.images), [catalogData.images]);
   const selectedTrackingRequestId = getRequestId(trackingSelectedRequest);
 
   useEffect(() => {
@@ -1305,6 +1323,48 @@ const ApplicationMigrationHelperPage = () => {
 
   const selectedBrand = getFirstBrand(scannedProduct);
   const selectedFinancial = getFirstFinancial(selectedBrand);
+  const getCatalogImageSuggestions = useCallback(
+    (query) => {
+      const q = normalizeText(query);
+      if (!q) return [];
+
+      return catalogImages
+        .map((image) => {
+          const name = getCatalogImageName(image);
+          const url = getCatalogImageUrl(image);
+
+          return {
+            ...image,
+            name,
+            imageUrl: url,
+            url,
+            source: "catalog",
+          };
+        })
+        .filter((image) =>
+          `${image.name || ""} ${image.url || ""}`.toLowerCase().includes(q)
+        )
+        .slice(0, 30);
+    },
+    [catalogImages]
+  );
+
+  const mergeImageSuggestions = useCallback((...groups) => {
+    const seen = new Set();
+
+    return groups
+      .flat()
+      .filter((item) => {
+        const url = item?.imageUrl || item?.url || "";
+        const name = item?.name || item?.image_name || "";
+        const key = `${normalizeText(name)}|${normalizeText(url)}`;
+
+        if (!url || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .slice(0, 30);
+  }, []);
 
   useEffect(() => {
     const typedText = imageName.trim();
@@ -1316,18 +1376,21 @@ const ApplicationMigrationHelperPage = () => {
     }
 
     const timer = setTimeout(async () => {
+      const localSuggestions = getCatalogImageSuggestions(typedText);
+
       try {
         const suggestions = await searchProductImageSuggestions(typedText, token);
-        setImageSuggestions(suggestions);
-        setImageSuggestionsOpen(suggestions.length > 0);
+        const mergedSuggestions = mergeImageSuggestions(localSuggestions, suggestions);
+        setImageSuggestions(mergedSuggestions);
+        setImageSuggestionsOpen(mergedSuggestions.length > 0);
       } catch {
-        setImageSuggestions([]);
-        setImageSuggestionsOpen(false);
+        setImageSuggestions(localSuggestions);
+        setImageSuggestionsOpen(localSuggestions.length > 0);
       }
     }, 250);
 
     return () => clearTimeout(timer);
-  }, [imageName, token]);
+  }, [getCatalogImageSuggestions, imageName, mergeImageSuggestions, token]);
 
   const hydrateFormsFromProduct = (product) => {
     const brand = getFirstBrand(product);

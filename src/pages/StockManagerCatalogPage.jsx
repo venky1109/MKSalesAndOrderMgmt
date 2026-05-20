@@ -174,6 +174,17 @@ const catalogSections = [
       { name: 'updated_at', label: 'Updated At', readOnly: true },
     ],
   },
+  {
+    key: 'images',
+    title: 'Images',
+    entity: 'images',
+    fields: [
+      { name: 'image_name', label: 'Image Name', required: true },
+      { name: 'url', label: 'Image URL', required: true },
+      { name: 'created_at', label: 'Created At', readOnly: true },
+      { name: 'updated_at', label: 'Updated At', readOnly: true },
+    ],
+  },
 ];
 
 const StockManagerCatalogPage = () => {
@@ -192,6 +203,7 @@ const StockManagerCatalogPage = () => {
     dispatch(fetchCatalogEntity('stakeholders'));
     dispatch(fetchCatalogEntity('warehouses'));
     dispatch(fetchCatalogEntity('product-barcodes'));
+    dispatch(fetchCatalogEntity('images'));
   }, [dispatch]);
 
   const catalogOptions = {
@@ -203,6 +215,7 @@ const StockManagerCatalogPage = () => {
     outlets: data.outlets || [],
     stakeholders: data.stakeholders || [],
     warehouses: data.warehouses || [],
+    images: data.images || [],
   };
 
   const activeSection = catalogSections.find((item) => item.key === activeKey);
@@ -216,7 +229,7 @@ const StockManagerCatalogPage = () => {
         </h1>
         <p className="text-sm text-gray-500">
           Manage catalog products, brands, categories, employees, outlets,
-          units, stakeholders, warehouses and product barcodes.
+          units, stakeholders, warehouses, product barcodes and images.
         </p>
       </section>
 
