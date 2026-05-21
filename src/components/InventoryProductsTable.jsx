@@ -1,5 +1,8 @@
 import React, { useMemo, useState } from 'react';
 
+import { formatStockQuantity } from '../utils/stockDisplay';
+import { getNextSortConfig, sortRows } from '../utils/tableSort';
+
 const firstValue = (...values) =>
   values.find((value) => value !== undefined && value !== null && value !== '');
 
@@ -33,6 +36,77 @@ const getInventoryProductDisplayName = (item) => {
   return `${brand} ${product}`;
 };
 
+const getInventoryStockQuantity = (item) =>
+  firstValue(
+    item?.count_in_stock,
+    item?.countInStock,
+    item?.stock,
+    item?.qty,
+    item?.quantityInStock,
+    item?.no_of_units,
+    item?.purchase_qty
+  );
+
+const getInventoryStockDisplay = (item) =>
+  formatStockQuantity(getInventoryStockQuantity(item));
+
+const columns = [
+  {
+    key: 'product',
+    label: 'Product',
+    align: 'left',
+    getValue: getInventoryProductDisplayName,
+  },
+  { key: 'sku', label: 'SKU', align: 'left', getValue: (item) => item.sku_id },
+  {
+    key: 'barcode',
+    label: 'Barcode',
+    align: 'left',
+    getValue: (item) => item.bar_code,
+  },
+  {
+    key: 'stock',
+    label: 'Stock',
+    align: 'right',
+    type: 'number',
+    getValue: getInventoryStockQuantity,
+  },
+  {
+    key: 'warehouse',
+    label: 'Warehouse',
+    align: 'left',
+    getValue: (item) => item.warehouse_id,
+  },
+  {
+    key: 'expiry',
+    label: 'Expiry',
+    align: 'left',
+    type: 'date',
+    getValue: (item) => item.exp_date,
+  },
+];
+
+const SortHeader = ({ column, sortConfig, onSort }) => (
+  <th className={`p-3 ${column.align === 'right' ? 'text-right' : 'text-left'}`}>
+    <button
+      type="button"
+      onClick={() => onSort(column.key)}
+      className={`inline-flex w-full items-center gap-1 font-semibold hover:text-blue-700 ${
+        column.align === 'right' ? 'justify-end' : 'justify-start'
+      }`}
+    >
+      <span>{column.label}</span>
+      <span className="text-xs">
+        {sortConfig.key === column.key
+          ? sortConfig.direction === 'asc'
+            ? '^'
+            : 'v'
+          : '-'}
+      </span>
+    </button>
+  </th>
+);
+
 const InventoryProductsTable = ({
   products = [],
   loading,
@@ -41,6 +115,10 @@ const InventoryProductsTable = ({
   onWarehouseChange,
 }) => {
   const [search, setSearch] = useState('');
+  const [sortConfig, setSortConfig] = useState({
+    key: 'product',
+    direction: 'asc',
+  });
 
   const filteredProducts = useMemo(() => {
     const value = search.toLowerCase();
@@ -60,6 +138,15 @@ const InventoryProductsTable = ({
       );
     });
   }, [products, search]);
+
+  const sortedProducts = useMemo(
+    () => sortRows(filteredProducts, sortConfig, columns),
+    [filteredProducts, sortConfig]
+  );
+
+  const handleSort = (key) => {
+    setSortConfig((current) => getNextSortConfig(current, key));
+  };
 
   return (
     <section className="bg-white rounded-xl border shadow-sm p-4">
@@ -98,23 +185,25 @@ const InventoryProductsTable = ({
           <table className="min-w-full text-sm">
             <thead className="bg-gray-100 text-gray-700">
               <tr>
-                <th className="text-left p-3">Product</th>
-                <th className="text-left p-3">SKU</th>
-                <th className="text-left p-3">Barcode</th>
-                <th className="text-right p-3">Stock</th>
-                <th className="text-left p-3">Warehouse</th>
-                <th className="text-left p-3">Expiry</th>
+                {columns.map((column) => (
+                  <SortHeader
+                    key={column.key}
+                    column={column}
+                    sortConfig={sortConfig}
+                    onSort={handleSort}
+                  />
+                ))}
               </tr>
             </thead>
 
             <tbody>
-              {filteredProducts.map((item) => (
+              {sortedProducts.map((item) => (
                 <tr key={item.id} className="border-b hover:bg-gray-50">
                   <td className="p-3 font-medium">{getInventoryProductDisplayName(item)}</td>
                   <td className="p-3">{item.sku_id}</td>
                   <td className="p-3">{item.bar_code || '-'}</td>
                   <td className="p-3 text-right font-semibold">
-                    {Number(item.count_in_stock || 0).toFixed(2)}
+                    {getInventoryStockDisplay(item)}
                   </td>
                   <td className="p-3">{item.warehouse_id || '-'}</td>
                   <td className="p-3">
@@ -125,7 +214,7 @@ const InventoryProductsTable = ({
                 </tr>
               ))}
 
-              {filteredProducts.length === 0 && (
+              {sortedProducts.length === 0 && (
                 <tr>
                   <td colSpan="6" className="p-4 text-center text-gray-500">
                     No inventory products found

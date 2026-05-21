@@ -8,6 +8,8 @@ import {
   getDispatchItemProductName,
   getDispatchItemUnit,
 } from '../utils/dispatchDisplay';
+import { formatStockQuantity } from '../utils/stockDisplay';
+import { getNextSortConfig, sortRows } from '../utils/tableSort';
 
 const statusClass = (status) => {
   const normalized = String(status || 'intransit').toLowerCase();
@@ -43,7 +45,7 @@ const getTransitRows = (transitProducts, dispatchOrders) => {
         barcode: getDispatchItemBarcode(item) || transit.bar_code || '-',
         brand: getDispatchItemBrand(item) || transit.brand || '-',
         category: getDispatchItemCategory(item) || transit.category || '-',
-        qty: item.qty || item.quantity || transit.qty || transit.quantity || '-',
+        qty: item.qty || item.quantity || transit.qty || transit.quantity,
         unit: getDispatchItemUnit(item) || transit.unit || '-',
         expDate: item.exp_date || transit.exp_date,
         updatedAt: transit.updated_at || order?.updated_at || order?.created_at,
@@ -68,7 +70,7 @@ const getTransitRows = (transitProducts, dispatchOrders) => {
         barcode: getDispatchItemBarcode(item),
         brand: getDispatchItemBrand(item),
         category: getDispatchItemCategory(item),
-        qty: item.qty || item.quantity || '-',
+        qty: item.qty || item.quantity,
         unit: getDispatchItemUnit(item),
         expDate: item.exp_date,
         updatedAt: order.updated_at || order.created_at,
@@ -76,12 +78,67 @@ const getTransitRows = (transitProducts, dispatchOrders) => {
     );
 };
 
+const columns = [
+  { key: 'dispatch', label: 'Dispatch', align: 'left', getValue: (row) => row.dispatchNo },
+  { key: 'product', label: 'Product', align: 'left', getValue: (row) => row.product },
+  { key: 'barcode', label: 'Barcode', align: 'left', getValue: (row) => row.barcode },
+  { key: 'brand', label: 'Brand', align: 'left', getValue: (row) => row.brand },
+  { key: 'category', label: 'Category', align: 'left', getValue: (row) => row.category },
+  {
+    key: 'qty',
+    label: 'Qty',
+    align: 'right',
+    type: 'number',
+    getValue: (row) => row.qty,
+  },
+  { key: 'unit', label: 'Unit', align: 'left', getValue: (row) => row.unit },
+  {
+    key: 'route',
+    label: 'Route',
+    align: 'left',
+    getValue: (row) => `${row.source || ''} ${row.destination || ''}`,
+  },
+  { key: 'status', label: 'Status', align: 'left', getValue: (row) => row.status },
+  {
+    key: 'expiry',
+    label: 'Expiry',
+    align: 'left',
+    type: 'date',
+    getValue: (row) => row.expDate,
+  },
+];
+
+const SortHeader = ({ column, sortConfig, onSort }) => (
+  <th className={`p-3 ${column.align === 'right' ? 'text-right' : 'text-left'}`}>
+    <button
+      type="button"
+      onClick={() => onSort(column.key)}
+      className={`inline-flex w-full items-center gap-1 font-semibold hover:text-blue-700 ${
+        column.align === 'right' ? 'justify-end' : 'justify-start'
+      }`}
+    >
+      <span>{column.label}</span>
+      <span className="text-xs">
+        {sortConfig.key === column.key
+          ? sortConfig.direction === 'asc'
+            ? '^'
+            : 'v'
+          : '-'}
+      </span>
+    </button>
+  </th>
+);
+
 const TransitProductsTable = ({
   transitProducts = [],
   dispatchOrders = [],
   loading = false,
 }) => {
   const [search, setSearch] = useState('');
+  const [sortConfig, setSortConfig] = useState({
+    key: 'dispatch',
+    direction: 'asc',
+  });
 
   const rows = useMemo(
     () => getTransitRows(transitProducts, dispatchOrders),
@@ -108,6 +165,15 @@ const TransitProductsTable = ({
     );
   }, [rows, search]);
 
+  const sortedRows = useMemo(
+    () => sortRows(filteredRows, sortConfig, columns),
+    [filteredRows, sortConfig]
+  );
+
+  const handleSort = (key) => {
+    setSortConfig((current) => getNextSortConfig(current, key));
+  };
+
   return (
     <section className="rounded-lg border bg-white p-4 shadow-sm">
       <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -133,28 +199,28 @@ const TransitProductsTable = ({
           <table className="min-w-full text-sm">
             <thead className="bg-gray-100 text-gray-700">
               <tr>
-                <th className="p-3 text-left">Dispatch</th>
-                <th className="p-3 text-left">Product</th>
-                <th className="p-3 text-left">Barcode</th>
-                <th className="p-3 text-left">Brand</th>
-                <th className="p-3 text-left">Category</th>
-                <th className="p-3 text-right">Qty</th>
-                <th className="p-3 text-left">Unit</th>
-                <th className="p-3 text-left">Route</th>
-                <th className="p-3 text-left">Status</th>
-                <th className="p-3 text-left">Expiry</th>
+                {columns.map((column) => (
+                  <SortHeader
+                    key={column.key}
+                    column={column}
+                    sortConfig={sortConfig}
+                    onSort={handleSort}
+                  />
+                ))}
               </tr>
             </thead>
 
             <tbody>
-              {filteredRows.map((row) => (
+              {sortedRows.map((row) => (
                 <tr key={row.id} className="border-b hover:bg-gray-50">
                   <td className="p-3 font-semibold">{row.dispatchNo}</td>
                   <td className="p-3">{row.product || '-'}</td>
                   <td className="p-3">{row.barcode || '-'}</td>
                   <td className="p-3">{row.brand || '-'}</td>
                   <td className="p-3">{row.category || '-'}</td>
-                  <td className="p-3 text-right font-semibold">{row.qty}</td>
+                  <td className="p-3 text-right font-semibold">
+                    {formatStockQuantity(row.qty, '-')}
+                  </td>
                   <td className="p-3">{row.unit || '-'}</td>
                   <td className="p-3">
                     {row.source || '-'} to {row.destination || '-'}
@@ -172,7 +238,7 @@ const TransitProductsTable = ({
                 </tr>
               ))}
 
-              {filteredRows.length === 0 && (
+              {sortedRows.length === 0 && (
                 <tr>
                   <td colSpan="10" className="p-4 text-center text-gray-500">
                     No products in transit found

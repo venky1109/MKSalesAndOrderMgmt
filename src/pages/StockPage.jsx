@@ -23,10 +23,10 @@ import {
   fetchStockTransactions,
   fetchWarehouses,
 } from '../features/inventory/stockManagerInventorySlice';
+import { formatStockQuantity } from '../utils/stockDisplay';
+import { getNextSortConfig, sortRows } from '../utils/tableSort';
 
 const number = (value) => Number(value || 0);
-
-const numberFormat = new Intl.NumberFormat('en-IN');
 
 const currencyFormat = new Intl.NumberFormat('en-IN', {
   style: 'currency',
@@ -39,7 +39,7 @@ const firstValue = (...values) =>
 
 const asArray = (value) => (Array.isArray(value) ? value : []);
 
-const formatNumber = (value) => numberFormat.format(number(value));
+const formatNumber = (value) => formatStockQuantity(value);
 
 const formatMoney = (value) => currencyFormat.format(number(value));
 
@@ -360,6 +360,59 @@ const tabs = [
   { id: 'transit', label: 'Products In Transit' },
 ];
 
+const outletColumns = [
+  {
+    key: 'product',
+    label: 'Product',
+    align: 'left',
+    getValue: getStockProductDisplayName,
+  },
+  { key: 'brand', label: 'Brand', align: 'left', getValue: (item) => item.brand },
+  {
+    key: 'outlet',
+    label: 'Outlet',
+    align: 'left',
+    getValue: (item) => getLocationName(item, 'outlet') || getLocationId(item, 'outlet'),
+  },
+  { key: 'sku', label: 'SKU', align: 'left', getValue: (item) => item.sku_id },
+  { key: 'barcode', label: 'Barcode', align: 'left', getValue: (item) => item.bar_code },
+  {
+    key: 'stock',
+    label: 'Stock',
+    align: 'right',
+    type: 'number',
+    getValue: getStockQty,
+  },
+  {
+    key: 'purchaseAmount',
+    label: 'Purchase Amount',
+    align: 'right',
+    type: 'number',
+    getValue: getPurchaseAmount,
+  },
+];
+
+const SortHeader = ({ column, sortConfig, onSort }) => (
+  <th className={`p-3 ${column.align === 'right' ? 'text-right' : 'text-left'}`}>
+    <button
+      type="button"
+      onClick={() => onSort(column.key)}
+      className={`inline-flex w-full items-center gap-1 font-semibold hover:text-blue-700 ${
+        column.align === 'right' ? 'justify-end' : 'justify-start'
+      }`}
+    >
+      <span>{column.label}</span>
+      <span className="text-xs">
+        {sortConfig.key === column.key
+          ? sortConfig.direction === 'asc'
+            ? '^'
+            : 'v'
+          : '-'}
+      </span>
+    </button>
+  </th>
+);
+
 const OutletStockTable = ({
   products = [],
   loading,
@@ -368,6 +421,10 @@ const OutletStockTable = ({
   onOutletChange,
 }) => {
   const [search, setSearch] = useState('');
+  const [sortConfig, setSortConfig] = useState({
+    key: 'product',
+    direction: 'asc',
+  });
 
   const filteredProducts = useMemo(() => {
     const value = search.toLowerCase();
@@ -385,6 +442,15 @@ const OutletStockTable = ({
         .some((field) => String(field).toLowerCase().includes(value))
     );
   }, [products, search]);
+
+  const sortedProducts = useMemo(
+    () => sortRows(filteredProducts, sortConfig, outletColumns),
+    [filteredProducts, sortConfig]
+  );
+
+  const handleSort = (key) => {
+    setSortConfig((current) => getNextSortConfig(current, key));
+  };
 
   return (
     <section className="rounded-xl border bg-white p-4 shadow-sm">
@@ -421,18 +487,19 @@ const OutletStockTable = ({
           <table className="min-w-full text-sm">
             <thead className="bg-gray-100 text-gray-700">
               <tr>
-                <th className="p-3 text-left">Product</th>
-                <th className="p-3 text-left">Brand</th>
-                <th className="p-3 text-left">Outlet</th>
-                <th className="p-3 text-left">SKU</th>
-                <th className="p-3 text-left">Barcode</th>
-                <th className="p-3 text-right">Stock</th>
-                <th className="p-3 text-right">Purchase Amount</th>
+                {outletColumns.map((column) => (
+                  <SortHeader
+                    key={column.key}
+                    column={column}
+                    sortConfig={sortConfig}
+                    onSort={handleSort}
+                  />
+                ))}
               </tr>
             </thead>
 
             <tbody>
-              {filteredProducts.map((item) => (
+              {sortedProducts.map((item) => (
                 <tr key={item.id} className="border-b hover:bg-gray-50">
                   <td className="p-3 font-medium">{getStockProductDisplayName(item)}</td>
                   <td className="p-3">{item.brand}</td>
@@ -450,7 +517,7 @@ const OutletStockTable = ({
                 </tr>
               ))}
 
-              {filteredProducts.length === 0 && (
+              {sortedProducts.length === 0 && (
                 <tr>
                   <td colSpan="7" className="p-4 text-center text-gray-500">
                     No outlet stock products found

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
+import * as XLSX from "xlsx";
 import {
   Activity,
   AlertTriangle,
@@ -52,6 +53,7 @@ import { applyHsnGstFallback } from "../utils/hsnGstMapping";
 
 const normalizeText = (value) => String(value || "").trim().toLowerCase();
 const asArray = (value) => (Array.isArray(value) ? value : value ? [value] : []);
+const sleepForReactState = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 const getProductName = (product) =>
   product?.name ||
@@ -121,6 +123,15 @@ const getProductSearchText = (product) =>
 const sameNormalizedText = (left, right) =>
   normalizeText(left).replace(/\s+/g, " ") === normalizeText(right).replace(/\s+/g, " ");
 
+const compactText = (value) => normalizeText(value).replace(/[^a-z0-9]/g, "");
+
+const textMatchesLoosely = (left, right) => {
+  const a = compactText(left);
+  const b = compactText(right);
+  if (!a || !b) return false;
+  return a === b || a.includes(b) || b.includes(a);
+};
+
 const joinBrandAndProductName = (brandName, productName) => {
   const brand = String(brandName || "").trim();
   const product = String(productName || "").trim();
@@ -147,6 +158,23 @@ const getOptionalImageErrorMessage = (error) =>
   isFirebaseAdminCredentialError(error)
     ? "Image storage is not configured on the backend. Continuing without product image."
     : `Product image skipped: ${error?.message || error || "Unable to update image."}`;
+
+const getErrorMessage = (error, fallback = "Action failed.") => {
+  if (!error) return fallback;
+  if (typeof error === "string") return error;
+  return (
+    error.message ||
+    error.error ||
+    error.payload?.message ||
+    error.payload?.error ||
+    error.response?.data?.message ||
+    error.response?.data?.error ||
+    fallback
+  );
+};
+
+const isDuplicateCodeError = (error) =>
+  /duplicate key|unique constraint|_code_key/i.test(getErrorMessage(error, ""));
 
 const getLegacyBarcode = (item) =>
   asArray(item?.barcode)[0] ||
@@ -293,21 +321,6 @@ const makeMkBarcode = ({
     pad(category_id, 2) +
     pad(parseInt(quantity || 0, 10), 3)
   );
-};
-
-const getNextReadableCode = (rows = [], codeField, prefix) => {
-  let max = 0;
-
-  rows.forEach((row) => {
-    const code = String(row?.[codeField] || "").trim();
-
-    if (code.startsWith(prefix)) {
-      const num = parseInt(code.replace(prefix, ""), 10);
-      if (!Number.isNaN(num)) max = Math.max(max, num);
-    }
-  });
-
-  return `${prefix}${String(max + 1).padStart(3, "0")}`;
 };
 
 const getEntityId = (payload) =>
@@ -542,6 +555,126 @@ const formatTrackingDate = (value) => {
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const TRACKING_REQUEST_TIMEOUT_MS = 8000;
 
+const bulkColumnAliases = {
+  productName: ["product name", "product nam", "product nar", "productname", "product", "name"],
+  noOfUnits: ["no:of units", "no of units", "no.of units", "units", "stock", "count in stock"],
+  unitPrice: ["amount/unit", "amount per unit", "unit price", "price", "mrp"],
+  total: ["total", "amount"],
+  mfgDate: ["mfgdate", "mfg date", "manufacturing date"],
+  expDate: ["expdate", "exp date", "expiry date", "expiration date"],
+  supplier: ["supplier", "stakeholder", "vendor"],
+  hsnCode: ["hsncode", "hsn code", "hsn"],
+  gstRate: ["tax%", "tax", "gst", "gst rate"],
+  warehouse: ["warehouse"],
+  packQuantity: ["pack quantity", "quantity", "pack qty", "qty"],
+  packUnit: ["pack unit", "unit", "uom"],
+  imageName: ["image name", "image"],
+  imageUrl: ["image url", "url"],
+  barcode: ["barcode", "vendor barcode", "ean", "upc"],
+  mkBarcode: ["mk barcode", "mkbarcode", "mk_barcode"],
+  outlet: ["outlet", "outlet name"],
+  brand: ["brand", "brand name"],
+  category: ["category", "categori", "ategori", "category name"],
+  remarks: ["message", "remarks", "remark", "migration message"],
+  requestId: ["request id", "migration request id", "request_id"],
+  transactionId: ["transaction id", "stock transaction id", "transaction_id", "tx id"],
+  productId: ["product id", "product_id", "catalog product id"],
+  productBarcodeId: ["product barcode id", "product_barcode_id", "barcode id"],
+  warehouseId: ["warehouse id", "warehouse_id"],
+  outletId: ["outlet id", "outlet_id"],
+  rollbackQuantity: ["rollback quantity", "rollback qty", "quantity to rollback"],
+  rollbackScope: ["rollback scope", "scope"],
+  reason: ["reason", "rollback reason", "reason for rollback"],
+};
+
+const normalizeBulkHeader = (value) =>
+  normalizeText(value).replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+
+const getBulkCell = (row, aliases) => {
+  const normalized = Object.fromEntries(
+    Object.entries(row).map(([key, value]) => [normalizeBulkHeader(key), value])
+  );
+  for (const alias of aliases) {
+    const value = normalized[normalizeBulkHeader(alias)];
+    if (value !== undefined && value !== null && String(value).trim() !== "") {
+      return String(value).trim();
+    }
+  }
+  return "";
+};
+
+const normalizeExcelDate = (value) => {
+  if (!value) return "";
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toISOString().slice(0, 10);
+  }
+  if (typeof value === "number") {
+    const parsed = XLSX.SSF.parse_date_code(value);
+    if (parsed?.y && parsed?.m && parsed?.d) {
+      return `${parsed.y}-${String(parsed.m).padStart(2, "0")}-${String(parsed.d).padStart(2, "0")}`;
+    }
+  }
+
+  const text = String(value).trim();
+  const iso = text.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+  if (iso) return `${iso[1]}-${iso[2].padStart(2, "0")}-${iso[3].padStart(2, "0")}`;
+
+  const dmy = text.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})$/);
+  if (dmy) {
+    const year = dmy[3].length === 2 ? `20${dmy[3]}` : dmy[3];
+    return `${year}-${dmy[2].padStart(2, "0")}-${dmy[1].padStart(2, "0")}`;
+  }
+
+  const parsed = new Date(text);
+  return Number.isNaN(parsed.getTime()) ? text : parsed.toISOString().slice(0, 10);
+};
+
+const normalizeBulkRow = (row, index) => {
+  const productName = getBulkCell(row, bulkColumnAliases.productName);
+  const packQuantity = getBulkCell(row, bulkColumnAliases.packQuantity);
+  const packUnit = getBulkCell(row, bulkColumnAliases.packUnit);
+  const noOfUnits = getBulkCell(row, bulkColumnAliases.noOfUnits);
+  const rollbackQuantity = getBulkCell(row, bulkColumnAliases.rollbackQuantity);
+  const rollbackScope = getBulkCell(row, bulkColumnAliases.rollbackScope);
+
+  return {
+    id: `${index + 1}-${productName || "row"}`,
+    rowNumber: index + 2,
+    status: "pending",
+    message: "",
+    productName,
+    noOfUnits,
+    unitPrice: getBulkCell(row, bulkColumnAliases.unitPrice),
+    total: getBulkCell(row, bulkColumnAliases.total),
+    mfgDate: normalizeExcelDate(getBulkCell(row, bulkColumnAliases.mfgDate)),
+    expDate: normalizeExcelDate(getBulkCell(row, bulkColumnAliases.expDate)),
+    supplier: getBulkCell(row, bulkColumnAliases.supplier),
+    hsnCode: getBulkCell(row, bulkColumnAliases.hsnCode),
+    gstRate: getBulkCell(row, bulkColumnAliases.gstRate),
+    warehouse: getBulkCell(row, bulkColumnAliases.warehouse),
+    packQuantity,
+    packUnit,
+    packText: makeWeightPack(packQuantity, packUnit),
+    imageName: getBulkCell(row, bulkColumnAliases.imageName),
+    imageUrl: getBulkCell(row, bulkColumnAliases.imageUrl),
+    barcode: getBulkCell(row, bulkColumnAliases.barcode),
+    mkBarcode: getBulkCell(row, bulkColumnAliases.mkBarcode),
+    outlet: getBulkCell(row, bulkColumnAliases.outlet),
+    brand: getBulkCell(row, bulkColumnAliases.brand),
+    category: getBulkCell(row, bulkColumnAliases.category),
+    remarks: getBulkCell(row, bulkColumnAliases.remarks),
+    requestId: getBulkCell(row, bulkColumnAliases.requestId),
+    transactionId: getBulkCell(row, bulkColumnAliases.transactionId),
+    productId: getBulkCell(row, bulkColumnAliases.productId),
+    productBarcodeId: getBulkCell(row, bulkColumnAliases.productBarcodeId),
+    warehouseId: getBulkCell(row, bulkColumnAliases.warehouseId),
+    outletId: getBulkCell(row, bulkColumnAliases.outletId),
+    rollbackQuantity: rollbackQuantity || noOfUnits,
+    rollbackScope: rollbackScope || "single_transaction",
+    reason: getBulkCell(row, bulkColumnAliases.reason),
+  };
+};
+
 const toRequiredNumber = (value) => {
   const next = Number(value);
   return Number.isFinite(next) ? next : null;
@@ -689,6 +822,7 @@ const MigrationStagePanel = ({ mode, stages }) => (
 const ApplicationMigrationHelperPage = () => {
   const dispatch = useDispatch();
   const migrationInFlightRef = useRef(false);
+  const catalogCodeCountersRef = useRef({});
   const token = useSelector((state) => state.posUser?.userInfo?.token);
   const { data: catalogData = {}, loading: catalogLoading } = useSelector(
     (state) => state.catalogCrud || {}
@@ -775,6 +909,10 @@ const ApplicationMigrationHelperPage = () => {
   const [productEditBusy, setProductEditBusy] = useState(false);
   const [inventorySaveBusy, setInventorySaveBusy] = useState(false);
   const [outletSaveBusy, setOutletSaveBusy] = useState(false);
+  const [bulkFileName, setBulkFileName] = useState("");
+  const [bulkRows, setBulkRows] = useState([]);
+  const [bulkRunning, setBulkRunning] = useState(false);
+  const [bulkMessage, setBulkMessage] = useState("");
   const [trackingStatusFilter, setTrackingStatusFilter] = useState("failed");
   const [trackingRequests, setTrackingRequests] = useState([]);
   const [trackingSelectedRequest, setTrackingSelectedRequest] = useState(null);
@@ -1334,6 +1472,49 @@ const ApplicationMigrationHelperPage = () => {
 
   const selectedBrand = getFirstBrand(scannedProduct);
   const selectedFinancial = getFirstFinancial(selectedBrand);
+  const getNextCatalogCode = (rows = [], codeField, prefix) => {
+    const cacheKey = `${prefix}:${codeField}`;
+    const maxFromRows = rows.reduce((max, row) => {
+      const code = String(row?.[codeField] || "").trim();
+      if (!code.startsWith(prefix)) return max;
+
+      const num = parseInt(code.replace(prefix, ""), 10);
+      return Number.isNaN(num) ? max : Math.max(max, num);
+    }, 0);
+    const next = Math.max(catalogCodeCountersRef.current[cacheKey] || 0, maxFromRows) + 1;
+    catalogCodeCountersRef.current[cacheKey] = next;
+
+    return `${prefix}${String(next).padStart(3, "0")}`;
+  };
+
+  const createCatalogEntityWithCodeRetry = async ({
+    entity,
+    rows,
+    codeField,
+    prefix,
+    buildPayload,
+  }) => {
+    let lastError = null;
+
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const code = getNextCatalogCode(rows, codeField, prefix);
+
+      try {
+        return await dispatch(
+          createCatalogEntity({
+            entity,
+            payload: buildPayload(code),
+          })
+        ).unwrap();
+      } catch (error) {
+        lastError = error;
+        if (!isDuplicateCodeError(error)) throw error;
+      }
+    }
+
+    throw lastError || new Error(`Unable to create ${entity}.`);
+  };
+
   const getCatalogImageSuggestions = useCallback(
     (query) => {
       const q = normalizeText(query);
@@ -1594,33 +1775,42 @@ const ApplicationMigrationHelperPage = () => {
     }
   };
 
-  const handleStockUpdate = async () => {
+  const handleStockUpdate = async (bulkContext = null) => {
+    const stockProductForm = bulkContext?.productForm || productForm;
+    const stockFinancialForm = bulkContext?.financialForm || financialForm;
+    const stockOutletPostingForm = bulkContext?.outletPostingForm || outletPostingForm;
+    const stockScannedProduct = bulkContext?.scannedProduct || scannedProduct;
+    const stockProductName = bulkContext?.productName || productName;
+    const stockSelectedBrand = getFirstBrand(stockScannedProduct);
+    const stockSelectedFinancial = getFirstFinancial(stockSelectedBrand);
     if (migrationInFlightRef.current) return;
     migrationInFlightRef.current = true;
-    const productID = pickId(scannedProduct?._id, scannedProduct?.id);
-    const brandID = pickId(scannedProduct?.brandId, selectedBrand?._id, selectedBrand?.id);
-    const financialID = pickId(scannedProduct?.financialId, selectedFinancial?._id, selectedFinancial?.id);
-    const newQuantity = numberOrNull(financialForm.countInStock);
-    const outletUnit = units.find((unit) => String(unit.id) === String(financialForm.unit_id));
+    const productID = pickId(stockScannedProduct?._id, stockScannedProduct?.id);
+    const brandID = pickId(stockScannedProduct?.brandId, stockSelectedBrand?._id, stockSelectedBrand?.id);
+    const financialID = pickId(stockScannedProduct?.financialId, stockSelectedFinancial?._id, stockSelectedFinancial?.id);
+    const newQuantity = numberOrNull(stockFinancialForm.countInStock);
+    const outletUnit = units.find((unit) => String(unit.id) === String(stockFinancialForm.unit_id));
     const pack = {
-      quantity: financialForm.quantity,
+      quantity: stockFinancialForm.quantity,
       units: outletUnit?.unit_short_code || outletUnit?.unit_name || "",
     };
 
     if (
-      !outletPostingForm.warehouse_id ||
-      !outletPostingForm.supplier_id ||
-      !outletPostingForm.outlet_id ||
-      !outletPostingForm.exp_date
+      !stockOutletPostingForm.warehouse_id ||
+      !stockOutletPostingForm.supplier_id ||
+      !stockOutletPostingForm.outlet_id ||
+      !stockOutletPostingForm.exp_date
     ) {
       migrationInFlightRef.current = false;
       setStatus("Warehouse, supplier, outlet and expiry date are required for outlet migration.");
+      if (bulkContext) throw new Error("Warehouse, supplier, outlet and expiry date are required for outlet migration.");
       return;
     }
 
     if (newQuantity === null) {
       migrationInFlightRef.current = false;
       setStatus("Count in stock is required.");
+      if (bulkContext) throw new Error("Count in stock is required.");
       return;
     }
 
@@ -1632,42 +1822,47 @@ const ApplicationMigrationHelperPage = () => {
     try {
       const taxFallback = applyHsnGstFallback(
         {
-          hsn_code: productForm.hsn_code,
-          gst_rate: productForm.gst_rate,
+          hsn_code: stockProductForm.hsn_code,
+          gst_rate: stockProductForm.gst_rate,
         },
-        productForm.product_name_eng,
-        productName,
-        productForm.category_name
+        stockProductForm.product_name_eng,
+        stockProductName,
+        stockProductForm.category_name
       );
       const base = await ensureSupplyChainBase({
-        productName: productForm.product_name_eng,
-        productTeluguName: productForm.product_name_tel,
-        brandName: productForm.brand_name,
-        categoryName: productForm.category_name,
+        productName: stockProductForm.product_name_eng,
+        productTeluguName: stockProductForm.product_name_tel,
+        brandName: stockProductForm.brand_name,
+        categoryName: stockProductForm.category_name,
         hsnCode: taxFallback.hsn_code,
         gstRate: taxFallback.gst_rate,
         pack,
-        mkBarcode: outletPostingForm.mk_barcode,
-        vendorBarcode: outletPostingForm.vendor_barcode || financialForm.barcode,
-        existingProductId: scannedProduct?.catalogProductId || selectedCatalogProductId,
-        existingBrandId: productForm.brand_id,
-        existingCategoryId: productForm.category_id,
-        existingUnitId: financialForm.unit_id,
+        mkBarcode: stockOutletPostingForm.mk_barcode,
+        vendorBarcode: stockOutletPostingForm.vendor_barcode || stockFinancialForm.barcode,
+        existingProductId:
+          bulkContext?.selectedCatalogProductId ||
+          stockScannedProduct?.catalogProductId ||
+          selectedCatalogProductId,
+        existingBrandId: stockProductForm.brand_id,
+        existingCategoryId: stockProductForm.category_id,
+        existingUnitId: stockFinancialForm.unit_id,
         stageMode: "outlet",
       });
-      setOutletPostingForm((prev) => ({
-        ...prev,
-        mk_barcode: prev.mk_barcode || base.mkBarcode,
-        vendor_barcode: prev.vendor_barcode || base.vendorBarcode,
-      }));
+      if (!bulkContext) {
+        setOutletPostingForm((prev) => ({
+          ...prev,
+          mk_barcode: prev.mk_barcode || base.mkBarcode,
+          vendor_barcode: prev.vendor_barcode || base.vendorBarcode,
+        }));
+      }
 
       if (productID && brandID && financialID) {
         const mongoBarcodes = uniqueValues([
           base.mkBarcode,
           base.vendorBarcode,
-          outletPostingForm.vendor_barcode,
-          financialForm.barcode,
-          ...asArray(selectedFinancial?.barcode),
+          stockOutletPostingForm.vendor_barcode,
+          stockFinancialForm.barcode,
+          ...asArray(stockSelectedFinancial?.barcode),
         ]);
         await dispatch(
           updateProduct({
@@ -1678,9 +1873,9 @@ const ApplicationMigrationHelperPage = () => {
               updateFields: {
                 catalogProductBarcodeId: base.productBarcodeId,
                 mkid: numberOrNull(base.mkBarcode),
-                price: numberOrNull(financialForm.price),
-                dprice: numberOrNull(financialForm.dprice),
-                Discount: numberOrNull(financialForm.discount),
+                price: numberOrNull(stockFinancialForm.price),
+                dprice: numberOrNull(stockFinancialForm.dprice),
+                Discount: numberOrNull(stockFinancialForm.discount),
                 quantity: numberOrNull(pack.quantity),
                 units: pack.units,
                 barcode: mongoBarcodes,
@@ -1691,20 +1886,20 @@ const ApplicationMigrationHelperPage = () => {
         ).unwrap();
       }
 
-      const inventoryUnitPrice = Number(outletPostingForm.unit_price || financialForm.price || 0);
+      const inventoryUnitPrice = Number(stockOutletPostingForm.unit_price || stockFinancialForm.price || 0);
       const migrationPurchaseUnitPrice = toWholeRupees(inventoryUnitPrice);
       const purchaseProductName = joinBrandAndProductName(
-        productForm.brand_name,
-        productForm.product_name_eng
+        stockProductForm.brand_name,
+        stockProductForm.product_name_eng
       );
       currentStage = "purchase";
       markMigrationStage("outlet", "purchase", "running", "Creating verified migration purchase request.");
       const purchaseOrder = await dispatch(
         createPurchaseOrderWithItems({
-          supplier_id: Number(outletPostingForm.supplier_id),
-          warehouse_id: Number(outletPostingForm.warehouse_id),
-          expected_date: outletPostingForm.exp_date,
-          remarks: outletPostingForm.remarks || "Outlet migration",
+          supplier_id: Number(stockOutletPostingForm.supplier_id),
+          warehouse_id: Number(stockOutletPostingForm.warehouse_id),
+          expected_date: stockOutletPostingForm.exp_date,
+          remarks: stockOutletPostingForm.remarks || "Outlet migration",
           status: "verified",
           bill_details: { created_from: "outlet_migration", source: "migration" },
           items: [
@@ -1715,12 +1910,12 @@ const ApplicationMigrationHelperPage = () => {
               unit_id: base.unitId,
               product_barcode_id: base.productBarcodeId,
               qty: Number(pack.quantity),
-              no_of_units: Number(outletPostingForm.no_of_units || newQuantity || 1),
+              no_of_units: Number(stockOutletPostingForm.no_of_units || newQuantity || 1),
               expected_unit_price: migrationPurchaseUnitPrice,
               actual_unit_price: migrationPurchaseUnitPrice,
               product_name: purchaseProductName,
-              category_name: productForm.category_name,
-              brand_name: productForm.brand_name,
+              category_name: stockProductForm.category_name,
+              brand_name: stockProductForm.brand_name,
               unit_name: pack.units,
               mk_barcode: base.mkBarcode,
               barcode: base.vendorBarcode,
@@ -1740,26 +1935,26 @@ const ApplicationMigrationHelperPage = () => {
           purchase_order_item_id: orderItem?.id || null,
           product_barcode_id: base.productBarcodeId,
           product_id: base.productId,
-          batch_id: outletPostingForm.batch_id,
+          batch_id: stockOutletPostingForm.batch_id,
           sku_id:
-            outletPostingForm.sku_id ||
+            stockOutletPostingForm.sku_id ||
             makeSkuId({
-              productCode: productForm.product_name_eng,
-              batchId: outletPostingForm.batch_id,
-              expDate: outletPostingForm.exp_date,
+              productCode: stockProductForm.product_name_eng,
+              batchId: stockOutletPostingForm.batch_id,
+              expDate: stockOutletPostingForm.exp_date,
             }),
-          warehouse_id: Number(outletPostingForm.warehouse_id),
-          supplier_id: Number(outletPostingForm.supplier_id),
-          stakeholders_id: Number(outletPostingForm.supplier_id),
+          warehouse_id: Number(stockOutletPostingForm.warehouse_id),
+          supplier_id: Number(stockOutletPostingForm.supplier_id),
+          stakeholders_id: Number(stockOutletPostingForm.supplier_id),
           qty: Number(pack.quantity || 0),
-          no_of_units: Number(outletPostingForm.no_of_units || newQuantity || 1),
+          no_of_units: Number(stockOutletPostingForm.no_of_units || newQuantity || 1),
           add_to_existing_units: true,
           merge_existing_inventory: true,
           unit_price: inventoryUnitPrice,
-          mfg_date: outletPostingForm.mfg_date || null,
-          exp_date: outletPostingForm.exp_date,
+          mfg_date: stockOutletPostingForm.mfg_date || null,
+          exp_date: stockOutletPostingForm.exp_date,
           source: "migration",
-          remarks: outletPostingForm.remarks || "Outlet migration",
+          remarks: stockOutletPostingForm.remarks || "Outlet migration",
         })
       ).unwrap();
 
@@ -1774,25 +1969,25 @@ const ApplicationMigrationHelperPage = () => {
         `Inventory ${inventoryProductId ? `ready: ${inventoryProductId}` : "updated"}. Barcode row ${dispatchProductBarcodeId}.`
       );
       if (inventoryProductId) {
-        const outlet = outlets.find((item) => String(item.id) === String(outletPostingForm.outlet_id));
-        const warehouse = warehouses.find((item) => String(item.id) === String(outletPostingForm.warehouse_id));
+        const outlet = outlets.find((item) => String(item.id) === String(stockOutletPostingForm.outlet_id));
+        const warehouse = warehouses.find((item) => String(item.id) === String(stockOutletPostingForm.warehouse_id));
         currentStage = "dispatch";
         markMigrationStage("outlet", "dispatch", "running", "Creating and dispatching stock to outlet.");
         const dispatchOrder = await dispatch(
           createInventoryDispatchOrder({
             purchase_order_id: order?.id || null,
-            source: `warehouse:${outletPostingForm.warehouse_id}:${warehouse?.warehouse_name || "Migration"}`,
-            destination: `outlet:${outletPostingForm.outlet_id}:${outlet?.outlet_name || "Outlet"}`,
+            source: `warehouse:${stockOutletPostingForm.warehouse_id}:${warehouse?.warehouse_name || "Migration"}`,
+            destination: `outlet:${stockOutletPostingForm.outlet_id}:${outlet?.outlet_name || "Outlet"}`,
             expected_dispatch_at: null,
-            dispatch_notes: outletPostingForm.remarks || "Outlet migration dispatch",
+            dispatch_notes: stockOutletPostingForm.remarks || "Outlet migration dispatch",
             dispatch_status: "sent",
             items: [
               {
                 inventory_product_id: Number(inventoryProductId),
                 product_barcode_id: dispatchProductBarcodeId,
-                qty: Number(outletPostingForm.no_of_units || newQuantity || 1),
-                no_of_units: Number(outletPostingForm.no_of_units || newQuantity || 1),
-                exp_date: outletPostingForm.exp_date,
+                qty: Number(stockOutletPostingForm.no_of_units || newQuantity || 1),
+                no_of_units: Number(stockOutletPostingForm.no_of_units || newQuantity || 1),
+                exp_date: stockOutletPostingForm.exp_date,
                 notes: "Migration dispatch",
               },
             ],
@@ -1849,6 +2044,7 @@ const ApplicationMigrationHelperPage = () => {
               setStatus(
                 "Catalog, barcode, purchase, inventory and dispatch completed. Outlet receive is pending because this barcode is not available in the Mongo outlet product list. Add the backend migration insert endpoint, then retry receive."
               );
+              if (bulkContext) throw new Error(message || "Outlet receive is pending because Mongo product is missing.");
               return;
             }
 
@@ -1864,6 +2060,7 @@ const ApplicationMigrationHelperPage = () => {
     } catch (error) {
       markMigrationStage("outlet", currentStage, "failed", error?.message || "Stage failed.");
       setStatus(error?.message || "Unable to update stock.");
+      if (bulkContext) throw error;
     } finally {
       setOutletSaveBusy(false);
       setBusy(false);
@@ -2356,19 +2553,19 @@ const ApplicationMigrationHelperPage = () => {
     setRollbackMessage("Selected migration request details copied into rollback.");
   };
 
-  const buildRollbackPayload = () => {
-    const quantity = rollbackForm.rollback_quantity
-      ? Number(rollbackForm.rollback_quantity)
+  const buildRollbackPayload = (form = rollbackForm) => {
+    const quantity = form.rollback_quantity
+      ? Number(form.rollback_quantity)
       : null;
 
-    if (!rollbackForm.request_id && !rollbackForm.transaction_id) {
+    if (!form.request_id && !form.transaction_id) {
       throw new Error("Enter a request id or transaction id to rollback.");
     }
 
     if (
-      !rollbackForm.product_id &&
-      !rollbackForm.product_barcode_id &&
-      !rollbackForm.mk_barcode
+      !form.product_id &&
+      !form.product_barcode_id &&
+      !form.mk_barcode
     ) {
       throw new Error("Enter product id, product barcode id, or MK barcode.");
     }
@@ -2378,16 +2575,16 @@ const ApplicationMigrationHelperPage = () => {
     }
 
     return {
-      request_id: rollbackForm.request_id || null,
-      transaction_id: rollbackForm.transaction_id || null,
-      product_id: rollbackForm.product_id || null,
-      product_barcode_id: rollbackForm.product_barcode_id || null,
-      mk_barcode: rollbackForm.mk_barcode || null,
-      outlet_id: rollbackForm.outlet_id || null,
-      warehouse_id: rollbackForm.warehouse_id || null,
+      request_id: form.request_id || null,
+      transaction_id: form.transaction_id || null,
+      product_id: form.product_id || null,
+      product_barcode_id: form.product_barcode_id || null,
+      mk_barcode: form.mk_barcode || null,
+      outlet_id: form.outlet_id || null,
+      warehouse_id: form.warehouse_id || null,
       rollback_quantity: quantity,
-      rollback_scope: rollbackForm.rollback_scope,
-      reason: rollbackForm.reason || "Product migration rollback",
+      rollback_scope: form.rollback_scope,
+      reason: form.reason || "Product migration rollback",
     };
   };
 
@@ -2571,32 +2768,34 @@ const ApplicationMigrationHelperPage = () => {
     ];
 
     if (!brandId) {
-      const createdBrand = await dispatch(
-        createCatalogEntity({
-          entity: "brands",
-          payload: {
-            brand_code: getNextReadableCode(catalogBrands, "brand_code", "MKB"),
+      const createdBrand = await createCatalogEntityWithCodeRetry({
+        entity: "brands",
+        rows: catalogBrands,
+        codeField: "brand_code",
+        prefix: "MKB",
+        buildPayload: (code) => ({
+            brand_code: code,
             brand_name_english: brandName,
             brand_name_telugu: brandName,
-          },
-        })
-      ).unwrap();
+        }),
+      });
       brandId = getEntityId(createdBrand);
       catalogActions[0] = "brand inserted";
       dispatch(fetchCatalogEntity("brands"));
     }
 
     if (!categoryId) {
-      const createdCategory = await dispatch(
-        createCatalogEntity({
-          entity: "categories",
-          payload: {
-            category_code: getNextReadableCode(catalogCategories, "category_code", "MKC"),
+      const createdCategory = await createCatalogEntityWithCodeRetry({
+        entity: "categories",
+        rows: catalogCategories,
+        codeField: "category_code",
+        prefix: "MKC",
+        buildPayload: (code) => ({
+            category_code: code,
             category_name_english: categoryName,
             category_name_telugu: categoryName,
-          },
-        })
-      ).unwrap();
+        }),
+      });
       categoryId = getEntityId(createdCategory);
       catalogActions[1] = "category inserted";
       dispatch(fetchCatalogEntity("categories"));
@@ -2618,20 +2817,21 @@ const ApplicationMigrationHelperPage = () => {
     }
 
     if (!productId) {
-      const createdProduct = await dispatch(
-        createCatalogEntity({
-          entity: "products",
-          payload: {
-            product_code: getNextReadableCode(catalogProducts, "product_code", "MKP"),
+      const createdProduct = await createCatalogEntityWithCodeRetry({
+        entity: "products",
+        rows: catalogProducts,
+        codeField: "product_code",
+        prefix: "MKP",
+        buildPayload: (code) => ({
+            product_code: code,
             product_name_eng: productName,
             product_name_tel: productTeluguName || productName,
             gst_rate: gstRate || null,
             "hsn-code": hsnCode || null,
             brand_id: brandId || null,
             category_id: categoryId || null,
-          },
-        })
-      ).unwrap();
+        }),
+      });
       productId = getCatalogProductId(createdProduct);
 
       if (!productId) {
@@ -2749,7 +2949,13 @@ const ApplicationMigrationHelperPage = () => {
     };
   };
 
-  const handleInventoryMigrationSave = async () => {
+  const handleInventoryMigrationSave = async (bulkContext = null) => {
+    const form = bulkContext?.inventoryForm || inventoryForm;
+    const selectedBarcodeOverride = bulkContext?.selectedInventoryBarcode;
+    const contextInventorySearch = bulkContext?.inventorySearch ?? inventorySearch;
+    const contextResolvedImageUrl = bulkContext?.resolvedImageUrl ?? resolvedImageUrl;
+    const contextExistingImageUrl = bulkContext?.existingImageUrl ?? existingImageUrl;
+    const contextImageUrl = bulkContext?.imageUrl ?? imageUrl;
     if (migrationInFlightRef.current && inventorySaveBusy) {
       setStatus("Inventory migration is already running.");
       return;
@@ -2764,14 +2970,15 @@ const ApplicationMigrationHelperPage = () => {
     migrationInFlightRef.current = true;
 
     if (
-      !inventoryForm.warehouse_id ||
-      !inventoryForm.supplier_id ||
-      !inventoryForm.qty ||
-      !inventoryForm.exp_date
+      !form.warehouse_id ||
+      !form.supplier_id ||
+      !form.qty ||
+      !form.exp_date
     ) {
       migrationInFlightRef.current = false;
       markMigrationStage("inventory", "start", "failed", "Required fields are missing.");
       setStatus("Warehouse, supplier, quantity and expiry date are required for inventory.");
+      if (bulkContext) throw new Error("Warehouse, supplier, quantity and expiry date are required for inventory.");
       return;
     }
 
@@ -2780,32 +2987,32 @@ const ApplicationMigrationHelperPage = () => {
     setBusy(true);
     let currentStage = "catalog";
     try {
-      const selectedBarcode = selectedInventoryBarcode || {};
-      const inventoryUnit = units.find((unit) => String(unit.id) === String(inventoryForm.unit_id));
-      const pack = inventoryForm.quantity && inventoryUnit
+      const selectedBarcode = selectedBarcodeOverride || selectedInventoryBarcode || {};
+      const inventoryUnit = units.find((unit) => String(unit.id) === String(form.unit_id));
+      const pack = form.quantity && inventoryUnit
         ? {
-            quantity: inventoryForm.quantity,
+            quantity: form.quantity,
             units: inventoryUnit.unit_short_code || inventoryUnit.unit_name || "",
           }
-        : splitWeightPack(inventoryForm.qty);
-      const inventoryUnitPrice = Number(inventoryForm.unit_price || 0);
+        : splitWeightPack(form.qty);
+      const inventoryUnitPrice = Number(form.unit_price || 0);
       const migrationPurchaseUnitPrice = toWholeRupees(inventoryUnitPrice);
       const productName =
-        inventoryForm.product_name_eng ||
+        form.product_name_eng ||
         getProductName(selectedBarcode) ||
         selectedBarcode.product_name_eng ||
         selectedBarcode.product_name ||
         selectedBarcode.product_code ||
-        inventorySearch ||
+        contextInventorySearch ||
         "";
       const brandName =
-        inventoryForm.brand_name ||
+        form.brand_name ||
         selectedBarcode.brand_name_english ||
         selectedBarcode.brand ||
         selectedBarcode.brand_name ||
         "";
       const categoryName =
-        inventoryForm.category_name ||
+        form.category_name ||
         selectedBarcode.category_name_english ||
         selectedBarcode.category ||
         selectedBarcode.category_name ||
@@ -2836,6 +3043,7 @@ const ApplicationMigrationHelperPage = () => {
         setStatus(
           `Cannot start catalog requests. Missing ${missingCatalogFields.join(", ")}.`
         );
+        if (bulkContext) throw new Error(`Missing ${missingCatalogFields.join(", ")}.`);
         return;
       }
 
@@ -2850,22 +3058,23 @@ const ApplicationMigrationHelperPage = () => {
         setStatus(
           `Cannot start catalog requests. Quantity / Weight must include both values. Parsed quantity="${pack.quantity || "-"}", unit="${pack.units || "-"}".`
         );
+        if (bulkContext) throw new Error("Quantity / Weight must include both values.");
         return;
       }
       const taxFallback = applyHsnGstFallback(
         {
           hsn_code:
-            inventoryForm.hsn_code ||
+            form.hsn_code ||
             selectedBarcode.hsncode ||
             selectedBarcode.hsn_code,
           gst_rate:
-            inventoryForm.gst_rate ||
+            form.gst_rate ||
             selectedBarcode.gst ||
             selectedBarcode.gstRate,
         },
         productName,
         categoryName,
-        inventorySearch
+        contextInventorySearch
       );
       if (hasSelectedNameMismatch) {
         markMigrationStage(
@@ -2877,13 +3086,13 @@ const ApplicationMigrationHelperPage = () => {
       }
       setStatus("Checking catalog records for inventory migration.");
       const vendorBarcodeForBase =
-        hasSelectedNameMismatch && sameNormalizedText(inventoryForm.vendor_barcode, selectedVendorBarcode)
+        hasSelectedNameMismatch && sameNormalizedText(form.vendor_barcode, selectedVendorBarcode)
           ? ""
-          : inventoryForm.vendor_barcode || selectedVendorBarcode;
+          : form.vendor_barcode || selectedVendorBarcode;
       const base = await ensureSupplyChainBase({
         productName,
         productTeluguName:
-          inventoryForm.product_name_tel ||
+          form.product_name_tel ||
           selectedBarcode.product_name_tel ||
           selectedBarcode.teluguname ||
           selectedBarcode.telugu_name ||
@@ -2897,7 +3106,11 @@ const ApplicationMigrationHelperPage = () => {
         vendorBarcode: vendorBarcodeForBase,
         existingProductId: hasSelectedNameMismatch
           ? null
-          : pickId(selectedBarcode.product_id, selectedBarcode.catalogProductId),
+          : pickId(
+              selectedBarcode.product_id,
+              selectedBarcode.catalogProductId,
+              bulkContext?.selectedCatalogProductId
+            ),
         existingBrandId: pickId(
           selectedBarcode.brand_id,
           selectedBarcode.catalogBrandId
@@ -2906,15 +3119,17 @@ const ApplicationMigrationHelperPage = () => {
           selectedBarcode.category_id,
           selectedBarcode.catalogCategoryId
         ),
-        existingUnitId: selectedBarcode.unit_id,
+        existingUnitId: selectedBarcode.unit_id || bulkContext?.existingUnitId,
         stageMode: "inventory",
       });
-      setInventoryForm((prev) => ({
-        ...prev,
-        vendor_barcode: prev.vendor_barcode || base.vendorBarcode,
-      }));
+      if (!bulkContext) {
+        setInventoryForm((prev) => ({
+          ...prev,
+          vendor_barcode: prev.vendor_barcode || base.vendorBarcode,
+        }));
+      }
       const purchaseProductName = joinBrandAndProductName(brandName, productName);
-      const inventoryImageUrl = resolvedImageUrl || existingImageUrl || imageUrl || "";
+      const inventoryImageUrl = contextResolvedImageUrl || contextExistingImageUrl || contextImageUrl || "";
 
       if (inventoryImageUrl) {
         await dispatch(
@@ -2938,10 +3153,10 @@ const ApplicationMigrationHelperPage = () => {
       markMigrationStage("inventory", "purchase", "running", "Creating verified migration purchase request.");
       const purchaseOrder = await dispatch(
         createPurchaseOrderWithItems({
-          supplier_id: Number(inventoryForm.supplier_id),
-          warehouse_id: Number(inventoryForm.warehouse_id),
-          expected_date: inventoryForm.exp_date,
-          remarks: inventoryForm.remarks || "Inventory migration",
+          supplier_id: Number(form.supplier_id),
+          warehouse_id: Number(form.warehouse_id),
+          expected_date: form.exp_date,
+          remarks: form.remarks || "Inventory migration",
           status: "verified",
           bill_details: {
             created_from: "migration",
@@ -2956,7 +3171,7 @@ const ApplicationMigrationHelperPage = () => {
               unit_id: base.unitId,
               product_barcode_id: base.productBarcodeId,
               qty: Number(pack.quantity),
-              no_of_units: Number(inventoryForm.no_of_units || 1),
+              no_of_units: Number(form.no_of_units || 1),
               expected_unit_price: migrationPurchaseUnitPrice,
               actual_unit_price: migrationPurchaseUnitPrice,
               product_name: purchaseProductName,
@@ -2997,29 +3212,29 @@ const ApplicationMigrationHelperPage = () => {
           purchase_order_item_id: orderItem?.id || null,
           product_barcode_id: base.productBarcodeId,
           product_id: base.productId,
-          batch_id: inventoryForm.batch_id,
+          batch_id: form.batch_id,
           sku_id:
-            inventoryForm.sku_id ||
+            form.sku_id ||
             makeSkuId({
               productCode: hasSelectedNameMismatch
                 ? purchaseProductName
                 : selectedBarcode.product_code || purchaseProductName,
-              batchId: inventoryForm.batch_id,
-              expDate: inventoryForm.exp_date,
+              batchId: form.batch_id,
+              expDate: form.exp_date,
             }),
-          warehouse_id: Number(inventoryForm.warehouse_id),
-          supplier_id: Number(inventoryForm.supplier_id),
-          stakeholders_id: Number(inventoryForm.supplier_id),
+          warehouse_id: Number(form.warehouse_id),
+          supplier_id: Number(form.supplier_id),
+          stakeholders_id: Number(form.supplier_id),
           qty: Number(pack.quantity || 0),
-          no_of_units: Number(inventoryForm.no_of_units || 1),
+          no_of_units: Number(form.no_of_units || 1),
           add_to_existing_units: true,
           merge_existing_inventory: true,
           unit_price: inventoryUnitPrice,
-          mfg_date: inventoryForm.mfg_date || null,
-          exp_date: inventoryForm.exp_date,
+          mfg_date: form.mfg_date || null,
+          exp_date: form.exp_date,
           source: "migration",
           image_url: inventoryImageUrl || null,
-          remarks: inventoryForm.remarks || "Inventory migration",
+          remarks: form.remarks || "Inventory migration",
         })
       ).unwrap();
       const inventoryProduct =
@@ -3042,6 +3257,7 @@ const ApplicationMigrationHelperPage = () => {
     } catch (error) {
       markMigrationStage("inventory", currentStage, "failed", error?.message || "Stage failed.");
       setStatus(error?.message || "Unable to update inventory.");
+      if (bulkContext) throw error;
     } finally {
       setInventorySaveBusy(false);
       setBusy(false);
@@ -3051,6 +3267,892 @@ const ApplicationMigrationHelperPage = () => {
 
   const handleCreateNewProduct = async () => {
     await handleStockUpdate();
+  };
+
+  const updateBulkRow = (rowId, patch) => {
+    setBulkRows((prev) =>
+      prev.map((row) => (row.id === rowId ? { ...row, ...patch } : row))
+    );
+  };
+
+  const updateBulkRowField = (rowId, field, value) => {
+    setBulkRows((prev) =>
+      prev.map((row) => (row.id === rowId ? { ...row, [field]: value } : row))
+    );
+  };
+
+  const findBulkOption = (rows, value, fields) => {
+    const q = normalizeText(value);
+    if (!q) return null;
+
+    return rows.find((row) =>
+      fields.some((field) => normalizeText(row?.[field]) === q)
+    ) || rows.find((row) =>
+      fields.some((field) => normalizeText(row?.[field]).includes(q))
+    );
+  };
+
+  const findBulkCatalogBarcode = (row) => {
+    const barcodeText = normalizeText(row.barcode);
+    const productText = normalizeText(row.productName);
+    const brandText = normalizeText(row.brand);
+    const categoryText = normalizeText(row.category);
+    const packQuantity = Number(row.packQuantity);
+    const packUnitText = normalizeUnitText(row.packUnit);
+
+    const barcodeMatch = catalogBarcodes.find((item) => {
+      const itemBarcodes = [item.mk_barcode, item.barcode].map(normalizeText);
+      return barcodeText && itemBarcodes.includes(barcodeText);
+    });
+    if (barcodeMatch) return barcodeMatch;
+
+    const scoredMatches = catalogBarcodes
+      .map((item) => {
+        let score = 0;
+        const productMatched =
+          productText &&
+          [
+            item.product_name_eng,
+            item.product_name,
+            item.product_code,
+          ].some((value) => textMatchesLoosely(value, productText));
+        const brandMatched =
+          brandText &&
+          [item.brand_name_english, item.brand_name, item.brand].some((value) =>
+            textMatchesLoosely(value, brandText)
+          );
+        const categoryMatched =
+          categoryText &&
+          [item.category_name_english, item.category_name, item.category].some((value) =>
+            textMatchesLoosely(value, categoryText)
+          );
+        const quantityMatched =
+          Number.isFinite(packQuantity) && Number(item.quantity) === packQuantity;
+        const unitMatched =
+          packUnitText &&
+          [item.unit_short_code, item.unit_name, item.weight, item.units, item.unit].some(
+            (value) => normalizeUnitText(value) === packUnitText
+          );
+
+        if (!productMatched) return null;
+        score += 8;
+        if (!brandText || brandMatched) score += 4;
+        if (!categoryText || categoryMatched) score += 4;
+        if (!row.packQuantity || quantityMatched) score += 2;
+        if (!row.packUnit || unitMatched) score += 2;
+
+        return { item, score };
+      })
+      .filter(Boolean)
+      .sort((left, right) => right.score - left.score);
+
+    return scoredMatches[0]?.item || null;
+  };
+
+  const findBulkCatalogProduct = (row, matchedBarcode) => {
+    if (matchedBarcode?.product_id) {
+      return catalogProducts.find(
+        (product) => String(product.id) === String(matchedBarcode.product_id)
+      );
+    }
+
+    return catalogProducts.find((product) => {
+      const productMatched =
+        row.productName &&
+        [
+          product.product_name_eng,
+          product.product_name,
+          product.product_code,
+        ]
+          .some((value) => textMatchesLoosely(value, row.productName));
+      const brandMatched =
+        !row.brand ||
+        [product.brand_name_english, product.brand_name, product.brand].some((value) =>
+          textMatchesLoosely(value, row.brand)
+        );
+      const categoryMatched =
+        !row.category ||
+        [
+          product.category_name_english,
+          product.category_name,
+          product.category,
+        ].some((value) => textMatchesLoosely(value, row.category));
+
+      return productMatched && brandMatched && categoryMatched;
+    }) || null;
+  };
+
+  const enrichBulkRowFromLegacy = async (row) => {
+    if (row.brand && row.category) return null;
+
+    try {
+      const legacyMatches = await searchLegacyProducts(row.productName, token);
+      return legacyMatches[0] || null;
+    } catch {
+      return null;
+    }
+  };
+
+  const buildBulkContext = async (row, mode) => {
+    const matchedBarcode = findBulkCatalogBarcode(row);
+    const matchedProduct = findBulkCatalogProduct(row, matchedBarcode);
+    const legacyProduct = matchedBarcode ? null : await enrichBulkRowFromLegacy(row);
+    const warehouse =
+      findBulkOption(warehouses, row.warehouse, ["warehouse_name", "warehouse_code", "id"]) ||
+      (mode === "outlet"
+        ? warehouses.find((item) => String(item.id) === String(outletPostingForm.warehouse_id))
+        : warehouses.find((item) => String(item.id) === String(inventoryForm.warehouse_id)));
+    const supplier =
+      findBulkOption(suppliers, row.supplier, ["stakeholder_name", "stackholder_code", "id"]) ||
+      (mode === "outlet"
+        ? suppliers.find((item) => String(item.id) === String(outletPostingForm.supplier_id))
+        : suppliers.find((item) => String(item.id) === String(inventoryForm.supplier_id)));
+    const outlet =
+      findBulkOption(outlets, row.outlet, ["outlet_name", "unit_code", "id"]) ||
+      outlets.find((item) => String(item.id) === String(outletPostingForm.outlet_id));
+    const unit = findCatalogUnit(units, row.packUnit || getBarcodeWeight(matchedBarcode));
+    const productName =
+      row.productName ||
+      getProductName(matchedBarcode) ||
+      getProductName(matchedProduct) ||
+      getProductName(legacyProduct);
+    const brandName =
+      row.brand ||
+      matchedBarcode?.brand_name_english ||
+      matchedBarcode?.brand_name ||
+      matchedProduct?.brand_name_english ||
+      matchedProduct?.brand_name ||
+      matchedProduct?.brand ||
+      legacyProduct?.brand ||
+      legacyProduct?.brand_name ||
+      "";
+    const categoryName =
+      row.category ||
+      matchedBarcode?.category_name_english ||
+      matchedBarcode?.category_name ||
+      matchedProduct?.category_name_english ||
+      matchedProduct?.category_name ||
+      matchedProduct?.category ||
+      getCategoryName(legacyProduct) ||
+      "";
+    const packQuantity = row.packQuantity || getBarcodeQuantity(matchedBarcode);
+    const packUnit = row.packUnit || getBarcodeWeight(matchedBarcode);
+    const packText = makeWeightPack(packQuantity, packUnit);
+    const commonMissing = [
+      !productName ? "product name" : "",
+      !brandName ? "brand" : "",
+      !categoryName ? "category" : "",
+      !warehouse ? "warehouse" : "",
+      !supplier ? "supplier" : "",
+      !packQuantity ? "pack quantity" : "",
+      !packUnit ? "pack unit" : "",
+      !row.expDate ? "expiry date" : "",
+    ].filter(Boolean);
+
+    if (mode === "outlet" && !outlet) commonMissing.push("outlet");
+    if (commonMissing.length) {
+      throw new Error(`Missing ${commonMissing.join(", ")}.`);
+    }
+
+    const taxFallback = applyHsnGstFallback(
+      { hsn_code: row.hsnCode, gst_rate: row.gstRate },
+      productName,
+      categoryName
+    );
+    const batchId = makeBatchId();
+    const vendorBarcode = row.barcode || matchedBarcode?.barcode || getLegacyBarcode(legacyProduct) || "";
+    const image = row.imageUrl || getProductImageUrl(legacyProduct) || matchedBarcode?.image_url || "";
+
+    if (mode === "inventory") {
+      return {
+        inventorySearch: productName,
+        selectedInventoryBarcode: matchedBarcode,
+        imageUrl: image,
+        resolvedImageUrl: image,
+        selectedCatalogProductId: matchedBarcode?.product_id || matchedProduct?.id || "",
+        existingUnitId: unit?.id || matchedBarcode?.unit_id || "",
+        inventoryForm: {
+          ...inventoryForm,
+          batch_id: batchId,
+          warehouse_id: warehouse.id,
+          supplier_id: supplier.id,
+          product_name_eng: productName,
+          product_name_tel: legacyProduct?.teluguname || legacyProduct?.telugu_name || "",
+          brand_name: brandName,
+          category_name: categoryName,
+          hsn_code: taxFallback.hsn_code || "",
+          gst_rate: taxFallback.gst_rate || "",
+          mk_barcode: matchedBarcode?.mk_barcode || "",
+          vendor_barcode: vendorBarcode,
+          quantity: packQuantity,
+          unit_id: unit?.id || matchedBarcode?.unit_id || "",
+          qty: packText,
+          no_of_units: row.noOfUnits || "1",
+          unit_price: row.unitPrice || "",
+          mfg_date: row.mfgDate || "",
+          exp_date: row.expDate,
+          sku_id: makeSkuId({ productCode: productName, batchId, expDate: row.expDate }),
+          remarks: row.remarks || `Bulk inventory migration row ${row.rowNumber}`,
+        },
+      };
+    }
+
+    return {
+      productName,
+      scannedProduct: null,
+      selectedCatalogProductId: matchedBarcode?.product_id || matchedProduct?.id || "",
+      productForm: {
+        ...productForm,
+        product_name_eng: productName,
+        product_name_tel: legacyProduct?.teluguname || legacyProduct?.telugu_name || "",
+        gst_rate: taxFallback.gst_rate || "",
+        hsn_code: taxFallback.hsn_code || "",
+        brand_id: matchedBarcode?.brand_id || matchedProduct?.brand_id || "",
+        brand_name: brandName,
+        category_id: matchedBarcode?.category_id || matchedProduct?.category_id || "",
+        category_name: categoryName,
+      },
+      financialForm: {
+        ...emptyFinancial,
+        quantity: packQuantity,
+        unit_id: unit?.id || matchedBarcode?.unit_id || "",
+        price: row.unitPrice || "",
+        dprice: row.unitPrice || "",
+        countInStock: row.noOfUnits || "1",
+        barcode: vendorBarcode,
+      },
+      outletPostingForm: {
+        ...outletPostingForm,
+        warehouse_id: warehouse.id,
+        supplier_id: supplier.id,
+        outlet_id: outlet.id,
+        batch_id: batchId,
+        no_of_units: row.noOfUnits || "1",
+        unit_price: row.unitPrice || "",
+        mfg_date: row.mfgDate || "",
+        exp_date: row.expDate,
+        sku_id: makeSkuId({ productCode: productName, batchId, expDate: row.expDate }),
+        vendor_barcode: vendorBarcode,
+        remarks: row.remarks || `Bulk outlet migration row ${row.rowNumber}`,
+      },
+    };
+  };
+
+  const findBulkRollbackTransaction = (row, matchedBarcode) => {
+    const transactionId = normalizeText(row.transactionId);
+    if (transactionId) {
+      const exact = stockTransactions.find(
+        (transaction) => normalizeText(getTransactionId(transaction)) === transactionId
+      );
+      if (exact) return exact;
+    }
+
+    const productBarcodeId = row.productBarcodeId || matchedBarcode?.id;
+    const productId = row.productId || matchedBarcode?.product_id;
+    const barcodeText = normalizeText(row.mkBarcode || row.barcode || matchedBarcode?.mk_barcode);
+    const productText = normalizeText(row.productName);
+    const brandText = normalizeText(row.brand);
+    const categoryText = normalizeText(row.category);
+    const requestId = normalizeText(row.requestId);
+
+    const candidates = stockTransactions
+      .map((transaction) => {
+        let score = 0;
+      const txProductId = getTransactionProductId(transaction);
+      const txProductBarcodeId = getTransactionProductBarcodeId(transaction);
+      const txRequestId = getTransactionRequestId(transaction);
+      const txText = getRollbackTransactionSearchText(transaction);
+
+        if (requestId && normalizeText(txRequestId) !== requestId) return null;
+        if (productBarcodeId && String(txProductBarcodeId) === String(productBarcodeId)) score += 10;
+        if (productId && String(txProductId) === String(productId)) score += 8;
+        if (barcodeText && txText.includes(barcodeText)) score += 7;
+        if (productText && txText.includes(productText)) score += 5;
+        if (brandText && txText.includes(brandText)) score += 2;
+        if (categoryText && txText.includes(categoryText)) score += 2;
+
+        return score > 0 ? { transaction, score } : null;
+      })
+      .filter(Boolean)
+      .sort((left, right) => {
+        if (right.score !== left.score) return right.score - left.score;
+        const rightTime = new Date(
+          right.transaction.created_at || right.transaction.createdAt || right.transaction.transaction_date || 0
+        ).getTime();
+        const leftTime = new Date(
+          left.transaction.created_at || left.transaction.createdAt || left.transaction.transaction_date || 0
+        ).getTime();
+        return rightTime - leftTime;
+      });
+
+    return candidates[0]?.transaction || null;
+  };
+
+  const getBulkRollbackTransactionOptions = (row) => {
+    const matchedBarcode = findBulkCatalogBarcode(row);
+    const productBarcodeId = row.productBarcodeId || matchedBarcode?.id;
+    const productId = row.productId || matchedBarcode?.product_id;
+    const barcodeText = normalizeText(row.mkBarcode || row.barcode || matchedBarcode?.mk_barcode);
+    const productText = normalizeText(row.productName);
+    const brandText = normalizeText(row.brand);
+    const categoryText = normalizeText(row.category);
+
+    return stockTransactions
+      .map((transaction) => {
+        let score = 0;
+        const txProductId = getTransactionProductId(transaction);
+        const txProductBarcodeId = getTransactionProductBarcodeId(transaction);
+        const txText = getRollbackTransactionSearchText(transaction);
+
+        if (productBarcodeId && String(txProductBarcodeId) === String(productBarcodeId)) score += 10;
+        if (productId && String(txProductId) === String(productId)) score += 8;
+        if (barcodeText && txText.includes(barcodeText)) score += 7;
+        if (productText && txText.includes(productText)) score += 5;
+        if (brandText && txText.includes(brandText)) score += 2;
+        if (categoryText && txText.includes(categoryText)) score += 2;
+
+        return score > 0 ? { transaction, score } : null;
+      })
+      .filter(Boolean)
+      .sort((left, right) => {
+        if (right.score !== left.score) return right.score - left.score;
+        const rightTime = new Date(
+          right.transaction.created_at || right.transaction.createdAt || right.transaction.transaction_date || 0
+        ).getTime();
+        const leftTime = new Date(
+          left.transaction.created_at || left.transaction.createdAt || left.transaction.transaction_date || 0
+        ).getTime();
+        return rightTime - leftTime;
+      })
+      .map(({ transaction }) => transaction)
+      .concat(
+        row.transactionId &&
+          !stockTransactions.some(
+            (transaction) => String(getTransactionId(transaction)) === String(row.transactionId)
+          )
+          ? [{ id: row.transactionId, transaction_id: row.transactionId }]
+          : []
+      );
+  };
+
+  const applyBulkRollbackTransaction = (rowId, transaction) => {
+    const transactionId = getTransactionId(transaction);
+    const requestId = getTransactionRequestId(transaction);
+    const productId = getTransactionProductId(transaction);
+    const productBarcodeId = getTransactionProductBarcodeId(transaction);
+    const quantity = pickId(
+      transaction?.qty_in,
+      transaction?.qty_out,
+      transaction?.quantity,
+      transaction?.no_of_units,
+      transaction?.qty,
+      ""
+    );
+
+    updateBulkRow(rowId, {
+      requestId: requestId || "",
+      transactionId: transactionId || "",
+      productId: productId || "",
+      productBarcodeId: productBarcodeId || "",
+      mkBarcode: pickId(transaction?.mk_barcode, transaction?.barcode, ""),
+      barcode: pickId(transaction?.barcode, transaction?.mk_barcode, ""),
+      warehouseId: pickId(transaction?.warehouse_id, transaction?.source_warehouse_id, ""),
+      outletId: pickId(transaction?.outlet_id, transaction?.destination_outlet_id, ""),
+      rollbackQuantity: quantity ? String(quantity) : "",
+      message: `Selected tx ${transactionId || "-"} / request ${requestId || "-"}`,
+    });
+  };
+
+  const buildBulkRollbackPayload = (row) => {
+    const matchedBarcode = findBulkCatalogBarcode(row);
+    const matchedProduct = findBulkCatalogProduct(row, matchedBarcode);
+    const transaction = findBulkRollbackTransaction(row, matchedBarcode);
+    const resolvedTransactionId = getTransactionId(transaction);
+    const resolvedProductBarcodeId = pickId(
+      row.productBarcodeId,
+      getTransactionProductBarcodeId(transaction),
+      matchedBarcode?.id
+    );
+    const resolvedProductId = pickId(
+      row.productId,
+      getTransactionProductId(transaction),
+      matchedBarcode?.product_id,
+      matchedProduct?.id
+    );
+
+    if (!row.requestId && !row.transactionId && !resolvedTransactionId) {
+      throw new Error(
+        "Could not resolve a stock transaction. Add Transaction ID, Request ID, MK barcode, or enough product details to match existing stock transactions."
+      );
+    }
+
+    if (!resolvedProductId && !resolvedProductBarcodeId && !row.mkBarcode && !row.barcode) {
+      throw new Error(
+        "Could not resolve product or barcode. Add Product ID, Barcode ID, MK barcode, or product details."
+      );
+    }
+
+    const warehouse =
+      findBulkOption(warehouses, row.warehouse, ["warehouse_name", "warehouse_code", "id"]) ||
+      warehouses.find((item) => String(item.id) === String(row.warehouseId || rollbackForm.warehouse_id));
+    const outlet =
+      findBulkOption(outlets, row.outlet, ["outlet_name", "unit_code", "id"]) ||
+      outlets.find((item) => String(item.id) === String(row.outletId || rollbackForm.outlet_id));
+    const quantity = pickId(
+      row.rollbackQuantity,
+      row.noOfUnits,
+      transaction?.qty_in,
+      transaction?.qty_out,
+      transaction?.quantity,
+      transaction?.no_of_units,
+      transaction?.qty,
+      ""
+    );
+    const nextForm = {
+      ...rollbackForm,
+      request_id: pickId(row.requestId, getTransactionRequestId(transaction), rollbackForm.request_id, ""),
+      transaction_id: pickId(row.transactionId, resolvedTransactionId, rollbackForm.transaction_id, ""),
+      product_id: pickId(resolvedProductId, rollbackForm.product_id, ""),
+      product_barcode_id: pickId(resolvedProductBarcodeId, rollbackForm.product_barcode_id, ""),
+      mk_barcode: pickId(
+        row.mkBarcode,
+        row.barcode,
+        transaction?.mk_barcode,
+        transaction?.barcode,
+        matchedBarcode?.mk_barcode,
+        matchedBarcode?.barcode,
+        rollbackForm.mk_barcode,
+        ""
+      ),
+      outlet_id: pickId(row.outletId, outlet?.id, transaction?.outlet_id, rollbackForm.outlet_id, ""),
+      warehouse_id: pickId(
+        row.warehouseId,
+        warehouse?.id,
+        transaction?.warehouse_id,
+        transaction?.source_warehouse_id,
+        rollbackForm.warehouse_id,
+        ""
+      ),
+      rollback_quantity: quantity ? String(quantity) : "",
+      rollback_scope: row.rollbackScope || rollbackForm.rollback_scope || "single_transaction",
+      reason: row.reason || row.remarks || rollbackForm.reason || "Bulk product migration rollback",
+    };
+
+    return buildRollbackPayload(nextForm);
+  };
+
+  const resolveBulkRollbackRow = (row) => {
+    const matchedBarcode = findBulkCatalogBarcode(row);
+    const matchedProduct = findBulkCatalogProduct(row, matchedBarcode);
+    const transaction = findBulkRollbackTransaction(row, matchedBarcode);
+    const transactionId = getTransactionId(transaction);
+    const requestId = getTransactionRequestId(transaction);
+    const productId = pickId(
+      row.productId,
+      getTransactionProductId(transaction),
+      matchedBarcode?.product_id,
+      matchedProduct?.id,
+      ""
+    );
+    const productBarcodeId = pickId(
+      row.productBarcodeId,
+      getTransactionProductBarcodeId(transaction),
+      matchedBarcode?.id,
+      ""
+    );
+    const mkBarcode = pickId(
+      row.mkBarcode,
+      row.barcode,
+      transaction?.mk_barcode,
+      transaction?.barcode,
+      matchedBarcode?.mk_barcode,
+      matchedBarcode?.barcode,
+      ""
+    );
+
+    return {
+      ...row,
+      requestId: row.requestId || requestId || "",
+      transactionId: row.transactionId || transactionId || "",
+      productId,
+      productBarcodeId,
+      mkBarcode,
+      barcode: row.barcode || matchedBarcode?.barcode || mkBarcode || "",
+      rollbackScope: row.rollbackScope || "single_transaction",
+      message:
+        transactionId || productId || productBarcodeId
+          ? `Resolved latest tx ${transactionId || "-"} / product ${productId || "-"} / barcode ${productBarcodeId || "-"}`
+          : row.message,
+    };
+  };
+
+  const handleBulkFileUpload = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const data = await file.arrayBuffer();
+      const workbook = XLSX.read(data, { type: "array", cellDates: true });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+      if (migrationMode === "rollback") {
+        await dispatch(fetchStockTransactions()).unwrap();
+      }
+      const normalizedRows = rows
+        .map(normalizeBulkRow)
+        .filter(
+          (row) =>
+            row.productName ||
+            row.barcode ||
+            row.mkBarcode ||
+            row.requestId ||
+            row.transactionId ||
+            row.productId ||
+            row.productBarcodeId
+        );
+      const readyRows =
+        migrationMode === "rollback"
+          ? normalizedRows.map(resolveBulkRollbackRow)
+          : normalizedRows;
+
+      setBulkFileName(file.name);
+      setBulkRows(readyRows);
+      setBulkMessage(
+        readyRows.length
+          ? `${readyRows.length} products loaded. Review them before starting migration.`
+          : "No product rows found in the uploaded file."
+      );
+    } catch (error) {
+      setBulkFileName(file.name);
+      setBulkRows([]);
+      setBulkMessage(error?.message || "Unable to read this file.");
+    } finally {
+      event.target.value = "";
+    }
+  };
+
+  const handleBulkMigration = async () => {
+    const mode =
+      migrationMode === "outlet"
+        ? "outlet"
+        : migrationMode === "rollback"
+          ? "rollback"
+          : "inventory";
+    const rowsToRun = bulkRows.filter((row) => row.status !== "done");
+    if (rowsToRun.length === 0) {
+      setBulkMessage("No pending products to migrate.");
+      return;
+    }
+
+    setBulkRunning(true);
+    setBulkMessage(`Bulk ${mode} started. Products run one after another.`);
+
+    for (const row of rowsToRun) {
+      updateBulkRow(row.id, { status: "running", message: "Preparing row..." });
+      try {
+        if (mode === "rollback") {
+          const resolvedRow = resolveBulkRollbackRow(row);
+          updateBulkRow(row.id, {
+            requestId: resolvedRow.requestId,
+            transactionId: resolvedRow.transactionId,
+            productId: resolvedRow.productId,
+            productBarcodeId: resolvedRow.productBarcodeId,
+            mkBarcode: resolvedRow.mkBarcode,
+            barcode: resolvedRow.barcode,
+            message: resolvedRow.message || "Resolved rollback row.",
+          });
+          const payload = buildBulkRollbackPayload(resolvedRow);
+          updateBulkRow(row.id, { message: "Previewing rollback..." });
+          const preview = await requestRollbackApi("/migration/product-rollback/preview", payload);
+          const previewProblems = getRollbackPreviewProblems(preview);
+          if (previewProblems.length > 0) {
+            throw new Error(previewProblems.join(" "));
+          }
+          updateBulkRow(row.id, { message: "Submitting rollback..." });
+          await requestRollbackApi("/migration/product-rollback", payload);
+          updateBulkRow(row.id, { status: "done", message: "Rollback completed." });
+        } else {
+          const context = await buildBulkContext(row, mode);
+          updateBulkRow(row.id, { message: "Migrating product..." });
+          if (mode === "outlet") {
+          await handleStockUpdate(context);
+          } else {
+            await handleInventoryMigrationSave(context);
+          }
+          updateBulkRow(row.id, { status: "done", message: "Migration completed." });
+        }
+        await sleepForReactState();
+      } catch (error) {
+        const failureMessage = getErrorMessage(
+          error,
+          mode === "rollback" ? "Rollback failed." : "Migration failed."
+        );
+        updateBulkRow(row.id, {
+          status: "failed",
+          message: failureMessage,
+        });
+      }
+    }
+
+    setBulkRunning(false);
+    if (mode === "rollback") {
+      dispatch(fetchInventoryProducts());
+      dispatch(fetchInventoryDispatchOrders());
+      dispatch(fetchStockTransactions());
+      if (token) dispatch(fetchAllProductsFresh({ token }));
+      await loadTrackingRequests({ preserveSelection: false });
+    }
+    setBulkMessage(`Bulk ${mode} finished. Review row status below.`);
+  };
+
+  const renderBulkMigrationPanel = () => {
+    if (!["outlet", "inventory", "rollback"].includes(migrationMode)) return null;
+    const modeLabel =
+      migrationMode === "outlet"
+        ? "Outlet"
+        : migrationMode === "rollback"
+          ? "Rollback"
+          : "Inventory";
+    const isRollbackMode = migrationMode === "rollback";
+    const doneCount = bulkRows.filter((row) => row.status === "done").length;
+    const failedCount = bulkRows.filter((row) => row.status === "failed").length;
+
+    return (
+      <section className="rounded-lg border bg-white p-4 shadow-sm">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="font-bold text-gray-900">{modeLabel} Bulk Migration</h2>
+            <p className="text-sm text-gray-500">
+              Upload Excel or CSV, review products, then run one product at a time.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <label className={`${buttonClass} cursor-pointer border bg-white text-gray-700 hover:bg-gray-50`}>
+              <UploadCloud size={17} />
+              Upload File
+              <input
+                type="file"
+                accept=".xlsx,.xls,.csv"
+                onChange={handleBulkFileUpload}
+                className="hidden"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={handleBulkMigration}
+              disabled={bulkRunning || bulkRows.length === 0}
+              className={`${buttonClass} bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-300`}
+            >
+              <PackagePlus size={17} />
+              {bulkRunning ? "Running..." : `Start ${modeLabel} Bulk`}
+            </button>
+          </div>
+        </div>
+
+        {bulkFileName || bulkMessage ? (
+          <div className="mb-3 rounded-lg bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-800">
+            {bulkFileName ? `${bulkFileName} | ` : ""}
+            {bulkMessage}
+            {bulkRows.length ? ` Done: ${doneCount}, Failed: ${failedCount}` : ""}
+          </div>
+        ) : null}
+
+        {bulkRows.length ? (
+          <div className="overflow-auto rounded-lg border">
+            <table className="min-w-[2800px] w-full table-fixed text-sm">
+              <thead className="bg-gray-50 text-xs uppercase text-gray-500">
+                <tr>
+                  <th className="w-24 p-2 text-left">Status</th>
+                  <th className="w-72 p-2 text-left">Product</th>
+                  {isRollbackMode ? <th className="w-36 p-2 text-left">Request ID</th> : null}
+                  {isRollbackMode ? <th className="w-40 p-2 text-left">Transaction ID</th> : null}
+                  {isRollbackMode ? <th className="w-32 p-2 text-left">Product ID</th> : null}
+                  {isRollbackMode ? <th className="w-32 p-2 text-left">Barcode ID</th> : null}
+                  <th className="w-40 p-2 text-left">Brand</th>
+                  <th className="w-40 p-2 text-left">Category</th>
+                  <th className="w-44 p-2 text-left">Barcode</th>
+                  <th className="w-24 p-2 text-left">Units</th>
+                  <th className="w-24 p-2 text-left">Price</th>
+                  <th className="w-24 p-2 text-left">Total</th>
+                  <th className="w-28 p-2 text-left">Pack</th>
+                  <th className="w-36 p-2 text-left">Warehouse</th>
+                  <th className="w-36 p-2 text-left">Outlet</th>
+                  <th className="w-44 p-2 text-left">Supplier</th>
+                  <th className="w-28 p-2 text-left">MFG</th>
+                  <th className="w-28 p-2 text-left">Expiry</th>
+                  <th className="w-28 p-2 text-left">HSN</th>
+                  <th className="w-20 p-2 text-left">Tax</th>
+                  <th className="w-40 p-2 text-left">Image</th>
+                  <th className="w-56 p-2 text-left">Image URL</th>
+                  {isRollbackMode ? <th className="w-32 p-2 text-left">Rollback Qty</th> : null}
+                  {isRollbackMode ? <th className="w-44 p-2 text-left">Scope</th> : null}
+                  <th className="w-56 p-2 text-left">Remarks</th>
+                  {isRollbackMode ? <th className="w-56 p-2 text-left">Reason</th> : null}
+                  <th className="w-64 p-2 text-left">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {bulkRows.map((row) => {
+                  const rollbackTransactionOptions =
+                    migrationMode === "rollback" ? getBulkRollbackTransactionOptions(row) : [];
+                  const selectedTransactionMissing =
+                    row.transactionId &&
+                    !rollbackTransactionOptions.some(
+                      (transaction) =>
+                        String(getTransactionId(transaction)) === String(row.transactionId)
+                    );
+                  const transactionSelectOptions = selectedTransactionMissing
+                    ? [{ id: row.transactionId, transaction_id: row.transactionId }, ...rollbackTransactionOptions]
+                    : rollbackTransactionOptions;
+
+                  return (
+                  <tr key={row.id} className="border-t">
+                    <td className="p-2">
+                      <span className={`rounded-full px-2 py-1 text-[11px] font-bold uppercase ${getStageBadgeClass(row.status)}`}>
+                        {row.status}
+                      </span>
+                    </td>
+                    <td className="max-w-[260px] p-2 font-semibold text-gray-900">
+                      <div className="truncate" title={row.productName}>{row.productName || "-"}</div>
+                    </td>
+                    {isRollbackMode ? (
+                    <td className="max-w-[140px] p-2">
+                      <input
+                        value={row.requestId || ""}
+                        onChange={(event) => updateBulkRowField(row.id, "requestId", event.target.value)}
+                        className={`${fieldClass} min-w-0 py-1`}
+                      />
+                    </td>
+                    ) : null}
+                    {isRollbackMode ? (
+                    <td className="max-w-[140px] p-2">
+                      {(
+                        <select
+                          value={row.transactionId || ""}
+                          onChange={(event) => {
+                            const selected = transactionSelectOptions.find(
+                              (transaction) =>
+                                String(getTransactionId(transaction)) === String(event.target.value)
+                            );
+                            if (selected) {
+                              applyBulkRollbackTransaction(row.id, selected);
+                            } else {
+                              updateBulkRowField(row.id, "transactionId", event.target.value);
+                            }
+                          }}
+                          className={`${fieldClass} min-w-0 py-1`}
+                        >
+                          <option value="">
+                            {transactionSelectOptions.length ? "Select tx" : "No tx found"}
+                          </option>
+                          {transactionSelectOptions.map((transaction) => {
+                            const transactionId = getTransactionId(transaction);
+                            const requestId = getTransactionRequestId(transaction);
+
+                            return (
+                              <option key={transactionId || requestId} value={transactionId || ""}>
+                                {transactionId || "-"}
+                              </option>
+                            );
+                          })}
+                        </select>
+                      )}
+                    </td>
+                    ) : null}
+                    {isRollbackMode ? (
+                    <td className="max-w-[120px] p-2">
+                      <input
+                        value={row.productId || ""}
+                        onChange={(event) => updateBulkRowField(row.id, "productId", event.target.value)}
+                        className={`${fieldClass} min-w-0 py-1`}
+                      />
+                    </td>
+                    ) : null}
+                    {isRollbackMode ? (
+                    <td className="max-w-[120px] p-2">
+                      <input
+                        value={row.productBarcodeId || ""}
+                        onChange={(event) => updateBulkRowField(row.id, "productBarcodeId", event.target.value)}
+                        className={`${fieldClass} min-w-0 py-1`}
+                      />
+                    </td>
+                    ) : null}
+                    <td className="max-w-[160px] p-2">
+                      <div className="truncate" title={row.brand}>{row.brand || "-"}</div>
+                    </td>
+                    <td className="max-w-[160px] p-2">
+                      <div className="truncate" title={row.category}>{row.category || "-"}</div>
+                    </td>
+                    <td className="max-w-[160px] p-2">
+                      <div className="truncate" title={row.barcode}>{row.barcode || "-"}</div>
+                    </td>
+                    <td className="p-2">{row.noOfUnits || "-"}</td>
+                    <td className="p-2">{row.unitPrice || "-"}</td>
+                    <td className="p-2">{row.total || "-"}</td>
+                    <td className="p-2">{row.packText || "-"}</td>
+                    <td className="p-2">{row.warehouse || "-"}</td>
+                    <td className="p-2">{row.outlet || "-"}</td>
+                    <td className="p-2">{row.supplier || "-"}</td>
+                    <td className="p-2">{row.mfgDate || "-"}</td>
+                    <td className="p-2">{row.expDate || "-"}</td>
+                    <td className="p-2">{row.hsnCode || "-"}</td>
+                    <td className="p-2">{row.gstRate || "-"}</td>
+                    <td className="max-w-[160px] p-2">
+                      <div className="truncate" title={row.imageName}>
+                        {row.imageName || "-"}
+                      </div>
+                    </td>
+                    <td className="max-w-[220px] p-2">
+                      <div className="truncate" title={row.imageUrl}>
+                        {row.imageUrl || "-"}
+                      </div>
+                    </td>
+                    {isRollbackMode ? (
+                    <td className="p-2">
+                      <input
+                        value={row.rollbackQuantity || ""}
+                        onChange={(event) => updateBulkRowField(row.id, "rollbackQuantity", event.target.value)}
+                        className={`${fieldClass} min-w-24 py-1`}
+                      />
+                    </td>
+                    ) : null}
+                    {isRollbackMode ? (
+                    <td className="max-w-[160px] p-2">
+                      <select
+                        value={row.rollbackScope || "single_transaction"}
+                        onChange={(event) => updateBulkRowField(row.id, "rollbackScope", event.target.value)}
+                        className={`${fieldClass} min-w-40 py-1`}
+                      >
+                        <option value="single_transaction">Only this transaction</option>
+                        <option value="request_product">This product in request</option>
+                        <option value="full_request">Full request</option>
+                      </select>
+                    </td>
+                    ) : null}
+                    <td className="max-w-[220px] p-2 text-xs font-semibold text-gray-600">
+                      <div className="truncate" title={row.remarks}>{row.remarks || "-"}</div>
+                    </td>
+                    {isRollbackMode ? (
+                    <td className="max-w-[220px] p-2 text-xs font-semibold text-gray-600">
+                      <input
+                        value={row.reason || ""}
+                        onChange={(event) => updateBulkRowField(row.id, "reason", event.target.value)}
+                        className={`${fieldClass} min-w-52 py-1`}
+                      />
+                    </td>
+                    ) : null}
+                    <td className="max-w-[240px] p-2 text-xs font-semibold text-gray-600">
+                      <div className="truncate" title={row.message}>{row.message || "-"}</div>
+                    </td>
+                  </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+      </section>
+    );
   };
 
   const renderTrackingMonitor = () => (
@@ -3318,6 +4420,8 @@ const ApplicationMigrationHelperPage = () => {
             Product Rollback
           </button>
         </section>
+
+        {renderBulkMigrationPanel()}
 
         {migrationMode === "outlet" ? (
         <section className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(320px,0.95fr)_minmax(420px,1.4fr)]">
