@@ -233,6 +233,36 @@ const getPurchaseAmount = (item) => {
   return getStockQty(item) * getPurchaseUnitPrice(item);
 };
 
+const getStockBrandName = (item) =>
+  firstValue(
+    item?.brand,
+    item?.brand_name,
+    item?.brand_name_english,
+    item?.brandName,
+    item?.brandNameEnglish
+  );
+
+const getStockProductName = (item) =>
+  firstValue(
+    item?.product_name,
+    item?.product_name_eng,
+    item?.product_name_tel,
+    item?.productName,
+    item?.name,
+    item?.product_id
+  );
+
+const getStockProductDisplayName = (item) => {
+  const brand = String(getStockBrandName(item) || '').trim();
+  const product = String(getStockProductName(item) || '').trim();
+
+  if (!brand) return product || '-';
+  if (!product) return brand;
+  if (product.toLowerCase().startsWith(brand.toLowerCase())) return product;
+
+  return `${brand} ${product}`;
+};
+
 const flattenOutletProducts = (
   products = [],
   fallbackOutletName = '',
@@ -345,6 +375,7 @@ const OutletStockTable = ({
     return products.filter((item) =>
       [
         item.product_name,
+        getStockProductDisplayName(item),
         item.product_code,
         item.sku_id,
         item.bar_code,
@@ -403,7 +434,7 @@ const OutletStockTable = ({
             <tbody>
               {filteredProducts.map((item) => (
                 <tr key={item.id} className="border-b hover:bg-gray-50">
-                  <td className="p-3 font-medium">{item.product_name}</td>
+                  <td className="p-3 font-medium">{getStockProductDisplayName(item)}</td>
                   <td className="p-3">{item.brand}</td>
                   <td className="p-3">
                     {getLocationName(item, 'outlet') || getLocationId(item, 'outlet') || '-'}

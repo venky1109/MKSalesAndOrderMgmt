@@ -1,5 +1,38 @@
 import React, { useMemo, useState } from 'react';
 
+const firstValue = (...values) =>
+  values.find((value) => value !== undefined && value !== null && value !== '');
+
+const getInventoryBrandName = (item) =>
+  firstValue(
+    item?.brand_name_english,
+    item?.brand_name,
+    item?.brand,
+    item?.brandName,
+    item?.brandNameEnglish
+  );
+
+const getInventoryProductName = (item) =>
+  firstValue(
+    item?.product_name,
+    item?.product_name_eng,
+    item?.product_name_tel,
+    item?.productName,
+    item?.name,
+    item?.product_id
+  );
+
+const getInventoryProductDisplayName = (item) => {
+  const brand = String(getInventoryBrandName(item) || '').trim();
+  const product = String(getInventoryProductName(item) || '').trim();
+
+  if (!brand) return product || '-';
+  if (!product) return brand;
+  if (product.toLowerCase().startsWith(brand.toLowerCase())) return product;
+
+  return `${brand} ${product}`;
+};
+
 const InventoryProductsTable = ({
   products = [],
   loading,
@@ -14,10 +47,16 @@ const InventoryProductsTable = ({
 
     return products.filter((item) => {
       return (
-        item.product_name?.toLowerCase().includes(value) ||
-        item.product_code?.toLowerCase().includes(value) ||
-        item.sku_id?.toLowerCase().includes(value) ||
-        item.bar_code?.toLowerCase().includes(value)
+        [
+          getInventoryProductDisplayName(item),
+          item.product_name,
+          item.product_code,
+          item.sku_id,
+          item.bar_code,
+          getInventoryBrandName(item),
+        ]
+          .filter(Boolean)
+          .some((field) => String(field).toLowerCase().includes(value))
       );
     });
   }, [products, search]);
@@ -71,7 +110,7 @@ const InventoryProductsTable = ({
             <tbody>
               {filteredProducts.map((item) => (
                 <tr key={item.id} className="border-b hover:bg-gray-50">
-                  <td className="p-3 font-medium">{item.product_name}</td>
+                  <td className="p-3 font-medium">{getInventoryProductDisplayName(item)}</td>
                   <td className="p-3">{item.sku_id}</td>
                   <td className="p-3">{item.bar_code || '-'}</td>
                   <td className="p-3 text-right font-semibold">

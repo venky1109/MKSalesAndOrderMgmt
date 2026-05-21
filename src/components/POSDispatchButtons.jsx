@@ -78,11 +78,9 @@ const POSDispatchButtons = ({ buttonClass = "" }) => {
     return String(value).slice(0, 10);
   };
 
-  const getProductName = (p) =>
-    p.product_name || p.product_name_eng || p.product_name_tel || "-";
+  const getProductName = (p) => getDispatchItemProductName(p);
 
-  const getBrandName = (p) =>
-    p.brand_name_english || p.brand_name_telugu || p.brand_name || "-";
+  const getBrandName = (p) => getDispatchItemBrand(p);
 
   const getCategoryName = (p) =>
     p.category_name_english || p.category_name_telugu || p.category_name || "-";

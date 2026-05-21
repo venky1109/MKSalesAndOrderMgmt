@@ -9,6 +9,8 @@ import {
 } from '../features/inventory/stockManagerInventorySlice';
 import {
   getDispatchDestinationLabel,
+  getDispatchItemBrand,
+  getDispatchItemProductName,
   getWarehouseLabel,
 } from '../utils/dispatchDisplay';
 
@@ -78,20 +80,17 @@ const CreateDispatchOrderSection = ({
           available_units: Number(item.no_of_units || item.count_in_stock || 0),
           product_barcode_id: item.product_barcode_id,
           display_barcode: item.mk_barcode || item.bar_code || item.barcode || '',
-          display_product_name:
-            item.product_name ||
-            item.product_name_eng ||
-            item.product_name_tel ||
-            item.product_code ||
-            'Product',
+          display_product_name: getDispatchItemProductName(item),
           searchText: [
             item.product_code,
+            getDispatchItemProductName(item),
             item.product_name,
             item.product_name_eng,
             item.product_name_tel,
             item.mk_barcode,
             item.bar_code,
             item.barcode,
+            getDispatchItemBrand(item),
             item.brand_name_english,
             item.category_name_english,
             item.unit_name,
@@ -152,13 +151,9 @@ const CreateDispatchOrderSection = ({
       barcode_quantity: inventoryRow.barcode_quantity || '',
 
       product_code: inventoryRow.product_code,
-      product_name:
-        inventoryRow.product_name ||
-        inventoryRow.product_name_eng ||
-        inventoryRow.product_name_tel ||
-        inventoryRow.product_code,
+      product_name: getDispatchItemProductName(inventoryRow),
 
-      brand_name_english: inventoryRow.brand_name_english,
+      brand_name_english: getDispatchItemBrand(inventoryRow),
       category_name_english: inventoryRow.category_name_english,
       unit_short_code: inventoryRow.unit_short_code,
       unit_name: inventoryRow.unit_name,
@@ -487,7 +482,7 @@ const CreateDispatchOrderSection = ({
                   >
                     <td className="p-2">
                       <div className="font-semibold">
-                        {item.product_code} - {item.product_name}
+                        {[item.product_code, item.product_name].filter(Boolean).join(' - ')}
                       </div>
                       <div className="text-xs text-gray-500">
                         Inventory ID: {item.inventory_product_id}

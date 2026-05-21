@@ -30,8 +30,43 @@ export const getDispatchDestinationLabel = (item, destinationType) => {
   }`;
 };
 
+const firstValue = (...values) =>
+  values.find((value) => value !== undefined && value !== null && value !== '');
+
+const joinBrandAndProductName = (brandName, productName) => {
+  const brand = String(brandName || '').trim();
+  const product = String(productName || '').trim();
+
+  if (!brand) return product || '-';
+  if (!product) return brand;
+  if (product.toLowerCase().startsWith(brand.toLowerCase())) return product;
+
+  return `${brand} ${product}`;
+};
+
+const getDispatchItemBrandValue = (item) =>
+  firstValue(
+    item.brand_name_english,
+    item.brand_name_telugu,
+    item.brand_name,
+    item.brand,
+    item.brandName
+  );
+
+export const getDispatchItemBrand = (item) => getDispatchItemBrandValue(item) || '-';
+
 export const getDispatchItemProductName = (item) =>
-  item.product_name_eng || item.product_name_tel || item.product_name || '-';
+  joinBrandAndProductName(
+    getDispatchItemBrandValue(item),
+    firstValue(
+      item.product_name_eng,
+      item.product_name_tel,
+      item.product_name,
+      item.productName,
+      item.name,
+      item.product_code
+    )
+  );
 
 export const getDispatchItemBarcode = (item) =>
   item.mk_barcode || item.barcode || item.bar_code || item.product_barcode_id || '-';
@@ -41,9 +76,6 @@ export const getDispatchItemCategory = (item) =>
   item.category_name_telugu ||
   item.category_name ||
   '-';
-
-export const getDispatchItemBrand = (item) =>
-  item.brand_name_english || item.brand_name_telugu || item.brand_name || '-';
 
 export const getDispatchItemUnit = (item) =>
   [

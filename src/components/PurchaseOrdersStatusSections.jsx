@@ -58,6 +58,18 @@ const getBrandName = (p) =>
   p?.brand_name ||
   '';
 
+const getProductDisplayName = (item) => {
+  const productName = String(item?.product_name || item?.product_id || '').trim();
+  const brandName = String(item?.brand_name || item?.brand_name_english || '').trim();
+
+  if (!brandName) return productName;
+  if (!productName) return brandName;
+
+  return productName.toLowerCase().startsWith(brandName.toLowerCase())
+    ? productName
+    : `${brandName} ${productName}`;
+};
+
 const PurchaseOrdersStatusSections = ({
   purchaseOrders = [],
   productBarcodes = [],
@@ -1356,8 +1368,7 @@ const PurchaseOrdersStatusSections = ({
                                           ) : (
                                             <>
                                               <div className="font-medium">
-                                                {item.product_name ||
-                                                  item.product_id}
+                                                {getProductDisplayName(item)}
                                               </div>
                                               <div className="text-xs text-gray-500">
                                                 Code: {item.product_code || '-'}

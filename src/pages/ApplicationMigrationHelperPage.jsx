@@ -121,6 +121,17 @@ const getProductSearchText = (product) =>
 const sameNormalizedText = (left, right) =>
   normalizeText(left).replace(/\s+/g, " ") === normalizeText(right).replace(/\s+/g, " ");
 
+const joinBrandAndProductName = (brandName, productName) => {
+  const brand = String(brandName || "").trim();
+  const product = String(productName || "").trim();
+
+  if (!brand) return product;
+  if (!product) return brand;
+  if (product.toLowerCase().startsWith(brand.toLowerCase())) return product;
+
+  return `${brand} ${product}`;
+};
+
 const getCatalogImageName = (image) =>
   image?.image_name || image?.name || image?.fileName || "";
 
@@ -1682,6 +1693,10 @@ const ApplicationMigrationHelperPage = () => {
 
       const inventoryUnitPrice = Number(outletPostingForm.unit_price || financialForm.price || 0);
       const migrationPurchaseUnitPrice = toWholeRupees(inventoryUnitPrice);
+      const purchaseProductName = joinBrandAndProductName(
+        productForm.brand_name,
+        productForm.product_name_eng
+      );
       currentStage = "purchase";
       markMigrationStage("outlet", "purchase", "running", "Creating verified migration purchase request.");
       const purchaseOrder = await dispatch(
@@ -1703,7 +1718,7 @@ const ApplicationMigrationHelperPage = () => {
               no_of_units: Number(outletPostingForm.no_of_units || newQuantity || 1),
               expected_unit_price: migrationPurchaseUnitPrice,
               actual_unit_price: migrationPurchaseUnitPrice,
-              product_name: productForm.product_name_eng,
+              product_name: purchaseProductName,
               category_name: productForm.category_name,
               brand_name: productForm.brand_name,
               unit_name: pack.units,
@@ -2898,6 +2913,7 @@ const ApplicationMigrationHelperPage = () => {
         ...prev,
         vendor_barcode: prev.vendor_barcode || base.vendorBarcode,
       }));
+      const purchaseProductName = joinBrandAndProductName(brandName, productName);
       const inventoryImageUrl = resolvedImageUrl || existingImageUrl || imageUrl || "";
 
       if (inventoryImageUrl) {
@@ -2943,7 +2959,7 @@ const ApplicationMigrationHelperPage = () => {
               no_of_units: Number(inventoryForm.no_of_units || 1),
               expected_unit_price: migrationPurchaseUnitPrice,
               actual_unit_price: migrationPurchaseUnitPrice,
-              product_name: productName,
+              product_name: purchaseProductName,
               product_code: hasSelectedNameMismatch ? "" : selectedBarcode.product_code,
               category_name: categoryName,
               brand_name: brandName,
@@ -2985,7 +3001,9 @@ const ApplicationMigrationHelperPage = () => {
           sku_id:
             inventoryForm.sku_id ||
             makeSkuId({
-              productCode: hasSelectedNameMismatch ? productName : selectedBarcode.product_code || productName,
+              productCode: hasSelectedNameMismatch
+                ? purchaseProductName
+                : selectedBarcode.product_code || purchaseProductName,
               batchId: inventoryForm.batch_id,
               expDate: inventoryForm.exp_date,
             }),
