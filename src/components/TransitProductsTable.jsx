@@ -55,7 +55,7 @@ const getTransitRows = (transitProducts, dispatchOrders) => {
 
   return dispatchOrders
     .filter((order) =>
-      ['sent', 'packed', 'dispatched'].includes(
+      ['sent', 'packed', 'label_printed', 'dispatched'].includes(
         String(order.dispatch_status || '').toLowerCase()
       )
     )

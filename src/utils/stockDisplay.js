@@ -1,5 +1,5 @@
 const stockNumberFormat = new Intl.NumberFormat('en-IN', {
-  maximumFractionDigits: 0,
+  maximumFractionDigits: 3,
 });
 
 export const formatStockQuantity = (value, fallback = '0') => {

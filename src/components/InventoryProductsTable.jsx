@@ -50,6 +50,26 @@ const getInventoryStockQuantity = (item) =>
 const getInventoryStockDisplay = (item) =>
   formatStockQuantity(getInventoryStockQuantity(item));
 
+const packQuantityFormat = new Intl.NumberFormat('en-IN', {
+  maximumFractionDigits: 3,
+});
+
+const getInventoryPackQuantity = (item) =>
+  firstValue(item?.quantity, item?.catalogQuantity, item?.barcode_quantity);
+
+const getInventoryPackQuantityDisplay = (item) => {
+  const value = getInventoryPackQuantity(item);
+  if (value === undefined) return '-';
+
+  const numericValue = Number(String(value).replace(/,/g, '').trim());
+  if (!Number.isFinite(numericValue)) return value || '-';
+
+  return packQuantityFormat.format(numericValue);
+};
+
+const getInventoryUnit = (item) =>
+  firstValue(item?.unit_short_code, item?.unit_name, item?.units, item?.unit);
+
 const columns = [
   {
     key: 'product',
@@ -63,6 +83,19 @@ const columns = [
     label: 'Barcode',
     align: 'left',
     getValue: (item) => item.bar_code,
+  },
+  {
+    key: 'quantity',
+    label: 'Quantity',
+    align: 'right',
+    type: 'number',
+    getValue: getInventoryPackQuantity,
+  },
+  {
+    key: 'unit',
+    label: 'Unit',
+    align: 'left',
+    getValue: getInventoryUnit,
   },
   {
     key: 'stock',
@@ -131,6 +164,8 @@ const InventoryProductsTable = ({
           item.product_code,
           item.sku_id,
           item.bar_code,
+          getInventoryPackQuantity(item),
+          getInventoryUnit(item),
           getInventoryBrandName(item),
         ]
           .filter(Boolean)
@@ -202,6 +237,8 @@ const InventoryProductsTable = ({
                   <td className="p-3 font-medium">{getInventoryProductDisplayName(item)}</td>
                   <td className="p-3">{item.sku_id}</td>
                   <td className="p-3">{item.bar_code || '-'}</td>
+                  <td className="p-3 text-right">{getInventoryPackQuantityDisplay(item)}</td>
+                  <td className="p-3">{getInventoryUnit(item) || '-'}</td>
                   <td className="p-3 text-right font-semibold">
                     {getInventoryStockDisplay(item)}
                   </td>
@@ -216,7 +253,7 @@ const InventoryProductsTable = ({
 
               {sortedProducts.length === 0 && (
                 <tr>
-                  <td colSpan="6" className="p-4 text-center text-gray-500">
+                  <td colSpan="8" className="p-4 text-center text-gray-500">
                     No inventory products found
                   </td>
                 </tr>

@@ -6,11 +6,12 @@ import CreateDispatchOrderSection from '../components/CreateDispatchOrderSection
 import DispatchOrdersSection from '../components/DispatchOrdersSection';
 
 import {
-  fetchSuppliers,
+  fetchDispatchStakeholders,
   fetchWarehouses,
   fetchOutlets,
   fetchInventoryProducts,
   fetchInventoryDispatchOrders,
+  fetchCatalogBarcodes,
 } from '../features/inventory/stockManagerInventorySlice';
 
 const DispatchPage = () => {
@@ -20,9 +21,10 @@ const DispatchPage = () => {
 
   const {
     inventoryProducts = [],
-    suppliers = [],
+    dispatchStakeholders = [],
     warehouses = [],
     outlets = [],
+    catalogBarcodes = [],
     inventoryDispatchOrders = [],
     inventoryDispatchLoading = false,
     inventoryDispatchError = null,
@@ -32,9 +34,10 @@ const DispatchPage = () => {
   useEffect(() => {
     if (userInfo?.token) {
       dispatch(fetchInventoryProducts());
-      dispatch(fetchSuppliers());
+      dispatch(fetchDispatchStakeholders());
       dispatch(fetchWarehouses());
       dispatch(fetchOutlets());
+      dispatch(fetchCatalogBarcodes());
       dispatch(fetchInventoryDispatchOrders());
     }
   }, [dispatch, userInfo?.token]);
@@ -63,15 +66,17 @@ const DispatchPage = () => {
 
         <CreateDispatchOrderSection
           inventoryProducts={inventoryProducts}
-          suppliers={suppliers}
+          dispatchStakeholders={dispatchStakeholders}
           warehouses={warehouses}
           outlets={outlets}
+          catalogBarcodes={catalogBarcodes}
           loading={inventoryDispatchLoading}
         />
 
         <DispatchOrdersSection
           orders={inventoryDispatchOrders}
           loading={inventoryDispatchLoading}
+          catalogBarcodes={catalogBarcodes}
         />
       </main>
     </StockManagerLayout>

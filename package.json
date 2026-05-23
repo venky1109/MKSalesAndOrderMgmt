@@ -28,6 +28,7 @@
   },
   "scripts": {
     "start": "react-scripts start",
+    "label-printer": "node scripts/local-label-printer.js",
     "build": "react-scripts build",
     "test": "react-scripts test",
     "eject": "react-scripts eject"

@@ -174,7 +174,12 @@ const getErrorMessage = (error, fallback = "Action failed.") => {
 };
 
 const isDuplicateCodeError = (error) =>
-  /duplicate key|unique constraint|_code_key/i.test(getErrorMessage(error, ""));
+  /_code_key|duplicate key.*code|unique constraint.*code/i.test(
+    getErrorMessage(error, "")
+  );
+
+const isDuplicateUniqueError = (error) =>
+  /duplicate key|unique constraint/i.test(getErrorMessage(error, ""));
 
 const getLegacyBarcode = (item) =>
   asArray(item?.barcode)[0] ||
@@ -375,6 +380,26 @@ const normalizeRows = (payload, keys = []) => {
   if (Array.isArray(payload?.data?.rows)) return payload.data.rows;
   return [];
 };
+
+const findCatalogBrandByName = (rows, brandName) =>
+  rows.find((brand) =>
+    [
+      brand?.brand_name_english,
+      brand?.brand_name_telugu,
+      brand?.brand_name,
+      brand?.name,
+    ].some((value) => sameNormalizedText(value, brandName))
+  );
+
+const findCatalogCategoryByName = (rows, categoryName) =>
+  rows.find((category) =>
+    [
+      category?.category_name_english,
+      category?.category_name_telugu,
+      category?.category_name,
+      category?.name,
+    ].some((value) => sameNormalizedText(value, categoryName))
+  );
 
 const getRequestId = (request) =>
   pickId(request?.id, request?._id, request?.request_id, request?.requestId);
@@ -2731,13 +2756,8 @@ const ApplicationMigrationHelperPage = () => {
     }
 
     const unitMatch = findCatalogUnit(units, pack.units);
-    let brandMatch = catalogBrands.find(
-      (brand) => normalizeText(brand.brand_name_english) === normalizeText(brandName)
-    );
-    let categoryMatch = catalogCategories.find(
-      (category) =>
-        normalizeText(category.category_name_english) === normalizeText(categoryName)
-    );
+    let brandMatch = findCatalogBrandByName(catalogBrands, brandName);
+    let categoryMatch = findCatalogCategoryByName(catalogCategories, categoryName);
     let productMatch = catalogProducts.find(
       (product) =>
         sameNormalizedText(product.product_name_eng, productName) ||
@@ -2756,10 +2776,27 @@ const ApplicationMigrationHelperPage = () => {
     const existingUnitMatch = units.find(
       (unit) => String(unit.id) === String(existingUnitId)
     );
+    const existingBrandMatchesName =
+      existingBrandMatch &&
+      [
+        existingBrandMatch.brand_name_english,
+        existingBrandMatch.brand_name_telugu,
+        existingBrandMatch.brand_name,
+        existingBrandMatch.name,
+      ].some((value) => sameNormalizedText(value, brandName));
+    const existingCategoryMatchesName =
+      existingCategoryMatch &&
+      [
+        existingCategoryMatch.category_name_english,
+        existingCategoryMatch.category_name_telugu,
+        existingCategoryMatch.category_name,
+        existingCategoryMatch.name,
+      ].some((value) => sameNormalizedText(value, categoryName));
     let productId = existingProductMatch?.id || productMatch?.id;
-    let brandId = existingBrandMatch?.id || brandMatch?.id;
-    let categoryId = existingCategoryMatch?.id || categoryMatch?.id;
-    let unitId = existingUnitMatch?.id || unitMatch?.id;
+    let brandId = brandMatch?.id || (existingBrandMatchesName ? existingBrandMatch?.id : null);
+    let categoryId =
+      categoryMatch?.id || (existingCategoryMatchesName ? existingCategoryMatch?.id : null);
+    let unitId = unitMatch?.id || existingUnitMatch?.id;
     const catalogActions = [
       brandId ? "brand exists" : "brand missing",
       categoryId ? "category exists" : "category missing",
@@ -2768,37 +2805,61 @@ const ApplicationMigrationHelperPage = () => {
     ];
 
     if (!brandId) {
-      const createdBrand = await createCatalogEntityWithCodeRetry({
-        entity: "brands",
-        rows: catalogBrands,
-        codeField: "brand_code",
-        prefix: "MKB",
-        buildPayload: (code) => ({
-            brand_code: code,
-            brand_name_english: brandName,
-            brand_name_telugu: brandName,
-        }),
-      });
-      brandId = getEntityId(createdBrand);
-      catalogActions[0] = "brand inserted";
-      dispatch(fetchCatalogEntity("brands"));
+      try {
+        const createdBrand = await createCatalogEntityWithCodeRetry({
+          entity: "brands",
+          rows: catalogBrands,
+          codeField: "brand_code",
+          prefix: "MKB",
+          buildPayload: (code) => ({
+              brand_code: code,
+              brand_name_english: brandName,
+              brand_name_telugu: brandName,
+          }),
+        });
+        brandId = getEntityId(createdBrand);
+        catalogActions[0] = "brand inserted";
+        dispatch(fetchCatalogEntity("brands"));
+      } catch (error) {
+        if (!isDuplicateUniqueError(error)) throw error;
+
+        const refreshedBrands = await dispatch(fetchCatalogEntity("brands")).unwrap();
+        const refreshedBrandRows = normalizeRows(refreshedBrands, ["brands"]);
+        const duplicateBrand = findCatalogBrandByName(refreshedBrandRows, brandName);
+        brandId = duplicateBrand?.id;
+
+        if (!brandId) throw error;
+        catalogActions[0] = "brand exists";
+      }
     }
 
     if (!categoryId) {
-      const createdCategory = await createCatalogEntityWithCodeRetry({
-        entity: "categories",
-        rows: catalogCategories,
-        codeField: "category_code",
-        prefix: "MKC",
-        buildPayload: (code) => ({
-            category_code: code,
-            category_name_english: categoryName,
-            category_name_telugu: categoryName,
-        }),
-      });
-      categoryId = getEntityId(createdCategory);
-      catalogActions[1] = "category inserted";
-      dispatch(fetchCatalogEntity("categories"));
+      try {
+        const createdCategory = await createCatalogEntityWithCodeRetry({
+          entity: "categories",
+          rows: catalogCategories,
+          codeField: "category_code",
+          prefix: "MKC",
+          buildPayload: (code) => ({
+              category_code: code,
+              category_name_english: categoryName,
+              category_name_telugu: categoryName,
+          }),
+        });
+        categoryId = getEntityId(createdCategory);
+        catalogActions[1] = "category inserted";
+        dispatch(fetchCatalogEntity("categories"));
+      } catch (error) {
+        if (!isDuplicateUniqueError(error)) throw error;
+
+        const refreshedCategories = await dispatch(fetchCatalogEntity("categories")).unwrap();
+        const refreshedCategoryRows = normalizeRows(refreshedCategories, ["categories"]);
+        const duplicateCategory = findCatalogCategoryByName(refreshedCategoryRows, categoryName);
+        categoryId = duplicateCategory?.id;
+
+        if (!categoryId) throw error;
+        catalogActions[1] = "category exists";
+      }
     }
 
     if (!unitId) {
@@ -2950,12 +3011,19 @@ const ApplicationMigrationHelperPage = () => {
   };
 
   const handleInventoryMigrationSave = async (bulkContext = null) => {
-    const form = bulkContext?.inventoryForm || inventoryForm;
-    const selectedBarcodeOverride = bulkContext?.selectedInventoryBarcode;
-    const contextInventorySearch = bulkContext?.inventorySearch ?? inventorySearch;
-    const contextResolvedImageUrl = bulkContext?.resolvedImageUrl ?? resolvedImageUrl;
-    const contextExistingImageUrl = bulkContext?.existingImageUrl ?? existingImageUrl;
-    const contextImageUrl = bulkContext?.imageUrl ?? imageUrl;
+    const isBulkContext = Boolean(bulkContext?.inventoryForm);
+    const form = isBulkContext ? bulkContext.inventoryForm : inventoryForm;
+    const selectedBarcodeOverride = isBulkContext ? bulkContext.selectedInventoryBarcode : null;
+    const contextInventorySearch = isBulkContext
+      ? bulkContext.inventorySearch ?? inventorySearch
+      : inventorySearch;
+    const contextResolvedImageUrl = isBulkContext
+      ? bulkContext.resolvedImageUrl ?? resolvedImageUrl
+      : resolvedImageUrl;
+    const contextExistingImageUrl = isBulkContext
+      ? bulkContext.existingImageUrl ?? existingImageUrl
+      : existingImageUrl;
+    const contextImageUrl = isBulkContext ? bulkContext.imageUrl ?? imageUrl : imageUrl;
     if (migrationInFlightRef.current && inventorySaveBusy) {
       setStatus("Inventory migration is already running.");
       return;
@@ -2978,7 +3046,7 @@ const ApplicationMigrationHelperPage = () => {
       migrationInFlightRef.current = false;
       markMigrationStage("inventory", "start", "failed", "Required fields are missing.");
       setStatus("Warehouse, supplier, quantity and expiry date are required for inventory.");
-      if (bulkContext) throw new Error("Warehouse, supplier, quantity and expiry date are required for inventory.");
+      if (isBulkContext) throw new Error("Warehouse, supplier, quantity and expiry date are required for inventory.");
       return;
     }
 
@@ -3043,7 +3111,7 @@ const ApplicationMigrationHelperPage = () => {
         setStatus(
           `Cannot start catalog requests. Missing ${missingCatalogFields.join(", ")}.`
         );
-        if (bulkContext) throw new Error(`Missing ${missingCatalogFields.join(", ")}.`);
+        if (isBulkContext) throw new Error(`Missing ${missingCatalogFields.join(", ")}.`);
         return;
       }
 
@@ -3058,7 +3126,7 @@ const ApplicationMigrationHelperPage = () => {
         setStatus(
           `Cannot start catalog requests. Quantity / Weight must include both values. Parsed quantity="${pack.quantity || "-"}", unit="${pack.units || "-"}".`
         );
-        if (bulkContext) throw new Error("Quantity / Weight must include both values.");
+        if (isBulkContext) throw new Error("Quantity / Weight must include both values.");
         return;
       }
       const taxFallback = applyHsnGstFallback(
@@ -3119,7 +3187,7 @@ const ApplicationMigrationHelperPage = () => {
           selectedBarcode.category_id,
           selectedBarcode.catalogCategoryId
         ),
-        existingUnitId: selectedBarcode.unit_id || bulkContext?.existingUnitId,
+        existingUnitId: form.unit_id || bulkContext?.existingUnitId || selectedBarcode.unit_id,
         stageMode: "inventory",
       });
       if (!bulkContext) {
@@ -3257,7 +3325,7 @@ const ApplicationMigrationHelperPage = () => {
     } catch (error) {
       markMigrationStage("inventory", currentStage, "failed", error?.message || "Stage failed.");
       setStatus(error?.message || "Unable to update inventory.");
-      if (bulkContext) throw error;
+      if (isBulkContext) throw error;
     } finally {
       setInventorySaveBusy(false);
       setBusy(false);
@@ -5824,7 +5892,7 @@ const ApplicationMigrationHelperPage = () => {
             <div className="mt-4">
               <button
                 type="button"
-                onClick={handleInventoryMigrationSave}
+                onClick={() => handleInventoryMigrationSave()}
                 disabled={inventorySaveBusy}
                 className={`${buttonClass} bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-300`}
               >

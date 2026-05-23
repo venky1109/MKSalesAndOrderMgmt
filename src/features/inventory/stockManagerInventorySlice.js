@@ -24,6 +24,8 @@ const normalizeArray = (payload) => {
   return [];
 };
 
+const normalizeText = (value) => String(value || '').trim().toLowerCase();
+
 /* =========================
    INVENTORY PRODUCTS
 ========================= */
@@ -175,6 +177,29 @@ export const fetchSuppliers = createAsyncThunk(
           item.stakeholder_type === 'Supplier' ||
           item.stakeholder_type === 'SUPPLIER'
       );
+    } catch (error) {
+      return thunkAPI.rejectWithValue(
+        error.response?.data?.message || error.message
+      );
+    }
+  }
+);
+
+export const fetchDispatchStakeholders = createAsyncThunk(
+  'stockManagerInventory/fetchDispatchStakeholders',
+  async (_, thunkAPI) => {
+    try {
+      const { data } = await axios.get(
+        apiUrl('/catalog-pg/stakeholders'),
+        authConfig(thunkAPI.getState)
+      );
+
+      const list = normalizeArray(data);
+
+      return list.filter((item) => {
+        const type = normalizeText(item.stakeholder_type);
+        return type.includes('vendor') || type.includes('customer');
+      });
     } catch (error) {
       return thunkAPI.rejectWithValue(
         error.response?.data?.message || error.message
@@ -422,11 +447,11 @@ export const fetchInventoryDispatchOrders = createAsyncThunk(
 
 export const receiveDispatchToOutlet = createAsyncThunk(
   'stockManagerInventory/receiveDispatchToOutlet',
-  async ({ dispatchOrderId }, thunkAPI) => {
+  async ({ dispatchOrderId, items = [] }, thunkAPI) => {
     try {
       const { data } = await axios.put(
         apiUrl(`/dispatch-pg/orders/${dispatchOrderId}/received-to-outlet`),
-        {},
+        { items },
         authConfig(thunkAPI.getState)
       );
 
@@ -436,6 +461,81 @@ export const receiveDispatchToOutlet = createAsyncThunk(
         error.response?.data?.message || error.message
       );
     }
+  }
+);
+
+export const receiveDispatchToStakeholder = createAsyncThunk(
+  'stockManagerInventory/receiveDispatchToStakeholder',
+  async ({ dispatchOrderId }, thunkAPI) => {
+    const endpoints = [
+      `/dispatch-pg/orders/${dispatchOrderId}/received-to-stakeholder`,
+      `/dispatch-pg/orders/${dispatchOrderId}/received-by-stakeholder`,
+    ];
+
+    let lastError = null;
+
+    for (const endpoint of endpoints) {
+      try {
+        const { data } = await axios.put(
+          apiUrl(endpoint),
+          {},
+          authConfig(thunkAPI.getState)
+        );
+
+        return data;
+      } catch (error) {
+        lastError = error;
+
+        if (error.response?.status !== 404) {
+          return thunkAPI.rejectWithValue(
+            error.response?.data?.message || error.message
+          );
+        }
+      }
+    }
+
+    return thunkAPI.rejectWithValue(
+      lastError?.response?.data?.message ||
+        'Stakeholder receive is not available on the server yet'
+    );
+  }
+);
+
+export const completeInternalPackingDispatch = createAsyncThunk(
+  'stockManagerInventory/completeInternalPackingDispatch',
+  async ({ dispatchOrderId }, thunkAPI) => {
+    const endpoints = [
+      `/dispatch-pg/orders/${dispatchOrderId}/internal-packing-dispatched`,
+      `/dispatch-pg/orders/${dispatchOrderId}/complete-internal-packing`,
+      `/dispatch-pg/orders/${dispatchOrderId}/dispatch-to-packing`,
+    ];
+
+    let lastError = null;
+
+    for (const endpoint of endpoints) {
+      try {
+        const { data } = await axios.put(
+          apiUrl(endpoint),
+          {},
+          authConfig(thunkAPI.getState)
+        );
+
+        return data;
+      } catch (error) {
+        lastError = error;
+
+        if (error.response?.status !== 404) {
+          return thunkAPI.rejectWithValue(
+            error.response?.data?.message || error.message
+          );
+        }
+      }
+    }
+
+    return thunkAPI.rejectWithValue(
+      lastError?.response?.data?.message ||
+        'Internal packing dispatch endpoint is not available on the server yet'
+    );
   }
 );
 
@@ -548,6 +648,7 @@ const initialState = {
   brands: [],
   units: [],
   suppliers: [],
+  dispatchStakeholders: [],
   warehouses: [],
   categories: [],
   catalogBarcodes: [],
@@ -637,6 +738,9 @@ const stockManagerInventorySlice = createSlice({
       })
       .addCase(fetchSuppliers.fulfilled, (state, action) => {
         state.suppliers = normalizeArray(action.payload);
+      })
+      .addCase(fetchDispatchStakeholders.fulfilled, (state, action) => {
+        state.dispatchStakeholders = normalizeArray(action.payload);
       })
       .addCase(fetchWarehouses.fulfilled, (state, action) => {
         state.warehouses = normalizeArray(action.payload);
@@ -740,6 +844,69 @@ const stockManagerInventorySlice = createSlice({
         state.inventoryDispatchLoading = false;
         state.inventoryDispatchError =
           action.payload || 'Failed to receive dispatch to outlet';
+      })
+
+      .addCase(receiveDispatchToStakeholder.pending, (state) => {
+        state.inventoryDispatchLoading = true;
+        state.inventoryDispatchError = null;
+        state.inventoryDispatchSuccess = null;
+      })
+      .addCase(receiveDispatchToStakeholder.fulfilled, (state, action) => {
+        state.inventoryDispatchLoading = false;
+        state.inventoryDispatchSuccess =
+          action.payload?.message || 'Dispatch received by stakeholder successfully';
+
+        const updatedOrder = action.payload?.order || action.payload;
+
+        if (updatedOrder?.id) {
+          const index = state.inventoryDispatchOrders.findIndex(
+            (order) => String(order.id) === String(updatedOrder.id)
+          );
+
+          if (index !== -1) {
+            state.inventoryDispatchOrders[index] = {
+              ...state.inventoryDispatchOrders[index],
+              ...updatedOrder,
+            };
+          }
+        }
+      })
+      .addCase(receiveDispatchToStakeholder.rejected, (state, action) => {
+        state.inventoryDispatchLoading = false;
+        state.inventoryDispatchError =
+          action.payload || 'Failed to receive dispatch by stakeholder';
+      })
+
+      .addCase(completeInternalPackingDispatch.pending, (state) => {
+        state.inventoryDispatchLoading = true;
+        state.inventoryDispatchError = null;
+        state.inventoryDispatchSuccess = null;
+      })
+      .addCase(completeInternalPackingDispatch.fulfilled, (state, action) => {
+        state.inventoryDispatchLoading = false;
+        state.inventoryDispatchSuccess =
+          action.payload?.message ||
+          'Internal packing dispatched, inventory reduced, and packing stock added';
+
+        const updatedOrder = action.payload?.order || action.payload;
+
+        if (updatedOrder?.id) {
+          const index = state.inventoryDispatchOrders.findIndex(
+            (order) => String(order.id) === String(updatedOrder.id)
+          );
+
+          if (index !== -1) {
+            state.inventoryDispatchOrders[index] = {
+              ...state.inventoryDispatchOrders[index],
+              ...updatedOrder,
+            };
+          }
+        }
+      })
+      .addCase(completeInternalPackingDispatch.rejected, (state, action) => {
+        state.inventoryDispatchLoading = false;
+        state.inventoryDispatchError =
+          action.payload || 'Failed to complete internal packing dispatch';
       })
 
       .addCase(createInventoryDispatchOrder.pending, (state) => {

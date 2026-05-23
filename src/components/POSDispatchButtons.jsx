@@ -34,6 +34,8 @@ const emptyItem = {
   unit_name: "",
   weight: "",
   qty: "",
+  price: "",
+  dprice: "",
   notes: "",
 };
 
@@ -98,6 +100,73 @@ const POSDispatchButtons = ({ buttonClass = "" }) => {
 
   const getBarcode = (p) => p.mk_barcode || p.barcode || p.bar_code || "";
   const getStock = (p) => p.count_in_stock ?? p.stock ?? 0;
+
+  const firstValue = (...values) =>
+    values.find((value) => value !== undefined && value !== null && value !== "");
+
+  const toNumberOrNull = (value) => {
+    const numberValue = Number(value);
+    return Number.isFinite(numberValue) && numberValue > 0 ? numberValue : null;
+  };
+
+  const getPriceFromNotes = (notes, key) => {
+    if (!notes) return null;
+    const pattern =
+      key === "mrp"
+        ? /MRP\s*Rs\.?\s*([0-9]+(?:\.[0-9]+)?)/i
+        : /Purchase\s*Rs\.?\s*([0-9]+(?:\.[0-9]+)?)/i;
+    const match = String(notes).match(pattern);
+    return match ? toNumberOrNull(match[1]) : null;
+  };
+
+  const getPurchasePrice = (item) =>
+    toNumberOrNull(
+      firstValue(
+        item.package_amount,
+        item.dprice,
+        item.discount_price,
+        item.discounted_price,
+        item.selling_price,
+        item.unit_price,
+        item.unitPrice,
+        getPriceFromNotes(item.notes, "purchase")
+      )
+    );
+
+  const getMrpPrice = (item) => {
+    const explicitMrp = toNumberOrNull(
+      firstValue(
+        item.mrp_amount,
+        item.mrp,
+        item.MRP,
+        item.price,
+        getPriceFromNotes(item.notes, "mrp")
+      )
+    );
+
+    if (explicitMrp) return explicitMrp;
+
+    const purchasePrice = getPurchasePrice(item);
+    return purchasePrice ? Math.round(purchasePrice * 1.25) : null;
+  };
+
+  const getReceivePricePayload = (order) =>
+    (order.items || []).map((item) => {
+      const qty = Number(firstValue(item.no_of_units, item.qty, 0));
+      const dprice = getPurchasePrice(item);
+      const price = getMrpPrice(item);
+
+      return {
+        dispatch_order_item_id: item.id,
+        product_barcode_id: item.product_barcode_id,
+        barcode: item.mk_barcode || item.barcode || item.bar_code || "",
+        qty,
+        no_of_units: qty,
+        countInStock: qty,
+        price,
+        dprice,
+      };
+    });
 
   const getProductSuggestionLabel = (p) =>
     `${getProductName(p)} | ${getWeight(p) || "-"} | ${getBrandName(
@@ -200,6 +269,8 @@ const POSDispatchButtons = ({ buttonClass = "" }) => {
         unit_id: selectedProduct.unit_id || "",
         unit_name: getUnitName(selectedProduct),
         weight: getWeight(selectedProduct),
+        price: getMrpPrice(selectedProduct) || "",
+        dprice: getPurchasePrice(selectedProduct) || "",
         exp_date: formatDateInput(
           selectedProduct.exp_date ||
             selectedProduct.expiry_date ||
@@ -273,6 +344,10 @@ const POSDispatchButtons = ({ buttonClass = "" }) => {
         unit_id: item.unit_id ? Number(item.unit_id) : null,
         qty: Number(item.qty),
         exp_date: item.exp_date,
+        price: toNumberOrNull(item.price),
+        dprice: toNumberOrNull(item.dprice),
+        mrp_amount: toNumberOrNull(item.price),
+        package_amount: toNumberOrNull(item.dprice),
         notes: item.notes || "",
       }));
 
@@ -335,6 +410,7 @@ const POSDispatchButtons = ({ buttonClass = "" }) => {
       await dispatch(
         receiveDispatchToOutlet({
           dispatchOrderId: order.id,
+          items: getReceivePricePayload(order),
         })
       ).unwrap();
 

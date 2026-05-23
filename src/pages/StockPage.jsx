@@ -326,7 +326,7 @@ const flattenOutletProducts = (
   );
 
 const statusIsTransit = (status) =>
-  ['sent', 'packed', 'dispatched', 'intransit'].includes(
+  ['sent', 'packed', 'label_printed', 'dispatched', 'intransit'].includes(
     String(status || '').toLowerCase()
   );
 
