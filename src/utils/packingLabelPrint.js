@@ -142,6 +142,12 @@ const compactValues = (...values) =>
 
 const getLabelId = (item) =>
   firstValue(
+    item.label_id,
+    item.labelId,
+    item.product_barcode_id,
+    item.productBarcodeId,
+    item.catalogProductBarcodeId,
+    item.catalogProductBarcodeID,
     item.mkid,
     item.MKID,
     item.pos_mkid,

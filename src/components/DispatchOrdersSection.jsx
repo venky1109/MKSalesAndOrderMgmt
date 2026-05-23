@@ -214,6 +214,11 @@ const DispatchOrdersSection = ({ orders = [], loading = false, catalogBarcodes =
       .map((value) => String(value || '').trim())
       .find((value) => /^\d{8,}$/.test(value)) || '';
 
+  const getProductBarcodeId = (...values) =>
+    values
+      .map((value) => String(value || '').trim())
+      .find((value) => /^\d+$/.test(value)) || '';
+
   const getNumericMkid = (...values) =>
     values
       .map((value) => String(value || '').trim())
@@ -225,11 +230,14 @@ const DispatchOrdersSection = ({ orders = [], loading = false, catalogBarcodes =
       const packingConfigurations = getDispatchItemPackingConfigurations(item);
 
       if (!packingConfigurations.length) {
+        const productBarcodeId = getProductBarcodeId(
+          item.product_barcode_id,
+          item.productBarcodeId,
+          item.catalogProductBarcodeId,
+          item.catalogProductBarcodeID
+        );
         const catalogBarcode = getCatalogBarcode(
-          item.product_barcode_id ||
-            item.productBarcodeId ||
-            item.catalogProductBarcodeId ||
-            item.catalogProductBarcodeID
+          productBarcodeId
         );
         const mkBarcode = getRealMkBarcode(
           catalogBarcode.mk_barcode,
@@ -242,9 +250,10 @@ const DispatchOrdersSection = ({ orders = [], loading = false, catalogBarcodes =
         return mkBarcode
           ? {
               ...item,
+              label_id: productBarcodeId,
               mk_barcode: mkBarcode,
               barcode: mkBarcode,
-              mkid: getNumericMkid(item.mkid, item.MKID, catalogBarcode.mkid, catalogBarcode.MKID),
+              mkid: getNumericMkid(productBarcodeId, item.mkid, item.MKID, catalogBarcode.mkid, catalogBarcode.MKID),
             }
           : item;
       }
@@ -252,11 +261,14 @@ const DispatchOrdersSection = ({ orders = [], loading = false, catalogBarcodes =
       return {
         ...item,
         packing_configurations: packingConfigurations.map((config) => {
+          const productBarcodeId = getProductBarcodeId(
+            config.product_barcode_id,
+            config.productBarcodeId,
+            config.catalogProductBarcodeId,
+            config.catalogProductBarcodeID
+          );
           const catalogBarcode = getCatalogBarcode(
-            config.product_barcode_id ||
-              config.productBarcodeId ||
-              config.catalogProductBarcodeId ||
-              config.catalogProductBarcodeID
+            productBarcodeId
           );
           const mkBarcode = getRealMkBarcode(
             catalogBarcode.mk_barcode,
@@ -272,10 +284,12 @@ const DispatchOrdersSection = ({ orders = [], loading = false, catalogBarcodes =
           return mkBarcode
             ? {
                 ...config,
+                label_id: productBarcodeId,
                 mk_barcode: mkBarcode,
                 barcode: mkBarcode,
                 mkid:
                   getNumericMkid(
+                    productBarcodeId,
                     config.mkid,
                     config.MKID,
                     item.mkid,
