@@ -196,6 +196,100 @@ const DispatchOrdersSection = ({ orders = [], loading = false, catalogBarcodes =
   const firstValue = (...values) =>
     values.find((value) => value !== undefined && value !== null && value !== '');
 
+  const getCatalogBarcode = (productBarcodeId) =>
+    (catalogBarcodes || []).find(
+      (barcode) =>
+        String(
+          barcode.id ||
+            barcode.product_barcode_id ||
+            barcode.productBarcodeId ||
+            barcode.catalogProductBarcodeId ||
+            barcode.catalogProductBarcodeID
+        ) ===
+        String(productBarcodeId)
+    ) || {};
+
+  const getRealMkBarcode = (...values) =>
+    values
+      .map((value) => String(value || '').trim())
+      .find((value) => /^\d{8,}$/.test(value)) || '';
+
+  const getNumericMkid = (...values) =>
+    values
+      .map((value) => String(value || '').trim())
+      .find((value) => /^\d+$/.test(value)) || '';
+
+  const getLabelReadyOrder = (order) => ({
+    ...order,
+    items: (order.items || []).map((item) => {
+      const packingConfigurations = getDispatchItemPackingConfigurations(item);
+
+      if (!packingConfigurations.length) {
+        const catalogBarcode = getCatalogBarcode(
+          item.product_barcode_id ||
+            item.productBarcodeId ||
+            item.catalogProductBarcodeId ||
+            item.catalogProductBarcodeID
+        );
+        const mkBarcode = getRealMkBarcode(
+          catalogBarcode.mk_barcode,
+          catalogBarcode.barcode,
+          item.mk_barcode,
+          item.barcode,
+          item.bar_code
+        );
+
+        return mkBarcode
+          ? {
+              ...item,
+              mk_barcode: mkBarcode,
+              barcode: mkBarcode,
+              mkid: getNumericMkid(item.mkid, item.MKID, catalogBarcode.mkid, catalogBarcode.MKID),
+            }
+          : item;
+      }
+
+      return {
+        ...item,
+        packing_configurations: packingConfigurations.map((config) => {
+          const catalogBarcode = getCatalogBarcode(
+            config.product_barcode_id ||
+              config.productBarcodeId ||
+              config.catalogProductBarcodeId ||
+              config.catalogProductBarcodeID
+          );
+          const mkBarcode = getRealMkBarcode(
+            catalogBarcode.mk_barcode,
+            catalogBarcode.barcode,
+            config.mk_barcode,
+            config.barcode,
+            config.bar_code,
+            item.mk_barcode,
+            item.barcode,
+            item.bar_code
+          );
+
+          return mkBarcode
+            ? {
+                ...config,
+                mk_barcode: mkBarcode,
+                barcode: mkBarcode,
+                mkid:
+                  getNumericMkid(
+                    config.mkid,
+                    config.MKID,
+                    item.mkid,
+                    item.MKID,
+                    catalogBarcode.mkid,
+                    catalogBarcode.MKID
+                  ),
+              }
+            : config;
+        }),
+      };
+    }),
+  });
+
   const getReceivePricePayload = (order) =>
     (order.items || []).flatMap((item) => {
       const configs =
@@ -249,7 +343,7 @@ const DispatchOrdersSection = ({ orders = [], loading = false, catalogBarcodes =
 
   const printLabelsAndMarkDone = async (order) => {
     try {
-      await printPackingLabels(order);
+      await printPackingLabels(getLabelReadyOrder(order));
 
       await dispatch(
         updateInventoryDispatchStatus({

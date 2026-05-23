@@ -87,6 +87,15 @@ const cartSlice = createSlice({
       item: product.productName,
       stock: stock - 1,
       product_code: product.product_code || product.productCode || '',
+      product_barcode_id:
+        product.product_barcode_id ||
+        product.productBarcodeId ||
+        product.catalogProductBarcodeId ||
+        product.catalogProductBarcodeID ||
+        product.product_barcode_id_fk ||
+        product.barcode_id ||
+        product.catalog_barcode_id ||
+        '',
       mkid: product.mkid || '',
       quantity: product.quantity,
       price: product.MRP,

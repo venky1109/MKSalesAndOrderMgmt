@@ -22,6 +22,27 @@ import { getCachedProductList } from "../utils/productCache";
 /** helpers */
 const safeLower = (v) => (typeof v === "string" ? v.toLowerCase() : "");
 const asArray = (v) => (Array.isArray(v) ? v : v != null ? [v] : []);
+const compactCodes = (...values) =>
+  values
+    .flatMap(asArray)
+    .map((value) => String(value ?? "").trim())
+    .filter(Boolean);
+
+const getFinancialLookupCodes = (f) =>
+  compactCodes(
+    f?.barcode,
+    f?.mk_barcode,
+    f?.mkBarcode,
+    f?.bar_code,
+    f?.product_barcode_id,
+    f?.productBarcodeId,
+    f?.catalogProductBarcodeId,
+    f?.catalogProductBarcodeID,
+    f?.product_barcode_id_fk,
+    f?.barcode_id,
+    f?.catalog_barcode_id,
+    f?.mkid
+  );
 
 const calcDiscount = (price, dprice) => {
   const p = Number(price);
@@ -90,10 +111,7 @@ function useOfflineCatalog() {
     for (const p of list || []) {
       for (const d of asArray(p?.details)) {
         for (const f of asArray(d?.financials)) {
-          let bars = Array.isArray(f?.barcode) ? f.barcode : [f?.barcode];
-          bars = bars.filter(Boolean).map((b) => String(b).trim());
-
-          for (const b of bars) {
+          for (const b of getFinancialLookupCodes(f)) {
             if (!b) continue;
             if (!map.has(b)) map.set(b, { p, d, f });
           }
@@ -529,6 +547,15 @@ const ProductList = forwardRef((props, ref) => {
           brand: d?.brand,
           brandId: d?._id,
           financialId: f?._id,
+          product_barcode_id:
+            f?.product_barcode_id ||
+            f?.productBarcodeId ||
+            f?.catalogProductBarcodeId ||
+            f?.catalogProductBarcodeID ||
+            f?.product_barcode_id_fk ||
+            f?.barcode_id ||
+            f?.catalog_barcode_id ||
+            "",
           mkid: f?.mkid || "",
           price: Number(f?.price || 0),
           MRP: Number(f?.price || 0),
@@ -801,7 +828,7 @@ const ProductList = forwardRef((props, ref) => {
                   handleBarcode(barcodeInput.trim());
                 }
               }}
-              placeholder="Scan barcode or type MKID"
+              placeholder="Scan barcode or type product barcode ID"
               className="w-full rounded border bg-white p-2 pl-10 pr-10 text-center text-sm text-slate-900 md:text-base"
             />
           </div>

@@ -118,9 +118,6 @@ const getLabelMrp = (item) => {
   return String(Math.round(discountPrice * 1.25));
 };
 
-const getMkBarcode = (item) =>
-  item.mk_barcode || item.mkBarcode || item.MKBarcode || '';
-
 const getMkid = (item) =>
   firstValue(
     item.mkid,
@@ -129,9 +126,43 @@ const getMkid = (item) =>
     item.generatedCode,
     item.generated_code,
     item.sku_id,
+    item.pos_mkid,
+    item.posMkid,
+    item.catalog_mkid,
+    item.catalogMkid,
     item.product_code,
     ''
   );
+
+const compactValues = (...values) =>
+  values
+    .flat()
+    .map((value) => String(value ?? '').trim())
+    .filter(Boolean);
+
+const getLabelId = (item) =>
+  firstValue(
+    item.mkid,
+    item.MKID,
+    item.pos_mkid,
+    item.posMkid,
+    item.catalog_mkid,
+    item.catalogMkid,
+    ''
+  );
+
+const getLabelBarcode = (item) => {
+  const candidates = compactValues(
+    item.mk_barcode,
+    item.mkBarcode,
+    item.MKBarcode
+  );
+  const longNumericBarcode = candidates.find((value) => /^\d{8,}$/.test(value));
+
+  if (longNumericBarcode) return longNumericBarcode;
+
+  return candidates.find((value) => !/^MK[A-Z]*\d+$/i.test(value)) || '';
+};
 
 const code128Patterns = [
   '212222', '222122', '222221', '121223', '121322', '131222', '122213',
@@ -239,8 +270,8 @@ const buildTsplLabel = (item, order) => {
   const discountPrice = getTsplText(getPrice(item), 8);
   const mrp = getTsplText(getLabelMrp(item), 8);
   const unit = getTsplText(item.unitText || getDispatchItemUnit(item), 12);
-  const barcode = getTsplText(getMkBarcode(item), 32);
-  const mkid = getTsplText(getMkid(item), 20);
+  const barcode = getTsplText(getLabelBarcode(item), 32);
+  const labelId = getTsplText(getLabelId(item), 20);
   const perUnitPrice = getTsplText(getPerUnitPrice(item), 8);
   const pkd = formatDate(new Date());
   const expDate = new Date();
@@ -266,7 +297,7 @@ TEXT 430,135,"0",180,7,7,"PerGm Rs:${perUnitPrice || '-'}"
 TEXT 430,112,"0",180,9,9,"${unit || '-'}"
 TEXT 250,135,"0",180,7,7,"PkdDt ${pkd}"
 TEXT 250,112,"0",180,7,7,"ExpDt ${exp}"
-${mkid ? `TEXT 250,88,"0",180,11,11,"MKID ${mkid}"` : ''}
+${labelId ? `TEXT 78,72,"0",90,12,12,"ID ${labelId}"` : ''}
 BARCODE 430,64,"128",38,1,180,2,2,"${barcode}"
 TEXT 120,18,"0",180,5,5,"${dispatchNo}"
 
@@ -344,8 +375,8 @@ const buildLabel = (item, order) => {
   const discountPrice = getPrice(item);
   const mrp = getLabelMrp(item);
   const unit = item.unitText || getDispatchItemUnit(item);
-  const barcode = getMkBarcode(item);
-  const mkid = getMkid(item);
+  const barcode = getLabelBarcode(item);
+  const labelId = getLabelId(item);
   const pkd = formatDate(new Date());
   const expDate = new Date();
   expDate.setDate(expDate.getDate() + LABEL_EXPIRY_DAYS);
@@ -366,8 +397,8 @@ const buildLabel = (item, order) => {
           <span>PkdDt ${escapeHtml(pkd)}</span>
           <span>ExpDt ${escapeHtml(exp)}</span>
         </div>
-        ${mkid ? `<div class="mkid">MKID ${escapeHtml(mkid)}</div>` : ''}
         ${perUnitPrice ? `<div class="meta">PerGm Rs: ${escapeHtml(perUnitPrice)}</div>` : ''}
+        ${labelId ? `<div class="idBadge">ID ${escapeHtml(labelId)}</div>` : ''}
         <div class="barcode">${barcodeSvg || escapeHtml(barcode || '-')}</div>
         <div class="barcodeText">${escapeHtml(barcode || '-')}</div>
         <div class="dispatchNo">${escapeHtml(order?.dispatch_no || '')}</div>
@@ -480,6 +511,18 @@ export const printPackingLabels = async (order) => {
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
+          }
+
+          .idBadge {
+            position: absolute;
+            left: 0;
+            bottom: 5mm;
+            transform: rotate(90deg);
+            transform-origin: left bottom;
+            font-size: 9px;
+            line-height: 1;
+            font-weight: 800;
+            white-space: nowrap;
           }
 
           .meta {

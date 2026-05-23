@@ -7,6 +7,28 @@ import { addToCart } from '../features/cart/cartSlice';
 import { FixedSizeGrid as Grid } from 'react-window';
 import { BrowserMultiFormatReader } from '@zxing/browser';
 
+const asArray = (value) => (Array.isArray(value) ? value : value != null ? [value] : []);
+const compactCodes = (...values) =>
+  values
+    .flatMap(asArray)
+    .map((value) => String(value ?? '').trim())
+    .filter(Boolean);
+const getFinancialLookupCodes = (financial) =>
+  compactCodes(
+    financial?.barcode,
+    financial?.mk_barcode,
+    financial?.mkBarcode,
+    financial?.bar_code,
+    financial?.product_barcode_id,
+    financial?.productBarcodeId,
+    financial?.catalogProductBarcodeId,
+    financial?.catalogProductBarcodeID,
+    financial?.product_barcode_id_fk,
+    financial?.barcode_id,
+    financial?.catalog_barcode_id,
+    financial?.mkid
+  );
+
 const ProductList = forwardRef((props, ref) => {
   const dispatch = useDispatch();
   const barcodeRef = useRef(null);
@@ -111,10 +133,12 @@ const ProductList = forwardRef((props, ref) => {
       }
     }
 
+    scanned = String(scanned || '').trim();
+
     const matchedProduct = safeProducts.find((p) =>
       p.details?.some((d) =>
         d.financials?.some((f) =>
-          (Array.isArray(f.barcode) ? f.barcode : [f.barcode || ""]).includes(scanned)
+          getFinancialLookupCodes(f).includes(scanned)
         )
       )
     );
@@ -122,11 +146,11 @@ const ProductList = forwardRef((props, ref) => {
     if (matchedProduct) {
       const detail = matchedProduct.details.find((d) =>
         d.financials?.some((f) =>
-          (Array.isArray(f.barcode) ? f.barcode : [f.barcode || ""]).includes(scanned)
+          getFinancialLookupCodes(f).includes(scanned)
         )
       );
       const financial = detail.financials.find((f) =>
-        (Array.isArray(f.barcode) ? f.barcode : [f.barcode || ""]).includes(scanned)
+        getFinancialLookupCodes(f).includes(scanned)
       );
 
       dispatch(addToCart({
@@ -136,6 +160,16 @@ const ProductList = forwardRef((props, ref) => {
         brand: detail.brand,
         brandId: detail._id,
         financialId: financial._id,
+        product_barcode_id:
+          financial.product_barcode_id ||
+          financial.productBarcodeId ||
+          financial.catalogProductBarcodeId ||
+          financial.catalogProductBarcodeID ||
+          financial.product_barcode_id_fk ||
+          financial.barcode_id ||
+          financial.catalog_barcode_id ||
+          '',
+        mkid: financial.mkid || '',
         MRP: financial.price,
         dprice: financial.dprice,
         quantity: financial.quantity,
@@ -240,6 +274,16 @@ const ProductList = forwardRef((props, ref) => {
             brand: d.brand,
             brandId: d._id,
             financialId: f._id,
+            product_barcode_id:
+              f.product_barcode_id ||
+              f.productBarcodeId ||
+              f.catalogProductBarcodeId ||
+              f.catalogProductBarcodeID ||
+              f.product_barcode_id_fk ||
+              f.barcode_id ||
+              f.catalog_barcode_id ||
+              '',
+            mkid: f.mkid || '',
             MRP: f.price,
             dprice: f.dprice,
             quantity: f.quantity,
