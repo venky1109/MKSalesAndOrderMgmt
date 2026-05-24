@@ -1,6 +1,6 @@
 import { createAsyncThunk, createSlice } from '@reduxjs/toolkit';
 
-const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || '';
+import { API_BASE_URL } from '../../utils/apiConfig';
 
 export const receiveVerifiedPurchaseToInventory = createAsyncThunk(
   'inventoryMovement/receiveVerifiedPurchaseToInventory',

@@ -580,10 +580,33 @@ const formatTrackingDate = (value) => {
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const TRACKING_REQUEST_TIMEOUT_MS = 8000;
 
+const sanitizeMoneyInput = (value) => {
+  const text = String(value ?? "").replace(/,/g, "").trim();
+  if (!text) return "";
+  if (!/^\d*\.?\d*$/.test(text)) return "";
+  const [whole = "", decimal] = text.split(".");
+  return decimal === undefined ? whole : `${whole}.${decimal.slice(0, 2)}`;
+};
+
+const toMoneyNumber = (value) => Number(sanitizeMoneyInput(value) || 0);
+
+const getUnitMrpValue = (...sources) =>
+  pickId(
+    ...sources.flatMap((source) => [
+      source?.unit_mrp,
+      source?.unit_MRP,
+      source?.inventory_unit_mrp,
+      source?.inventoryUnitMrp,
+      source?.mrp,
+      source?.MRP,
+    ])
+  );
+
 const bulkColumnAliases = {
   productName: ["product name", "product nam", "product nar", "productname", "product", "name"],
   noOfUnits: ["no:of units", "no of units", "no.of units", "units", "stock", "count in stock"],
-  unitPrice: ["amount/unit", "amount per unit", "unit price", "price", "mrp"],
+  unitPrice: ["amount/unit", "amount per unit", "unit price", "price"],
+  unitMrp: ["unit mrp", "unit_mrp", "inventory unit mrp", "inventory_unit_mrp", "mrp", "unit MRP"],
   total: ["total", "amount"],
   mfgDate: ["mfgdate", "mfg date", "manufacturing date"],
   expDate: ["expdate", "exp date", "expiry date", "expiration date"],
@@ -669,7 +692,8 @@ const normalizeBulkRow = (row, index) => {
     message: "",
     productName,
     noOfUnits,
-    unitPrice: getBulkCell(row, bulkColumnAliases.unitPrice),
+    unitPrice: sanitizeMoneyInput(getBulkCell(row, bulkColumnAliases.unitPrice)),
+    unitMrp: sanitizeMoneyInput(getBulkCell(row, bulkColumnAliases.unitMrp)),
     total: getBulkCell(row, bulkColumnAliases.total),
     mfgDate: normalizeExcelDate(getBulkCell(row, bulkColumnAliases.mfgDate)),
     expDate: normalizeExcelDate(getBulkCell(row, bulkColumnAliases.expDate)),
@@ -856,6 +880,9 @@ const ApplicationMigrationHelperPage = () => {
   const stockTransactions = useSelector((state) =>
     asArray(state.stockManagerInventory?.transactions)
   );
+  const inventoryProducts = useSelector((state) =>
+    asArray(state.stockManagerInventory?.inventoryProducts)
+  );
   const productsList = useSelector((state) => {
     const all = state.products?.all;
     if (Array.isArray(all)) return all;
@@ -890,6 +917,7 @@ const ApplicationMigrationHelperPage = () => {
     batch_id: makeBatchId(),
     no_of_units: "1",
     unit_price: "",
+    unit_mrp: "",
     mfg_date: "",
     exp_date: "",
     sku_id: "",
@@ -924,6 +952,7 @@ const ApplicationMigrationHelperPage = () => {
     qty: "",
     no_of_units: "1",
     unit_price: "",
+    unit_mrp: "",
     mfg_date: "",
     exp_date: "",
     sku_id: "",
@@ -1614,6 +1643,7 @@ const ApplicationMigrationHelperPage = () => {
     const financial = getFirstFinancial(brand);
     const name = getProductName(product);
     const image = getProductImageUrl(product);
+    const unitMrp = getUnitMrpValue(product, financial);
 
     setProductName(name);
     setExistingImageUrl(image);
@@ -1653,6 +1683,7 @@ const ApplicationMigrationHelperPage = () => {
         prev.no_of_units
       ),
       unit_price: prev.unit_price || pickId(product?.MRP, financial?.price, ""),
+      unit_mrp: prev.unit_mrp || sanitizeMoneyInput(unitMrp),
       mk_barcode: prev.mk_barcode || product?.mk_barcode || "",
       vendor_barcode:
         prev.vendor_barcode ||
@@ -1741,6 +1772,7 @@ const ApplicationMigrationHelperPage = () => {
       ...prev,
       no_of_units: pickId(legacyProduct?.countInStock, legacyProduct?.stock, prev.no_of_units),
       unit_price: prev.unit_price || getLegacyPrice(legacyProduct) || "",
+      unit_mrp: prev.unit_mrp || sanitizeMoneyInput(getUnitMrpValue(legacyProduct)),
       vendor_barcode: barcodeValue || prev.vendor_barcode,
       mk_barcode: legacyProduct?.mk_barcode || prev.mk_barcode,
     }));
@@ -1912,6 +1944,7 @@ const ApplicationMigrationHelperPage = () => {
       }
 
       const inventoryUnitPrice = Number(stockOutletPostingForm.unit_price || stockFinancialForm.price || 0);
+      const inventoryUnitMrp = toMoneyNumber(stockOutletPostingForm.unit_mrp);
       const migrationPurchaseUnitPrice = toWholeRupees(inventoryUnitPrice);
       const purchaseProductName = joinBrandAndProductName(
         stockProductForm.brand_name,
@@ -1938,6 +1971,7 @@ const ApplicationMigrationHelperPage = () => {
               no_of_units: Number(stockOutletPostingForm.no_of_units || newQuantity || 1),
               expected_unit_price: migrationPurchaseUnitPrice,
               actual_unit_price: migrationPurchaseUnitPrice,
+              unit_mrp: inventoryUnitMrp,
               product_name: purchaseProductName,
               category_name: stockProductForm.category_name,
               brand_name: stockProductForm.brand_name,
@@ -1954,6 +1988,7 @@ const ApplicationMigrationHelperPage = () => {
       markMigrationStage("outlet", "purchase", "done", `Purchase request ready: ${order?.id || "created"}.`);
       currentStage = "inventory";
       markMigrationStage("outlet", "inventory", "running", "Adding received purchase units to inventory.");
+      console.log("inventoryUnitMrp before API:", inventoryUnitMrp);
       const inventoryResult = await dispatch(
         receiveVerifiedPurchaseToInventory({
           purchase_order_id: order?.id || null,
@@ -1976,6 +2011,7 @@ const ApplicationMigrationHelperPage = () => {
           add_to_existing_units: true,
           merge_existing_inventory: true,
           unit_price: inventoryUnitPrice,
+          unit_mrp: inventoryUnitMrp,
           mfg_date: stockOutletPostingForm.mfg_date || null,
           exp_date: stockOutletPostingForm.exp_date,
           source: "migration",
@@ -2012,6 +2048,7 @@ const ApplicationMigrationHelperPage = () => {
                 product_barcode_id: dispatchProductBarcodeId,
                 qty: Number(stockOutletPostingForm.no_of_units || newQuantity || 1),
                 no_of_units: Number(stockOutletPostingForm.no_of_units || newQuantity || 1),
+                unit_mrp: inventoryUnitMrp,
                 exp_date: stockOutletPostingForm.exp_date,
                 notes: "Migration dispatch",
               },
@@ -2042,7 +2079,18 @@ const ApplicationMigrationHelperPage = () => {
             "Checking outlet Mongo product; insert if missing, otherwise update stock count."
           );
           try {
-            const receiveResult = await dispatch(receiveDispatchToOutlet({ dispatchOrderId: dispatchId })).unwrap();
+            const receiveResult = await dispatch(
+              receiveDispatchToOutlet({
+                dispatchOrderId: dispatchId,
+                items: [
+                  {
+                    inventory_product_id: Number(inventoryProductId),
+                    product_barcode_id: dispatchProductBarcodeId,
+                    unit_mrp: inventoryUnitMrp,
+                  },
+                ],
+              })
+            ).unwrap();
             const receiveText = String(
               receiveResult?.message ||
                 receiveResult?.action ||
@@ -2212,7 +2260,10 @@ const ApplicationMigrationHelperPage = () => {
 
   const handleOutletPostingFormChange = (field, value) => {
     setOutletPostingForm((prev) => {
-      const next = { ...prev, [field]: value };
+      const next = {
+        ...prev,
+        [field]: field === "unit_mrp" ? sanitizeMoneyInput(value) : value,
+      };
 
       if (["batch_id", "exp_date"].includes(field)) {
         next.sku_id = makeSkuId({
@@ -2233,7 +2284,10 @@ const ApplicationMigrationHelperPage = () => {
 
   const handleInventoryFormChange = (field, value) => {
     setInventoryForm((prev) => {
-      const next = { ...prev, [field]: value };
+      const next = {
+        ...prev,
+        [field]: field === "unit_mrp" ? sanitizeMoneyInput(value) : value,
+      };
 
       if (["quantity", "unit_id"].includes(field)) {
         const nextUnit = units.find((unit) => String(unit.id) === String(next.unit_id));
@@ -2341,6 +2395,19 @@ const ApplicationMigrationHelperPage = () => {
     setStatus("Selling price calculated from price and discount.");
   };
 
+  const findInventoryProductForBarcode = (item) =>
+    inventoryProducts.find((product) => {
+      const itemBarcodeId = pickId(item?.product_barcode_id, item?.barcode_id, item?.id);
+      const productBarcodeId = pickId(product?.product_barcode_id, product?.barcode_id);
+      const itemBarcode = normalizeText(pickId(item?.barcode, item?.bar_code, item?.mk_barcode));
+      const productBarcode = normalizeText(pickId(product?.barcode, product?.bar_code, product?.mk_barcode));
+
+      return (
+        (itemBarcodeId && String(productBarcodeId) === String(itemBarcodeId)) ||
+        (itemBarcode && productBarcode && itemBarcode === productBarcode)
+      );
+    });
+
   const selectInventoryBarcode = (item) => {
     const batchId = inventoryForm.batch_id || makeBatchId();
     const expDate = inventoryForm.exp_date;
@@ -2362,6 +2429,8 @@ const ApplicationMigrationHelperPage = () => {
       "";
     const categoryName = getCategoryName(item) || inventoryForm.category_name || "";
     const image = getProductImageUrl(item);
+    const inventoryProduct = findInventoryProductForBarcode(item);
+    const unitMrp = getUnitMrpValue(inventoryProduct, item);
 
     setSelectedInventoryBarcode(item);
     setExistingImageUrl(image);
@@ -2391,6 +2460,7 @@ const ApplicationMigrationHelperPage = () => {
           quantity: packQuantity || prev.quantity || "",
           unit_id: unitMatch?.id || prev.unit_id || "",
           unit_price: prev.unit_price || "",
+          unit_mrp: prev.unit_mrp || sanitizeMoneyInput(unitMrp),
           qty: makeWeightPack(packQuantity, packUnit) || prev.qty || "",
           no_of_units: prev.no_of_units || "1",
           sku_id:
@@ -2449,6 +2519,7 @@ const ApplicationMigrationHelperPage = () => {
           unit_id: unitMatch?.id || prev.unit_id,
           qty: getLegacyWeightPack(legacyProduct) || prev.qty,
           unit_price: String(getLegacyPrice(legacyProduct) || prev.unit_price || ""),
+          unit_mrp: prev.unit_mrp || sanitizeMoneyInput(getUnitMrpValue(legacyProduct)),
           no_of_units: prev.no_of_units || "1",
         },
         name,
@@ -3064,6 +3135,7 @@ const ApplicationMigrationHelperPage = () => {
           }
         : splitWeightPack(form.qty);
       const inventoryUnitPrice = Number(form.unit_price || 0);
+      const inventoryUnitMrp = toMoneyNumber(form.unit_mrp);
       const migrationPurchaseUnitPrice = toWholeRupees(inventoryUnitPrice);
       const productName =
         form.product_name_eng ||
@@ -3242,6 +3314,7 @@ const ApplicationMigrationHelperPage = () => {
               no_of_units: Number(form.no_of_units || 1),
               expected_unit_price: migrationPurchaseUnitPrice,
               actual_unit_price: migrationPurchaseUnitPrice,
+              unit_mrp: inventoryUnitMrp,
               product_name: purchaseProductName,
               product_code: hasSelectedNameMismatch ? "" : selectedBarcode.product_code,
               category_name: categoryName,
@@ -3274,6 +3347,7 @@ const ApplicationMigrationHelperPage = () => {
         "running",
         "If stock exists, add no. of units; otherwise insert new inventory entry."
       );
+      console.log("inventoryUnitMrp before API:", inventoryUnitMrp);
       const inventoryResult = await dispatch(
         receiveVerifiedPurchaseToInventory({
           purchase_order_id: order?.id || null,
@@ -3298,6 +3372,7 @@ const ApplicationMigrationHelperPage = () => {
           add_to_existing_units: true,
           merge_existing_inventory: true,
           unit_price: inventoryUnitPrice,
+          unit_mrp: inventoryUnitMrp,
           mfg_date: form.mfg_date || null,
           exp_date: form.exp_date,
           source: "migration",
@@ -3557,6 +3632,7 @@ const ApplicationMigrationHelperPage = () => {
           qty: packText,
           no_of_units: row.noOfUnits || "1",
           unit_price: row.unitPrice || "",
+          unit_mrp: row.unitMrp || "",
           mfg_date: row.mfgDate || "",
           exp_date: row.expDate,
           sku_id: makeSkuId({ productCode: productName, batchId, expDate: row.expDate }),
@@ -3597,6 +3673,7 @@ const ApplicationMigrationHelperPage = () => {
         batch_id: batchId,
         no_of_units: row.noOfUnits || "1",
         unit_price: row.unitPrice || "",
+        unit_mrp: row.unitMrp || "",
         mfg_date: row.mfgDate || "",
         exp_date: row.expDate,
         sku_id: makeSkuId({ productCode: productName, batchId, expDate: row.expDate }),
@@ -4027,7 +4104,7 @@ const ApplicationMigrationHelperPage = () => {
 
         {bulkRows.length ? (
           <div className="overflow-auto rounded-lg border">
-            <table className="min-w-[2800px] w-full table-fixed text-sm">
+            <table className="min-w-[2900px] w-full table-fixed text-sm">
               <thead className="bg-gray-50 text-xs uppercase text-gray-500">
                 <tr>
                   <th className="w-24 p-2 text-left">Status</th>
@@ -4041,6 +4118,7 @@ const ApplicationMigrationHelperPage = () => {
                   <th className="w-44 p-2 text-left">Barcode</th>
                   <th className="w-24 p-2 text-left">Units</th>
                   <th className="w-24 p-2 text-left">Price</th>
+                  <th className="w-24 p-2 text-left">Unit MRP</th>
                   <th className="w-24 p-2 text-left">Total</th>
                   <th className="w-28 p-2 text-left">Pack</th>
                   <th className="w-36 p-2 text-left">Warehouse</th>
@@ -4156,6 +4234,7 @@ const ApplicationMigrationHelperPage = () => {
                     </td>
                     <td className="p-2">{row.noOfUnits || "-"}</td>
                     <td className="p-2">{row.unitPrice || "-"}</td>
+                    <td className="p-2">{row.unitMrp || "-"}</td>
                     <td className="p-2">{row.total || "-"}</td>
                     <td className="p-2">{row.packText || "-"}</td>
                     <td className="p-2">{row.warehouse || "-"}</td>
@@ -5194,6 +5273,19 @@ const ApplicationMigrationHelperPage = () => {
                   />
                 </label>
                 <label className="text-sm font-medium text-gray-700">
+                  Unit MRP
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={outletPostingForm.unit_mrp}
+                    onChange={(event) =>
+                      handleOutletPostingFormChange("unit_mrp", event.target.value)
+                    }
+                    className={`${fieldClass} mt-1`}
+                  />
+                </label>
+                <label className="text-sm font-medium text-gray-700">
                   Batch ID
                   <input
                     type="number"
@@ -5736,6 +5828,19 @@ const ApplicationMigrationHelperPage = () => {
                   value={inventoryForm.unit_price}
                   onChange={(event) =>
                     handleInventoryFormChange("unit_price", event.target.value)
+                  }
+                  className={`${fieldClass} mt-1`}
+                />
+              </label>
+              <label className="text-sm font-medium text-gray-700">
+                Unit MRP
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={inventoryForm.unit_mrp}
+                  onChange={(event) =>
+                    handleInventoryFormChange("unit_mrp", event.target.value)
                   }
                   className={`${fieldClass} mt-1`}
                 />

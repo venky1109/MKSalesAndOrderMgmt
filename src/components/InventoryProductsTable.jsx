@@ -54,6 +54,11 @@ const packQuantityFormat = new Intl.NumberFormat('en-IN', {
   maximumFractionDigits: 3,
 });
 
+const moneyFormat = new Intl.NumberFormat('en-IN', {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
 const getInventoryPackQuantity = (item) =>
   firstValue(item?.quantity, item?.catalogQuantity, item?.barcode_quantity);
 
@@ -69,6 +74,19 @@ const getInventoryPackQuantityDisplay = (item) => {
 
 const getInventoryUnit = (item) =>
   firstValue(item?.unit_short_code, item?.unit_name, item?.units, item?.unit);
+
+const getInventoryUnitMrp = (item) =>
+  firstValue(item?.unit_mrp, item?.unit_MRP, item?.inventory_unit_mrp, item?.inventoryUnitMrp);
+
+const getInventoryUnitMrpDisplay = (item) => {
+  const value = getInventoryUnitMrp(item);
+  if (value === undefined) return '-';
+
+  const numericValue = Number(String(value).replace(/,/g, '').trim());
+  if (!Number.isFinite(numericValue)) return value || '-';
+
+  return moneyFormat.format(numericValue);
+};
 
 const columns = [
   {
@@ -103,6 +121,13 @@ const columns = [
     align: 'right',
     type: 'number',
     getValue: getInventoryStockQuantity,
+  },
+  {
+    key: 'unit_mrp',
+    label: 'Unit MRP',
+    align: 'right',
+    type: 'number',
+    getValue: getInventoryUnitMrp,
   },
   {
     key: 'warehouse',
@@ -166,6 +191,7 @@ const InventoryProductsTable = ({
           item.bar_code,
           getInventoryPackQuantity(item),
           getInventoryUnit(item),
+          getInventoryUnitMrp(item),
           getInventoryBrandName(item),
         ]
           .filter(Boolean)
@@ -242,6 +268,7 @@ const InventoryProductsTable = ({
                   <td className="p-3 text-right font-semibold">
                     {getInventoryStockDisplay(item)}
                   </td>
+                  <td className="p-3 text-right">{getInventoryUnitMrpDisplay(item)}</td>
                   <td className="p-3">{item.warehouse_id || '-'}</td>
                   <td className="p-3">
                     {item.exp_date
@@ -253,7 +280,7 @@ const InventoryProductsTable = ({
 
               {sortedProducts.length === 0 && (
                 <tr>
-                  <td colSpan="8" className="p-4 text-center text-gray-500">
+                  <td colSpan="9" className="p-4 text-center text-gray-500">
                     No inventory products found
                   </td>
                 </tr>

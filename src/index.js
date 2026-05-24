@@ -8,6 +8,21 @@ import { Provider } from 'react-redux';
 import { store } from './app/store'; // Adjust path if needed
 document.title = process.env.REACT_APP_TITLE || "Gumastha";
 
+console.warn('MK frontend boot:', {
+  nodeEnv: process.env.NODE_ENV,
+  apiBaseUrl: process.env.REACT_APP_API_BASE_URL,
+  href: window.location.href,
+});
+
+if ('serviceWorker' in navigator && process.env.NODE_ENV === 'development') {
+  navigator.serviceWorker
+    .getRegistrations()
+    .then((registrations) => {
+      registrations.forEach((registration) => registration.unregister());
+    })
+    .catch(() => {});
+}
+
 if ('serviceWorker' in navigator && process.env.NODE_ENV === 'production') {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/service-worker.js').catch(() => {});
