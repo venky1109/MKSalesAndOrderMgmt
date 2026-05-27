@@ -28,6 +28,23 @@ function useSafeProducts() {
   return storeList?.length ? storeList : cachedList;
 }
 
+const asArray = (value) => (Array.isArray(value) ? value : value != null ? [value] : []);
+
+const getProductBarcodeId = (financial = {}) =>
+  [
+    financial.product_barcode_id,
+    financial.productBarcodeId,
+    financial.catalogProductBarcodeId,
+    financial.catalogProductBarcodeID,
+    financial.product_barcode_id_fk,
+    financial.barcode_id,
+    financial.catalog_barcode_id,
+    financial.mkid,
+  ]
+    .flatMap(asArray)
+    .map((value) => String(value ?? "").trim())
+    .find(Boolean) || "";
+
 export default function HeaderPOS() {
   const dispatch = useDispatch();
 
@@ -109,9 +126,10 @@ export default function HeaderPOS() {
               ? f.barcode
               : [f.barcode || ""];
             const pack = `${f.quantity ?? ""}${f.units ?? ""}`;
+            const productBarcodeId = getProductBarcodeId(f);
             const hay = `${p.name} ${d.brand || ""} ${p.category || ""} ${pack} ${
               f.price ?? ""
-            } ${f.dprice ?? ""} ${barcodes.join(" ")}`;
+            } ${f.dprice ?? ""} ${productBarcodeId} ${barcodes.join(" ")}`;
 
             if (!matchesAll(hay)) continue;
 
@@ -153,6 +171,8 @@ export default function HeaderPOS() {
       brand: d.brand,
       brandId: d._id,
       financialId: f._id,
+      product_barcode_id: getProductBarcodeId(f),
+      mkid: getProductBarcodeId(f),
       MRP: f.price,
       dprice: f.dprice,
       quantity: f.quantity,
@@ -275,7 +295,7 @@ export default function HeaderPOS() {
                       {it.p.name}
                     </div>
                     <div className="text-xs text-gray-500 truncate">
-                      {it.d.brand}
+                      {it.d.brand} {getProductBarcodeId(it.f) ? `| ID: ${getProductBarcodeId(it.f)}` : ""}
                     </div>
                   </div>
                   <div className="text-sm font-semibold whitespace-nowrap">

@@ -44,6 +44,18 @@ const getFinancialLookupCodes = (f) =>
     f?.mkid
   );
 
+const getProductBarcodeId = (f) =>
+  compactCodes(
+    f?.product_barcode_id,
+    f?.productBarcodeId,
+    f?.catalogProductBarcodeId,
+    f?.catalogProductBarcodeID,
+    f?.product_barcode_id_fk,
+    f?.barcode_id,
+    f?.catalog_barcode_id,
+    f?.mkid
+  )[0] || "";
+
 const calcDiscount = (price, dprice) => {
   const p = Number(price);
   const dp = Number(dprice);
@@ -61,6 +73,42 @@ const normalizeScan = (raw) => {
 };
 
 const sortText = (a, b) => String(a || "").localeCompare(String(b || ""));
+
+const getProductNameKey = (p) =>
+  safeLower(p?.productname || p?.englishname || p?.teluguname || p?.name).replace(/\s+/g, "");
+
+const getProductBrandKey = (p) =>
+  asArray(p?.details)
+    .map((d) => safeLower(d?.brand || "unbranded").replace(/\s+/g, ""))
+    .sort()
+    .join("|");
+
+const getPreferredProductScore = (p) =>
+  (p?.catalogProductId ? 100 : 0) +
+  (p?.productname ? 10 : 0) +
+  (p?.englishname ? 10 : 0) +
+  (p?.teluguname ? 10 : 0);
+
+const dedupePreferredProducts = (products = []) => {
+  const byKey = new Map();
+
+  for (const product of products || []) {
+    const key = [
+      safeLower(product?.category).replace(/\s+/g, ""),
+      getProductBrandKey(product),
+      getProductNameKey(product),
+    ].join("::");
+
+    if (!key.replace(/:/g, "")) continue;
+
+    const existing = byKey.get(key);
+    if (!existing || getPreferredProductScore(product) > getPreferredProductScore(existing)) {
+      byKey.set(key, product);
+    }
+  }
+
+  return [...byKey.values()];
+};
 
 const getCatalogEntryKey = (p, d, f) =>
   [
@@ -103,14 +151,24 @@ function useOfflineCatalog() {
 
   const lsList = useMemo(() => getCachedProductList(), []);
 
-  const list = storeList?.length ? storeList : lsList;
+  const list = useMemo(
+    () => dedupePreferredProducts(storeList?.length ? storeList : lsList),
+    [storeList, lsList]
+  );
 
-  const barcodeMap = useMemo(() => {
+  const { barcodeMap, productBarcodeIdMap } = useMemo(() => {
     const map = new Map();
+    const idMap = new Map();
 
     for (const p of list || []) {
       for (const d of asArray(p?.details)) {
         for (const f of asArray(d?.financials)) {
+          const productBarcodeId = getProductBarcodeId(f);
+
+          if (productBarcodeId) {
+            idMap.set(productBarcodeId, { p, d, f });
+          }
+
           for (const b of getFinancialLookupCodes(f)) {
             if (!b) continue;
             if (!map.has(b)) map.set(b, { p, d, f });
@@ -119,10 +177,10 @@ function useOfflineCatalog() {
       }
     }
 
-    return map;
+    return { barcodeMap: map, productBarcodeIdMap: idMap };
   }, [list]);
 
-  return { productsList: list, barcodeMap };
+  return { productsList: list, barcodeMap, productBarcodeIdMap };
 }
 
 const SearchKeyboard = forwardRef(({ visible, onKeyPress, onClose }, ref) => {
@@ -354,7 +412,11 @@ const ProductList = forwardRef((props, ref) => {
 
   const token = useSelector((state) => state.posUser.userInfo?.token);
   const { loading, error } = useSelector((state) => state.products || {});
-  const { productsList: safeProducts, barcodeMap } = useOfflineCatalog();
+  const {
+    productsList: safeProducts,
+    barcodeMap,
+    productBarcodeIdMap,
+  } = useOfflineCatalog();
 
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [brandFilter, setBrandFilter] = useState("all");
@@ -519,7 +581,7 @@ const ProductList = forwardRef((props, ref) => {
 
         products.forEach((product) => {
           product.items.forEach((item) => {
-            const shortcutCode = String(item.f?.mkid || "").trim();
+            const shortcutCode = getProductBarcodeId(item.f);
 
             const entryKey = getCatalogEntryKey(item.p, item.d, item.f);
             entryShortcuts.set(entryKey, shortcutCode);
@@ -547,15 +609,7 @@ const ProductList = forwardRef((props, ref) => {
           brand: d?.brand,
           brandId: d?._id,
           financialId: f?._id,
-          product_barcode_id:
-            f?.product_barcode_id ||
-            f?.productBarcodeId ||
-            f?.catalogProductBarcodeId ||
-            f?.catalogProductBarcodeID ||
-            f?.product_barcode_id_fk ||
-            f?.barcode_id ||
-            f?.catalog_barcode_id ||
-            "",
+          product_barcode_id: getProductBarcodeId(f),
           mkid: f?.mkid || "",
           price: Number(f?.price || 0),
           MRP: Number(f?.price || 0),
@@ -586,10 +640,14 @@ const ProductList = forwardRef((props, ref) => {
       const scanned = normalizeScan(raw);
       if (!scanned) return;
 
+      const normalizedNumericId = scanned.replace(/^0+/, "");
       const hit =
-        barcodeMap.get(scanned) ||
-        barcodeMap.get(scanned.replace(/^0+/, "")) ||
+        productBarcodeIdMap.get(scanned) ||
+        productBarcodeIdMap.get(normalizedNumericId) ||
         shortcutCatalog.shortcutMap.get(scanned) ||
+        shortcutCatalog.shortcutMap.get(normalizedNumericId) ||
+        barcodeMap.get(scanned) ||
+        barcodeMap.get(normalizedNumericId) ||
         null;
 
       if (hit) {
@@ -644,7 +702,7 @@ const ProductList = forwardRef((props, ref) => {
       setBarcodeInput("");
       setTimeout(() => barcodeRef.current?.focus(), 50);
     },
-    [dispatch, token, barcodeMap, shortcutCatalog, addItemToCart]
+    [dispatch, token, barcodeMap, productBarcodeIdMap, shortcutCatalog, addItemToCart]
   );
 
   const handleNumberPadPress = useCallback(
@@ -985,7 +1043,7 @@ const ProductList = forwardRef((props, ref) => {
                         <div className="flex h-full flex-col">
                           {shortcutCode ? (
                             <div className="mb-1 text-center text-xs font-bold text-blue-700">
-                              MKID: {shortcutCode}
+                              ID: {shortcutCode}
                             </div>
                           ) : null}
 

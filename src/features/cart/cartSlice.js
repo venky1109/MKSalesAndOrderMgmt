@@ -23,6 +23,17 @@ const saveCartToStorage = (state) => {
   }
 };
 
+const getProductBarcodeId = (product = {}) =>
+  product.product_barcode_id ||
+  product.productBarcodeId ||
+  product.catalogProductBarcodeId ||
+  product.catalogProductBarcodeID ||
+  product.product_barcode_id_fk ||
+  product.barcode_id ||
+  product.catalog_barcode_id ||
+  product.mkid ||
+  '';
+
 const initialState = loadCartFromStorage() || {
   items: [],
   total: 0,
@@ -87,15 +98,7 @@ const cartSlice = createSlice({
       item: product.productName,
       stock: stock - 1,
       product_code: product.product_code || product.productCode || '',
-      product_barcode_id:
-        product.product_barcode_id ||
-        product.productBarcodeId ||
-        product.catalogProductBarcodeId ||
-        product.catalogProductBarcodeID ||
-        product.product_barcode_id_fk ||
-        product.barcode_id ||
-        product.catalog_barcode_id ||
-        '',
+      product_barcode_id: getProductBarcodeId(product),
       mkid: product.mkid || '',
       quantity: product.quantity,
       price: product.MRP,

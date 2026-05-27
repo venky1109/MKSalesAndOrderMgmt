@@ -8,6 +8,7 @@
 
 # production
 /build
+/build-check
 /dist
 /outputs/
 
@@ -37,3 +38,4 @@ scripts/__pycache__/
 # Firebase
 .firebase/
 .firebase/*
+.firebaserc

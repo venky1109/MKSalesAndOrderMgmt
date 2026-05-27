@@ -1,6 +1,7 @@
 {
   "projects": {
-    "default": "manakirana"
+    "default": "manakirana",
+    "MKGumastha": "manakirana-988b3"
   },
   "targets": {
     "manakirana": {

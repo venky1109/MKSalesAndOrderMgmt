@@ -8,6 +8,7 @@ import { FixedSizeGrid as Grid } from 'react-window';
 import { BrowserMultiFormatReader } from '@zxing/browser';
 
 const asArray = (value) => (Array.isArray(value) ? value : value != null ? [value] : []);
+const safeLower = (value) => String(value || '').toLowerCase();
 const compactCodes = (...values) =>
   values
     .flatMap(asArray)
@@ -29,6 +30,62 @@ const getFinancialLookupCodes = (financial) =>
     financial?.mkid
   );
 
+const getProductBarcodeId = (financial) =>
+  compactCodes(
+    financial?.product_barcode_id,
+    financial?.productBarcodeId,
+    financial?.catalogProductBarcodeId,
+    financial?.catalogProductBarcodeID,
+    financial?.product_barcode_id_fk,
+    financial?.barcode_id,
+    financial?.catalog_barcode_id,
+    financial?.mkid
+  )[0] || '';
+
+const getProductNameKey = (product) =>
+  safeLower(
+    product?.productname ||
+      product?.englishname ||
+      product?.teluguname ||
+      product?.name
+  ).replace(/\s+/g, '');
+
+const getProductBrandKey = (product) =>
+  asArray(product?.details)
+    .map((detail) => safeLower(detail?.brand || 'unbranded').replace(/\s+/g, ''))
+    .sort()
+    .join('|');
+
+const getPreferredProductScore = (product) =>
+  (product?.catalogProductId ? 100 : 0) +
+  (product?.productname ? 10 : 0) +
+  (product?.englishname ? 10 : 0) +
+  (product?.teluguname ? 10 : 0);
+
+const dedupePreferredProducts = (products = []) => {
+  const byKey = new Map();
+
+  for (const product of products || []) {
+    const key = [
+      safeLower(product?.category).replace(/\s+/g, ''),
+      getProductBrandKey(product),
+      getProductNameKey(product),
+    ].join('::');
+
+    if (!key.replace(/:/g, '')) continue;
+
+    const existing = byKey.get(key);
+    if (
+      !existing ||
+      getPreferredProductScore(product) > getPreferredProductScore(existing)
+    ) {
+      byKey.set(key, product);
+    }
+  }
+
+  return [...byKey.values()];
+};
+
 const ProductList = forwardRef((props, ref) => {
   const dispatch = useDispatch();
   const barcodeRef = useRef(null);
@@ -37,13 +94,15 @@ const ProductList = forwardRef((props, ref) => {
 
   const token = useSelector((state) => state.posUser.userInfo?.token);
   const { all: products = [], loading, error } = useSelector((state) => state.products || {});
-  const safeProducts = useMemo(() => (
-    Array.isArray(products)
+  const safeProducts = useMemo(() => {
+    const list = Array.isArray(products)
       ? products
       : Array.isArray(products?.products)
         ? products.products
-        : []
-  ), [products]);
+        : [];
+
+    return dedupePreferredProducts(list);
+  }, [products]);
 
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [brandFilter, setBrandFilter] = useState('all');
@@ -134,6 +193,46 @@ const ProductList = forwardRef((props, ref) => {
     }
 
     scanned = String(scanned || '').trim();
+    const normalizedNumericId = scanned.replace(/^0+/, '');
+
+    const exactProductBarcodeHit = safeProducts
+      .flatMap((p) =>
+        (p.details || []).flatMap((d) =>
+          (d.financials || []).map((f) => ({ p, d, f }))
+        )
+      )
+      .find(
+        ({ f }) =>
+          getProductBarcodeId(f) === scanned ||
+          getProductBarcodeId(f) === normalizedNumericId
+      );
+
+    if (exactProductBarcodeHit) {
+      const { p: matchedProduct, d: detail, f: financial } = exactProductBarcodeHit;
+
+      dispatch(addToCart({
+        id: matchedProduct._id,
+        productName: matchedProduct.name,
+        category: matchedProduct.category,
+        brand: detail.brand,
+        brandId: detail._id,
+        financialId: financial._id,
+        product_barcode_id: getProductBarcodeId(financial),
+        mkid: financial.mkid || '',
+        MRP: financial.price,
+        dprice: financial.dprice,
+        quantity: financial.quantity,
+        countInStock: financial.countInStock,
+        units: financial.units,
+        image: detail.images?.[0]?.image,
+        catalogQuantity: financial.quantity,
+        discount: Math.round(((financial.price - financial.dprice) / financial.price) * 100),
+        qty: 1
+      }));
+
+      setTimeout(() => barcodeRef.current?.focus(), 100);
+      return;
+    }
 
     const matchedProduct = safeProducts.find((p) =>
       p.details?.some((d) =>
@@ -160,15 +259,7 @@ const ProductList = forwardRef((props, ref) => {
         brand: detail.brand,
         brandId: detail._id,
         financialId: financial._id,
-        product_barcode_id:
-          financial.product_barcode_id ||
-          financial.productBarcodeId ||
-          financial.catalogProductBarcodeId ||
-          financial.catalogProductBarcodeID ||
-          financial.product_barcode_id_fk ||
-          financial.barcode_id ||
-          financial.catalog_barcode_id ||
-          '',
+        product_barcode_id: getProductBarcodeId(financial),
         mkid: financial.mkid || '',
         MRP: financial.price,
         dprice: financial.dprice,
@@ -260,6 +351,7 @@ const ProductList = forwardRef((props, ref) => {
     if (!item) return null;
 
     const { p, d, f } = item;
+    const productBarcodeId = getProductBarcodeId(f);
 
     return (
       <div
@@ -274,15 +366,7 @@ const ProductList = forwardRef((props, ref) => {
             brand: d.brand,
             brandId: d._id,
             financialId: f._id,
-            product_barcode_id:
-              f.product_barcode_id ||
-              f.productBarcodeId ||
-              f.catalogProductBarcodeId ||
-              f.catalogProductBarcodeID ||
-              f.product_barcode_id_fk ||
-              f.barcode_id ||
-              f.catalog_barcode_id ||
-              '',
+            product_barcode_id: productBarcodeId,
             mkid: f.mkid || '',
             MRP: f.price,
             dprice: f.dprice,
@@ -297,6 +381,11 @@ const ProductList = forwardRef((props, ref) => {
         }
         className="bg-green-100 border p-2 rounded shadow text-center cursor-pointer hover:bg-green-200 m-1"
       >
+        {productBarcodeId ? (
+          <div className="mb-1 text-xs font-bold text-blue-700">
+            ID: {productBarcodeId}
+          </div>
+        ) : null}
         <img
           src={d.images?.[0]?.image}
           alt={p.name}

@@ -2,6 +2,7 @@ import {
   getDispatchItemPackingConfigurations,
   getDispatchItemProductName,
   getDispatchItemUnit,
+  getPackingConfigurationsFromNotes,
   getPackingConfigUnit,
 } from './dispatchDisplay';
 
@@ -142,18 +143,14 @@ const compactValues = (...values) =>
 
 const getLabelId = (item) =>
   firstValue(
-    item.label_id,
-    item.labelId,
     item.product_barcode_id,
     item.productBarcodeId,
     item.catalogProductBarcodeId,
     item.catalogProductBarcodeID,
+    item.label_id,
+    item.labelId,
     item.mkid,
     item.MKID,
-    item.pos_mkid,
-    item.posMkid,
-    item.catalog_mkid,
-    item.catalogMkid,
     ''
   );
 
@@ -225,12 +222,13 @@ const makeCode128Svg = (value) => {
   )}</svg>`;
 };
 
-const getLabelRows = (order) =>
+export const getPackingLabelRows = (order) =>
   (order?.items || []).flatMap((item) => {
     const isInternalPacking = String(order?.destination || '')
       .toLowerCase()
       .startsWith('internal_packing:');
     const configs = getDispatchItemPackingConfigurations(item);
+    const noteConfigs = getPackingConfigurationsFromNotes(item);
 
     if (!configs.length) {
       if (isInternalPacking) {
@@ -245,19 +243,41 @@ const getLabelRows = (order) =>
       }));
     }
 
-    return configs.flatMap((config) => {
+    return configs.flatMap((config, configIndex) => {
+      const noteConfig = noteConfigs[configIndex] || {};
+      const labelConfig = {
+        ...noteConfig,
+        ...config,
+        package_amount: firstValue(
+          config.package_amount,
+          config.packageAmount,
+          config.purchase_amount,
+          config.purchaseAmount,
+          noteConfig.package_amount,
+          noteConfig.packageAmount
+        ),
+        mrp_amount: firstValue(
+          config.mrp_amount,
+          config.mrpAmount,
+          config.MRP,
+          config.mrp,
+          noteConfig.mrp_amount,
+          noteConfig.mrpAmount
+        ),
+        notes: config.notes || noteConfig.notes || '',
+      };
       const count = Math.max(1, Number(config.pack_count || config.qty || 1));
 
       return Array.from({ length: count }, () => ({
-        ...config,
-        notes: config.notes || item.notes || '',
+        ...labelConfig,
+        notes: labelConfig.notes,
         product_name:
-          config.product_name ||
-          config.product_name_eng ||
+          labelConfig.product_name ||
+          labelConfig.product_name_eng ||
           getDispatchItemProductName(item),
-        mkid: getMkid(config) || getMkid(item),
+        mkid: getMkid(labelConfig) || getMkid(item),
         exp_date: item.exp_date,
-        unitText: getPackingConfigUnit(config),
+        unitText: getPackingConfigUnit(labelConfig),
       }));
     });
   });
@@ -298,12 +318,12 @@ CLS
 
 TEXT 430,185,"0",180,11,11,"${productName}"
 TEXT 430,158,"0",180,9,9,"MRP:Rs ${mrp || '-'}"
-TEXT 260,158,"0",180,9,9,"MKPrice:Rs ${discountPrice || '-'}"
-TEXT 430,135,"0",180,7,7,"PerGm Rs:${perUnitPrice || '-'}"
-TEXT 430,112,"0",180,9,9,"${unit || '-'}"
-TEXT 250,135,"0",180,7,7,"PkdDt ${pkd}"
-TEXT 250,112,"0",180,7,7,"ExpDt ${exp}"
-${labelId ? `TEXT 78,72,"0",90,12,12,"ID ${labelId}"` : ''}
+TEXT 310,158,"0",180,9,9,"MKP:Rs ${discountPrice || '-'}"
+TEXT 430,135,"0",180,7,7,"PkdDt ${pkd}"
+TEXT 310,135,"0",180,7,7,"ExpDt ${exp}"
+TEXT 430,112,"0",180,7,7,"PerGm Rs:${perUnitPrice || '-'}"
+TEXT 310,112,"0",180,9,9,"${unit || '-'}"
+${labelId ? `TEXT 92,128,"0",270,8,8,"ID ${labelId}"` : ''}
 BARCODE 430,64,"128",38,1,180,2,2,"${barcode}"
 TEXT 120,18,"0",180,5,5,"${dispatchNo}"
 
@@ -376,6 +396,46 @@ const getPackingRowsFromNotes = (item) => {
   });
 };
 
+export const getPackingLabelRowKey = (item) =>
+  compactValues(
+    getLabelId(item),
+    getLabelBarcode(item),
+    getDispatchItemProductName(item),
+    item.unitText || getDispatchItemUnit(item),
+    item.barcode_quantity,
+    item.quantity,
+    item.package_amount,
+    item.mrp_amount,
+    item._notePackIndex
+  ).join('|');
+
+export const summarizePackingLabelRows = (rows = []) => {
+  const byKey = new Map();
+
+  rows.forEach((row) => {
+    const key = getPackingLabelRowKey(row);
+    const existing = byKey.get(key);
+
+    if (existing) {
+      existing.count += 1;
+      return;
+    }
+
+    byKey.set(key, {
+      key,
+      count: 1,
+      productName: getDispatchItemProductName(row),
+      unit: row.unitText || getDispatchItemUnit(row),
+      barcode: getLabelBarcode(row),
+      labelId: getLabelId(row),
+      price: getPrice(row),
+      mrp: getLabelMrp(row),
+    });
+  });
+
+  return Array.from(byKey.values());
+};
+
 const buildLabel = (item, order) => {
   const productName = getDispatchItemProductName(item).replace(/\(.*?\)/g, '').trim();
   const discountPrice = getPrice(item);
@@ -396,14 +456,14 @@ const buildLabel = (item, order) => {
         <div class="product">${escapeHtml(productName).slice(0, 30)}</div>
         <div class="priceLine">
           <strong>MRP:Rs ${escapeHtml(mrp || '-')}</strong>
-          <strong>MKPrice:Rs ${escapeHtml(discountPrice || '-')}</strong>
-          <span>${escapeHtml(unit || '-')}</span>
+          <strong>MKP:Rs ${escapeHtml(discountPrice || '-')}</strong>
         </div>
-        <div class="dateLine">
+        <div class="detailGrid">
           <span>PkdDt ${escapeHtml(pkd)}</span>
           <span>ExpDt ${escapeHtml(exp)}</span>
+          <span>${perUnitPrice ? `PerGm Rs: ${escapeHtml(perUnitPrice)}` : ''}</span>
+          <strong>${escapeHtml(unit || '-')}</strong>
         </div>
-        ${perUnitPrice ? `<div class="meta">PerGm Rs: ${escapeHtml(perUnitPrice)}</div>` : ''}
         ${labelId ? `<div class="idBadge">ID ${escapeHtml(labelId)}</div>` : ''}
         <div class="barcode">${barcodeSvg || escapeHtml(barcode || '-')}</div>
         <div class="barcodeText">${escapeHtml(barcode || '-')}</div>
@@ -413,13 +473,248 @@ const buildLabel = (item, order) => {
   `;
 };
 
-export const printPackingLabels = async (order) => {
-  const labelRows = getLabelRows(order);
-  const labels = labelRows.map((item) => buildLabel(item, order));
+const buildPackingLabelsHtml = (order, labels, autoPrint = true) => `
+  <html>
+    <head>
+      <title>${escapeHtml(order?.dispatch_no || 'Packing Labels')}</title>
+      <style>
+        @page {
+          size: ${LABEL_WIDTH_MM}mm ${LABEL_HEIGHT_MM}mm;
+          margin: 0;
+        }
+
+        * {
+          box-sizing: border-box;
+        }
+
+        body {
+          margin: 0;
+          color: #111;
+          font-family: Arial, Helvetica, sans-serif;
+          width: ${LABEL_WIDTH_MM}mm;
+        }
+
+        .label {
+          position: relative;
+          width: ${LABEL_WIDTH_MM}mm;
+          height: ${LABEL_HEIGHT_MM}mm;
+          padding: 0;
+          page-break-after: always;
+          break-after: page;
+          overflow: hidden;
+        }
+
+        .labelContent {
+          position: absolute;
+          left: 3mm;
+          right: 3mm;
+          top: 20mm;
+          height: 20mm;
+          overflow: hidden;
+        }
+
+        .product {
+          font-size: 10px;
+          line-height: 1;
+          font-weight: 800;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        .priceLine {
+          display: grid;
+          grid-template-columns: 25mm 19mm;
+          align-items: baseline;
+          column-gap: 1.5mm;
+          margin-top: 1mm;
+          font-size: 8px;
+          line-height: 1;
+          font-weight: 800;
+        }
+
+        .detailGrid {
+          display: grid;
+          grid-template-columns: 25mm 19mm;
+          gap: 0.7mm 1.5mm;
+          margin-top: 1mm;
+          font-size: 8px;
+          line-height: 1;
+        }
+
+        .priceLine strong:nth-child(2),
+        .detailGrid span:nth-child(2),
+        .detailGrid strong {
+          text-align: left;
+        }
+
+        .mkid {
+          margin-top: 1.1mm;
+          font-size: 10px;
+          line-height: 1;
+          font-weight: 800;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        .idBadge {
+          position: absolute;
+          right: 0;
+          top: 9.6mm;
+          max-width: 17mm;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          transform: rotate(90deg);
+          transform-origin: right top;
+          font-size: 6px;
+          line-height: 1;
+          font-weight: 800;
+          white-space: nowrap;
+        }
+
+        .meta {
+          margin-top: 0.7mm;
+          font-size: 5.5px;
+          line-height: 1;
+        }
+
+        .barcode {
+          margin-top: 0.9mm;
+          height: 5.4mm;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+
+        .barcodeSvg {
+          width: 100%;
+          height: 5.4mm;
+          fill: #111;
+        }
+
+        .barcodeText {
+          margin-top: 0.3mm;
+          text-align: center;
+          font-family: 'Courier New', monospace;
+          font-size: 6px;
+          line-height: 1;
+        }
+
+        .dispatchNo {
+          position: absolute;
+          right: 0;
+          bottom: 0;
+          max-width: 32mm;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          color: #555;
+          font-size: 5px;
+        }
+
+        .previewToolbar {
+          position: sticky;
+          top: 0;
+          z-index: 2;
+          display: flex;
+          gap: 8px;
+          align-items: center;
+          padding: 8px;
+          background: #111827;
+          color: #fff;
+          font-family: Arial, Helvetica, sans-serif;
+          font-size: 12px;
+        }
+
+        .previewToolbar button {
+          border: 0;
+          border-radius: 6px;
+          padding: 6px 10px;
+          background: #2563eb;
+          color: #fff;
+          font-weight: 700;
+          cursor: pointer;
+        }
+
+        @media print {
+          html,
+          body {
+            width: ${LABEL_WIDTH_MM}mm !important;
+            height: ${LABEL_HEIGHT_MM}mm !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            overflow: hidden !important;
+          }
+
+          .previewToolbar {
+            display: none !important;
+          }
+
+          .label {
+            margin: 0 !important;
+            page-break-after: always;
+            break-after: page;
+          }
+        }
+      </style>
+    </head>
+    <body>
+      ${
+        autoPrint
+          ? ''
+          : `<div class="previewToolbar">
+              <strong>${escapeHtml(order?.dispatch_no || 'Packing Labels')}</strong>
+              <span>${labels.length} label${labels.length === 1 ? '' : 's'}</span>
+              <button type="button" onclick="window.print()">Print previewed labels</button>
+            </div>`
+      }
+      ${labels.join('')}
+      ${
+        autoPrint
+          ? `<script>
+              window.onload = function () {
+                window.focus();
+                setTimeout(function () {
+                  window.print();
+                }, 150);
+              };
+            </script>`
+          : ''
+      }
+    </body>
+  </html>
+`;
+
+const openPackingLabelsWindow = (order, rows, autoPrint = true) => {
+  const labels = rows.map((item) => buildLabel(item, order));
+  const html = buildPackingLabelsHtml(order, labels, autoPrint);
+  const printWindow = window.open('', '_blank', autoPrint ? 'width=420,height=360' : 'width=900,height=700');
+
+  if (!printWindow) {
+    alert('Please allow popups to print packing labels.');
+    return false;
+  }
+
+  printWindow.document.open();
+  printWindow.document.write(html);
+  printWindow.document.close();
+  return true;
+};
+
+export const printPackingLabels = async (order, options = {}) => {
+  const excludedRowKeys = new Set(options.excludedRowKeys || []);
+  const labelRows = (options.rows || getPackingLabelRows(order)).filter(
+    (row) => !excludedRowKeys.has(getPackingLabelRowKey(row))
+  );
 
   if (!labelRows.length) {
     alert('No labels available for this dispatch.');
-    return;
+    return false;
+  }
+
+  if (options.mode === 'preview') {
+    return openPackingLabelsWindow(order, labelRows, false);
   }
 
   const prn = labelRows.map((item) => buildTsplLabel(item, order)).join('\n');
@@ -427,7 +722,7 @@ export const printPackingLabels = async (order) => {
   try {
     await sendTsplToLocalPrinter(prn);
     alert('Labels sent to local TSC printer.');
-    return;
+    return true;
   } catch (error) {
     downloadTsplLabels(order, labelRows);
     if (
@@ -437,180 +732,9 @@ export const printPackingLabels = async (order) => {
         }\n\nRaw TSC label file downloaded as fallback. Open browser preview also?`
       )
     ) {
-      return;
+      return true;
     }
   }
 
-  const html = `
-    <html>
-      <head>
-        <title>${escapeHtml(order?.dispatch_no || 'Packing Labels')}</title>
-        <style>
-          @page {
-            size: ${LABEL_WIDTH_MM}mm ${LABEL_HEIGHT_MM}mm;
-            margin: 0;
-          }
-
-          * {
-            box-sizing: border-box;
-          }
-
-          body {
-            margin: 0;
-            color: #111;
-            font-family: Arial, Helvetica, sans-serif;
-            width: ${LABEL_WIDTH_MM}mm;
-          }
-
-          .label {
-            position: relative;
-            width: ${LABEL_WIDTH_MM}mm;
-            height: ${LABEL_HEIGHT_MM}mm;
-            padding: 0;
-            page-break-after: always;
-            break-after: page;
-            overflow: hidden;
-          }
-
-          .labelContent {
-            position: absolute;
-            left: 3mm;
-            right: 3mm;
-            top: 20mm;
-            height: 20mm;
-            overflow: hidden;
-          }
-
-          .product {
-              font-size: 10px;
-            line-height: 1;
-            font-weight: 800;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-          }
-
-          .priceLine {
-            display: flex;
-            justify-content: space-between;
-            align-items: baseline;
-            gap: 1.5mm;
-            margin-top: 1mm;
-            font-size: 8px;
-            line-height: 1;
-            font-weight: 800;
-          }
-
-          .dateLine {
-            display: flex;
-            justify-content: space-between;
-            margin-top: 1mm;
-            font-size: 6px;
-            line-height: 1;
-          }
-
-          .mkid {
-            margin-top: 1.1mm;
-            font-size: 10px;
-            line-height: 1;
-            font-weight: 800;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-          }
-
-          .idBadge {
-            position: absolute;
-            left: 0;
-            bottom: 5mm;
-            transform: rotate(90deg);
-            transform-origin: left bottom;
-            font-size: 9px;
-            line-height: 1;
-            font-weight: 800;
-            white-space: nowrap;
-          }
-
-          .meta {
-            margin-top: 0.7mm;
-            font-size: 5.5px;
-            line-height: 1;
-          }
-
-          .barcode {
-            margin-top: 0.9mm;
-            height: 5.4mm;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-          }
-
-          .barcodeSvg {
-            width: 100%;
-            height: 5.4mm;
-            fill: #111;
-          }
-
-          .barcodeText {
-            margin-top: 0.3mm;
-            text-align: center;
-            font-family: 'Courier New', monospace;
-            font-size: 6px;
-            line-height: 1;
-          }
-
-          .dispatchNo {
-            position: absolute;
-            right: 0;
-            bottom: 0;
-            max-width: 32mm;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-            color: #555;
-            font-size: 5px;
-          }
-
-          @media print {
-            html,
-            body {
-              width: ${LABEL_WIDTH_MM}mm !important;
-              height: ${LABEL_HEIGHT_MM}mm !important;
-              margin: 0 !important;
-              padding: 0 !important;
-              overflow: hidden !important;
-            }
-
-            .label {
-              margin: 0 !important;
-              page-break-after: always;
-              break-after: page;
-            }
-          }
-        </style>
-      </head>
-      <body>
-        ${labels.join('')}
-        <script>
-          window.onload = function () {
-            window.focus();
-            setTimeout(function () {
-              window.print();
-            }, 150);
-          };
-        </script>
-      </body>
-    </html>
-  `;
-
-  const printWindow = window.open('', '_blank', 'width=420,height=360');
-
-  if (!printWindow) {
-    alert('Please allow popups to print packing labels.');
-    return;
-  }
-
-  printWindow.document.open();
-  printWindow.document.write(html);
-  printWindow.document.close();
+  return openPackingLabelsWindow(order, labelRows, true);
 };

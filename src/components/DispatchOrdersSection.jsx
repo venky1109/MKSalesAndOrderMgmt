@@ -12,7 +12,12 @@ import {
   fetchStockTransactions,
 } from '../features/inventory/stockManagerInventorySlice';
 import DispatchItemsTable from './DispatchItemsTable';
-import { printPackingLabels } from '../utils/packingLabelPrint';
+import {
+  getPackingLabelRowKey,
+  getPackingLabelRows,
+  printPackingLabels,
+  summarizePackingLabelRows,
+} from '../utils/packingLabelPrint';
 import {
   formatDispatchDate,
   getDispatchItemBarcode,
@@ -27,6 +32,8 @@ import {
 
 const DispatchOrdersSection = ({ orders = [], loading = false, catalogBarcodes = [] }) => {
   const dispatch = useDispatch();
+  const [labelDialog, setLabelDialog] = React.useState(null);
+  const [excludedLabelKeys, setExcludedLabelKeys] = React.useState(new Set());
 
   const normalizeUnit = (value) =>
     String(value || '').toLowerCase().replace(/\./g, '').replace(/\s+/g, '');
@@ -219,10 +226,44 @@ const DispatchOrdersSection = ({ orders = [], loading = false, catalogBarcodes =
       .map((value) => String(value || '').trim())
       .find((value) => /^\d+$/.test(value)) || '';
 
-  const getNumericMkid = (...values) =>
-    values
-      .map((value) => String(value || '').trim())
-      .find((value) => /^\d+$/.test(value)) || '';
+  const getBarcodeUnitFields = (barcode = {}, fallback = {}) => ({
+    barcode_quantity: firstValue(
+      fallback.barcode_quantity,
+      fallback.quantity,
+      barcode.barcode_quantity,
+      barcode.quantity
+    ),
+    quantity: firstValue(
+      fallback.barcode_quantity,
+      fallback.quantity,
+      barcode.barcode_quantity,
+      barcode.quantity
+    ),
+    unit_short_code: firstValue(
+      fallback.unit_short_code,
+      fallback.unit_code,
+      fallback.unit_name,
+      fallback.units,
+      fallback.unit,
+      barcode.unit_short_code,
+      barcode.unit_code,
+      barcode.unit_name,
+      barcode.units,
+      barcode.unit
+    ),
+    unit_name: firstValue(
+      fallback.unit_name,
+      fallback.unit_short_code,
+      fallback.unit_code,
+      fallback.units,
+      fallback.unit,
+      barcode.unit_name,
+      barcode.unit_short_code,
+      barcode.unit_code,
+      barcode.units,
+      barcode.unit
+    ),
+  });
 
   const getLabelReadyOrder = (order) => ({
     ...order,
@@ -234,10 +275,22 @@ const DispatchOrdersSection = ({ orders = [], loading = false, catalogBarcodes =
           item.product_barcode_id,
           item.productBarcodeId,
           item.catalogProductBarcodeId,
-          item.catalogProductBarcodeID
+          item.catalogProductBarcodeID,
+          item.label_id,
+          item.labelId,
+          item.mkid
         );
         const catalogBarcode = getCatalogBarcode(
           productBarcodeId
+        );
+        const postgresBarcodeId = getProductBarcodeId(
+          productBarcodeId,
+          catalogBarcode.id,
+          catalogBarcode.product_barcode_id,
+          catalogBarcode.productBarcodeId,
+          catalogBarcode.catalogProductBarcodeId,
+          catalogBarcode.catalogProductBarcodeID,
+          catalogBarcode.mkid
         );
         const mkBarcode = getRealMkBarcode(
           catalogBarcode.mk_barcode,
@@ -246,14 +299,21 @@ const DispatchOrdersSection = ({ orders = [], loading = false, catalogBarcodes =
           item.barcode,
           item.bar_code
         );
+        const unitFields = getBarcodeUnitFields(catalogBarcode, item);
 
         return mkBarcode
           ? {
               ...item,
-              label_id: productBarcodeId,
+              ...unitFields,
+              product_barcode_id: postgresBarcodeId,
+              productBarcodeId: postgresBarcodeId,
+              catalogProductBarcodeId: postgresBarcodeId,
+              catalogProductBarcodeID: postgresBarcodeId,
+              label_id: postgresBarcodeId,
+              labelId: postgresBarcodeId,
               mk_barcode: mkBarcode,
               barcode: mkBarcode,
-              mkid: getNumericMkid(productBarcodeId, item.mkid, item.MKID, catalogBarcode.mkid, catalogBarcode.MKID),
+              mkid: postgresBarcodeId,
             }
           : item;
       }
@@ -265,10 +325,22 @@ const DispatchOrdersSection = ({ orders = [], loading = false, catalogBarcodes =
             config.product_barcode_id,
             config.productBarcodeId,
             config.catalogProductBarcodeId,
-            config.catalogProductBarcodeID
+            config.catalogProductBarcodeID,
+            config.label_id,
+            config.labelId,
+            config.mkid
           );
           const catalogBarcode = getCatalogBarcode(
             productBarcodeId
+          );
+          const postgresBarcodeId = getProductBarcodeId(
+            productBarcodeId,
+            catalogBarcode.id,
+            catalogBarcode.product_barcode_id,
+            catalogBarcode.productBarcodeId,
+            catalogBarcode.catalogProductBarcodeId,
+            catalogBarcode.catalogProductBarcodeID,
+            catalogBarcode.mkid
           );
           const mkBarcode = getRealMkBarcode(
             catalogBarcode.mk_barcode,
@@ -280,23 +352,21 @@ const DispatchOrdersSection = ({ orders = [], loading = false, catalogBarcodes =
             item.barcode,
             item.bar_code
           );
+          const unitFields = getBarcodeUnitFields(catalogBarcode, config);
 
           return mkBarcode
             ? {
                 ...config,
-                label_id: productBarcodeId,
+                ...unitFields,
+                product_barcode_id: postgresBarcodeId,
+                productBarcodeId: postgresBarcodeId,
+                catalogProductBarcodeId: postgresBarcodeId,
+                catalogProductBarcodeID: postgresBarcodeId,
+                label_id: postgresBarcodeId,
+                labelId: postgresBarcodeId,
                 mk_barcode: mkBarcode,
                 barcode: mkBarcode,
-                mkid:
-                  getNumericMkid(
-                    productBarcodeId,
-                    config.mkid,
-                    config.MKID,
-                    item.mkid,
-                    item.MKID,
-                    catalogBarcode.mkid,
-                    catalogBarcode.MKID
-                  ),
+                mkid: postgresBarcodeId,
               }
             : config;
         }),
@@ -355,18 +425,75 @@ const DispatchOrdersSection = ({ orders = [], loading = false, catalogBarcodes =
       }));
     });
 
-  const printLabelsAndMarkDone = async (order) => {
+  const openLabelDialog = (order, shouldMarkDone = false) => {
+    const labelReadyOrder = getLabelReadyOrder(order);
+    const rows = getPackingLabelRows(labelReadyOrder);
+
+    if (!rows.length) {
+      alert('No labels available for this dispatch.');
+      return;
+    }
+
+    setExcludedLabelKeys(new Set());
+    setLabelDialog({
+      order,
+      labelReadyOrder,
+      rows,
+      shouldMarkDone,
+    });
+  };
+
+  const toggleExcludedLabel = (key) => {
+    setExcludedLabelKeys((current) => {
+      const next = new Set(current);
+
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+
+      return next;
+    });
+  };
+
+  const setAllLabelsIncluded = (included) => {
+    if (!labelDialog) return;
+
+    if (included) {
+      setExcludedLabelKeys(new Set());
+      return;
+    }
+
+    setExcludedLabelKeys(
+      new Set(summarizePackingLabelRows(labelDialog.rows).map((row) => row.key))
+    );
+  };
+
+  const runLabelAction = async (mode) => {
+    if (!labelDialog) return;
+
     try {
-      await printPackingLabels(getLabelReadyOrder(order));
+      const completed = await printPackingLabels(labelDialog.labelReadyOrder, {
+        mode,
+        excludedRowKeys: Array.from(excludedLabelKeys),
+        rows: labelDialog.rows,
+      });
 
-      await dispatch(
-        updateInventoryDispatchStatus({
-          id: order.id,
-          dispatch_status: 'label_printed',
-        })
-      ).unwrap();
+      if (!completed || mode === 'preview') return;
 
-      dispatch(fetchInventoryDispatchOrders());
+      if (labelDialog.shouldMarkDone) {
+        await dispatch(
+          updateInventoryDispatchStatus({
+            id: labelDialog.order.id,
+            dispatch_status: 'label_printed',
+          })
+        ).unwrap();
+
+        dispatch(fetchInventoryDispatchOrders());
+      }
+
+      setLabelDialog(null);
     } catch (error) {
       alert(error?.message || error || 'Labels printed, but status update failed');
     }
@@ -426,6 +553,12 @@ const DispatchOrdersSection = ({ orders = [], loading = false, catalogBarcodes =
   };
 
   const printDispatch = (order) => {
+    const getPrintPrice = (value) => {
+      if (value === undefined || value === null || value === '') return '-';
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric.toFixed(2) : String(value);
+    };
+
     const rows = (order.items || [])
       .flatMap((item) => {
           const packingConfigs =
@@ -492,6 +625,18 @@ const DispatchOrdersSection = ({ orders = [], loading = false, catalogBarcodes =
             ]
               .filter(Boolean)
               .join(' | ') || item.notes,
+          unit_price:
+            mergedConfig.package_amount ||
+            mergedConfig.packageAmount ||
+            mergedConfig.purchase_amount ||
+            mergedConfig.purchaseAmount ||
+            item.unit_price,
+          unit_mrp:
+            mergedConfig.mrp_amount ||
+            mergedConfig.mrpAmount ||
+            mergedConfig.MRP ||
+            mergedConfig.mrp ||
+            item.unit_mrp,
           _isPackingConfig: true,
         };
         });
@@ -509,6 +654,8 @@ const DispatchOrdersSection = ({ orders = [], loading = false, catalogBarcodes =
               item._isPackingConfig ? getPackingConfigUnit(item) : getDispatchItemUnit(item)
             }</td>
             <td>${formatDispatchDate(item.exp_date)}</td>
+            <td class="text-right">${getPrintPrice(item.unit_price)}</td>
+            <td class="text-right">${getPrintPrice(item.unit_mrp)}</td>
             <td>${item.notes || '-'}</td>
           </tr>
         `
@@ -572,6 +719,10 @@ const DispatchOrdersSection = ({ orders = [], loading = false, catalogBarcodes =
               text-align: center;
             }
 
+            .text-right {
+              text-align: right;
+            }
+
             .footer {
               margin-top: 45px;
               display: flex;
@@ -619,6 +770,8 @@ const DispatchOrdersSection = ({ orders = [], loading = false, catalogBarcodes =
                 <th class="text-center">Qty</th>
                 <th class="text-center">Unit</th>
                 <th>Expiry</th>
+                <th class="text-right">Unit Price</th>
+                <th class="text-right">MRP</th>
                 <th>Notes</th>
               </tr>
             </thead>
@@ -626,7 +779,7 @@ const DispatchOrdersSection = ({ orders = [], loading = false, catalogBarcodes =
               ${
                 rows ||
                 `<tr>
-                  <td colspan="9" class="text-center">No items</td>
+                  <td colspan="11" class="text-center">No items</td>
                 </tr>`
               }
             </tbody>
@@ -768,7 +921,7 @@ const DispatchOrdersSection = ({ orders = [], loading = false, catalogBarcodes =
                       <>
                         <button
                           type="button"
-                          onClick={() => printLabelsAndMarkDone(order)}
+                          onClick={() => openLabelDialog(order, true)}
                           className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700"
                         >
                           Label Print
@@ -792,13 +945,22 @@ const DispatchOrdersSection = ({ orders = [], loading = false, catalogBarcodes =
                     ))}
 
                   {status === 'label_printed' && isInternalPackingDispatch(order) && (
-                    <button
-                      type="button"
-                      onClick={() => completeInternalPacking(order)}
-                      className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
-                    >
-                      Dispatch Packings
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => openLabelDialog(order, false)}
+                        className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700"
+                      >
+                        Reprint Labels
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => completeInternalPacking(order)}
+                        className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
+                      >
+                        Dispatch Packings
+                      </button>
+                    </>
                   )}
 
                   {status === 'dispatched' &&
@@ -851,6 +1013,8 @@ const DispatchOrdersSection = ({ orders = [], loading = false, catalogBarcodes =
                       <th className="px-3 py-2 text-center">Qty</th>
                       <th className="px-3 py-2 text-center">Unit</th>
                       <th className="px-3 py-2 text-left">Expiry</th>
+                      <th className="px-3 py-2 text-right">Unit Price</th>
+                      <th className="px-3 py-2 text-right">MRP</th>
                       <th className="px-3 py-2 text-left">Notes</th>
                     </tr>
                   </thead>
@@ -865,7 +1029,143 @@ const DispatchOrdersSection = ({ orders = [], loading = false, catalogBarcodes =
           );
         })}
       </div>
+
+      {labelDialog && (
+        <LabelPrintDialog
+          order={labelDialog.order}
+          rows={summarizePackingLabelRows(labelDialog.rows)}
+          excludedKeys={excludedLabelKeys}
+          selectedCount={labelDialog.rows.filter(
+            (row) => !excludedLabelKeys.has(getPackingLabelRowKey(row))
+          ).length}
+          onToggle={toggleExcludedLabel}
+          onIncludeAll={() => setAllLabelsIncluded(true)}
+          onExcludeAll={() => setAllLabelsIncluded(false)}
+          onPreview={() => runLabelAction('preview')}
+          onPrint={() => runLabelAction('print')}
+          onClose={() => setLabelDialog(null)}
+        />
+      )}
     </section>
+  );
+};
+
+const LabelPrintDialog = ({
+  order,
+  rows,
+  excludedKeys,
+  selectedCount,
+  onToggle,
+  onIncludeAll,
+  onExcludeAll,
+  onPreview,
+  onPrint,
+  onClose,
+}) => {
+  const selectedProducts = rows.filter((row) => !excludedKeys.has(row.key)).length;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-4xl rounded-2xl bg-white shadow-2xl">
+        <div className="flex flex-col gap-3 border-b p-4 md:flex-row md:items-start md:justify-between">
+          <div>
+            <h3 className="text-lg font-bold text-gray-900">Print Packing Labels</h3>
+            <p className="text-sm text-gray-600">
+              {order.dispatch_no || '-'} - {selectedCount} labels selected
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="self-start rounded-lg border px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+          >
+            Close
+          </button>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-gray-50 px-4 py-3">
+          <div className="text-sm font-semibold text-gray-700">
+            {selectedProducts} of {rows.length} products included
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={onIncludeAll}
+              className="rounded-lg border px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-white"
+            >
+              Include All
+            </button>
+            <button
+              type="button"
+              onClick={onExcludeAll}
+              className="rounded-lg border px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-white"
+            >
+              Exclude All
+            </button>
+          </div>
+        </div>
+
+        <div className="max-h-[55vh] overflow-auto">
+          <table className="min-w-full text-sm">
+            <thead className="sticky top-0 bg-gray-100 text-gray-700">
+              <tr>
+                <th className="px-3 py-2 text-left">Print</th>
+                <th className="px-3 py-2 text-left">Product</th>
+                <th className="px-3 py-2 text-left">Barcode</th>
+                <th className="px-3 py-2 text-left">Unit</th>
+                <th className="px-3 py-2 text-center">Labels</th>
+                <th className="px-3 py-2 text-right">MRP</th>
+                <th className="px-3 py-2 text-right">MK Price</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => {
+                const included = !excludedKeys.has(row.key);
+
+                return (
+                  <tr key={row.key} className={included ? 'border-t' : 'border-t bg-red-50 text-gray-500'}>
+                    <td className="px-3 py-2">
+                      <input
+                        type="checkbox"
+                        checked={included}
+                        onChange={() => onToggle(row.key)}
+                        className="h-4 w-4"
+                        aria-label={`Include ${row.productName}`}
+                      />
+                    </td>
+                    <td className="px-3 py-2 font-semibold text-gray-900">{row.productName || '-'}</td>
+                    <td className="px-3 py-2">{row.barcode || row.labelId || '-'}</td>
+                    <td className="px-3 py-2">{row.unit || '-'}</td>
+                    <td className="px-3 py-2 text-center">{row.count}</td>
+                    <td className="px-3 py-2 text-right">{row.mrp || '-'}</td>
+                    <td className="px-3 py-2 text-right">{row.price || '-'}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="flex flex-col gap-2 border-t p-4 md:flex-row md:items-center md:justify-end">
+          <button
+            type="button"
+            onClick={onPreview}
+            disabled={!selectedCount}
+            className="rounded-lg border border-blue-300 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Preview
+          </button>
+          <button
+            type="button"
+            onClick={onPrint}
+            disabled={!selectedCount}
+            className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Print Selected
+          </button>
+        </div>
+      </div>
+    </div>
   );
 };
 

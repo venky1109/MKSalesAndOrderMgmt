@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useDispatch } from 'react-redux';
 
 import {
@@ -39,6 +39,24 @@ const CreateDispatchOrderSection = ({
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [search, setSearch] = useState('');
   const [items, setItems] = useState([]);
+  const inventorySearchRef = useRef(null);
+
+  useEffect(() => {
+    const closeSuggestionsOnOutsideClick = (event) => {
+      if (
+        inventorySearchRef.current &&
+        !inventorySearchRef.current.contains(event.target)
+      ) {
+        setShowSuggestions(false);
+      }
+    };
+
+    document.addEventListener('mousedown', closeSuggestionsOnOutsideClick);
+
+    return () => {
+      document.removeEventListener('mousedown', closeSuggestionsOnOutsideClick);
+    };
+  }, []);
 
   const destinations = useMemo(() => {
     if (destinationType === 'internal_packing') {
@@ -288,8 +306,25 @@ const CreateDispatchOrderSection = ({
     )} x ${formatPackUnit(item)} | Available: ${formatDecimal(item.available_units)}`;
   };
 
-  const getSourceUnitsForPayload = (item) =>
-    isInternalPacking ? getConfiguredSourceUnits(item) : Number(item.no_of_units);
+  const getLooseQtyPerUnit = (item) => {
+    const qty = Number(item.barcode_quantity || item.quantity || item.catalog_quantity || 0);
+    const unit = normalizeUnit(item.unit_short_code || item.unit_name || item.units || item.unit);
+
+    return unit === 'qty' && qty > 1 ? qty : 0;
+  };
+
+  const getDispatchUnitsFromEntry = (item) => {
+    if (isInternalPacking) return getConfiguredSourceUnits(item);
+
+    const looseQtyPerUnit = getLooseQtyPerUnit(item);
+    if (item.dispatch_entry_mode === 'qty' && looseQtyPerUnit) {
+      return Number((Number(item.dispatch_qty || 0) / looseQtyPerUnit).toFixed(3));
+    }
+
+    return Number(item.no_of_units || 0);
+  };
+
+  const getSourceUnitsForPayload = (item) => getDispatchUnitsFromEntry(item);
 
   const getPackingSummary = (item) =>
     (item.packing_configs || [])
@@ -391,8 +426,10 @@ const CreateDispatchOrderSection = ({
     );
 
     const alreadyAddedUnits = getAlreadyAddedUnits(inventoryRow);
+    const remainingUnits = availableUnits - alreadyAddedUnits;
+    const initialUnits = remainingUnits >= 1 ? 1 : Number(remainingUnits.toFixed(3));
 
-    if (alreadyAddedUnits + 1 > availableUnits) {
+    if (initialUnits <= 0) {
       alert(`Only ${availableUnits} units available.`);
       return;
     }
@@ -439,8 +476,10 @@ const CreateDispatchOrderSection = ({
       exp_date: inventoryRow.exp_date_only,
       available_units: availableUnits,
 
-      qty: 1,
-      no_of_units: 1,
+      qty: initialUnits,
+      no_of_units: initialUnits,
+      dispatch_entry_mode: 'units',
+      dispatch_qty: '',
       notes: '',
       packing_configs: [],
     };
@@ -452,15 +491,16 @@ const CreateDispatchOrderSection = ({
           String(newItem.inventory_product_id)
       );
 
-      if (existingIndex !== -1) {
-        return prev.map((item, index) =>
-          index === existingIndex
-            ? {
-                ...item,
-                qty: Number(item.qty || 0) + 1,
-                no_of_units: Number(item.no_of_units || 0) + 1,
-              }
-            : item
+        if (existingIndex !== -1) {
+          return prev.map((item, index) =>
+            index === existingIndex
+              ? {
+                  ...item,
+                  qty: Number(item.qty || 0) + initialUnits,
+                  no_of_units: Number(item.no_of_units || 0) + initialUnits,
+                  dispatch_entry_mode: item.dispatch_entry_mode || 'units',
+                }
+              : item
         );
       }
 
@@ -486,6 +526,38 @@ const CreateDispatchOrderSection = ({
 
           return {
             ...item,
+            qty: nextUnits,
+            no_of_units: nextUnits,
+          };
+        }
+
+        if (field === 'dispatch_entry_mode') {
+          return {
+            ...item,
+            dispatch_entry_mode: value,
+            dispatch_qty: '',
+            qty: value === 'qty' ? 0 : Number(item.no_of_units || 1),
+            no_of_units: value === 'qty' ? 0 : Number(item.no_of_units || 1),
+          };
+        }
+
+        if (field === 'dispatch_qty') {
+          const looseQtyPerUnit = getLooseQtyPerUnit(item);
+          const nextQty = Number(value || 0);
+          const maxQty = Number(item.available_units || 0) * looseQtyPerUnit;
+
+          if (looseQtyPerUnit && nextQty > maxQty) {
+            alert(`Only ${formatDecimal(maxQty, 0)} qty available.`);
+            return item;
+          }
+
+          const nextUnits = looseQtyPerUnit
+            ? Number((nextQty / looseQtyPerUnit).toFixed(3))
+            : nextQty;
+
+          return {
+            ...item,
+            dispatch_qty: value,
             qty: nextUnits,
             no_of_units: nextUnits,
           };
@@ -606,8 +678,8 @@ const CreateDispatchOrderSection = ({
         !item.inventory_product_id ||
         !item.product_barcode_id ||
         !item.exp_date ||
-        Number(item.no_of_units || 0) <= 0 ||
-        Number(item.no_of_units || 0) > Number(item.available_units || 0)
+        Number(getSourceUnitsForPayload(item) || 0) <= 0 ||
+        Number(getSourceUnitsForPayload(item) || 0) > Number(item.available_units || 0)
     );
 
     if (invalidItem) {
@@ -804,7 +876,7 @@ const CreateDispatchOrderSection = ({
             Add Product From Inventory
           </label>
 
-          <div className="relative">
+          <div ref={inventorySearchRef} className="relative">
             <input
               value={search}
               onFocus={() => setShowSuggestions(true)}
@@ -874,6 +946,7 @@ const CreateDispatchOrderSection = ({
                 <th className="p-2 text-left">Category</th>
                 <th className="p-2 text-center">Expiry</th>
                 <th className="p-2 text-center">Available</th>
+                <th className="p-2 text-center">Dispatch By</th>
                 <th className="p-2 text-center">Dispatch Units</th>
                 <th className="p-2 text-center">Unit</th>
                 <th className="p-2 text-left">Notes</th>
@@ -884,16 +957,20 @@ const CreateDispatchOrderSection = ({
             <tbody>
               {items.length === 0 ? (
                 <tr>
-                  <td colSpan="10" className="p-6 text-center text-gray-500">
+                  <td colSpan="11" className="p-6 text-center text-gray-500">
                     No products added
                   </td>
                 </tr>
               ) : (
-                items.map((item, index) => (
-                  <tr
-                    key={`${item.inventory_product_id}-${index}`}
-                    className="border-t"
-                  >
+                items.map((item, index) => {
+                  const looseQtyPerUnit = getLooseQtyPerUnit(item);
+                  const dispatchUnits = getDispatchUnitsFromEntry(item);
+
+                  return (
+                    <tr
+                      key={`${item.inventory_product_id}-${index}`}
+                      className="border-t"
+                    >
                     <td className="p-2">
                       <div className="font-semibold">
                         {[item.product_code, item.product_name].filter(Boolean).join(' - ')}
@@ -913,26 +990,74 @@ const CreateDispatchOrderSection = ({
                     </td>
 
                     <td className="p-2 text-center">
+                      {looseQtyPerUnit ? (
+                        <select
+                          value={item.dispatch_entry_mode || 'units'}
+                          onChange={(e) =>
+                            updateItem(index, 'dispatch_entry_mode', e.target.value)
+                          }
+                          className="rounded border px-2 py-1 text-sm"
+                        >
+                          <option value="units">Units</option>
+                          <option value="qty">Qty</option>
+                        </select>
+                      ) : (
+                        <span className="text-gray-500">Units</span>
+                      )}
+                    </td>
+
+                    <td className="p-2 text-center">
                       <input
                         type="number"
-                        min={isInternalPacking ? '0.001' : '1'}
-                        step={isInternalPacking ? '0.001' : '1'}
-                        max={item.available_units}
+                        min={
+                          isInternalPacking || item.dispatch_entry_mode === 'qty'
+                            ? '0.001'
+                            : Number(item.available_units || 0) < 1
+                              ? '0.001'
+                              : '1'
+                        }
+                        step={
+                          isInternalPacking || item.dispatch_entry_mode === 'qty'
+                            ? '0.001'
+                            : Number(item.available_units || 0) < 1
+                              ? '0.001'
+                              : '1'
+                        }
+                        max={
+                          item.dispatch_entry_mode === 'qty' && looseQtyPerUnit
+                            ? Number(item.available_units || 0) * looseQtyPerUnit
+                            : item.available_units
+                        }
                         value={
                           isInternalPacking
                             ? formatDecimal(getConfiguredSourceUnits(item))
+                            : item.dispatch_entry_mode === 'qty'
+                              ? item.dispatch_qty
                             : item.no_of_units
                         }
                         onChange={(e) =>
-                          updateItem(index, 'no_of_units', e.target.value)
+                          updateItem(
+                            index,
+                            item.dispatch_entry_mode === 'qty'
+                              ? 'dispatch_qty'
+                              : 'no_of_units',
+                            e.target.value
+                          )
                         }
                         readOnly={isInternalPacking}
                         className="w-24 rounded border px-2 py-1 text-center"
                       />
+                      {item.dispatch_entry_mode === 'qty' && looseQtyPerUnit ? (
+                        <div className="mt-1 text-[11px] text-gray-500">
+                          {formatDecimal(dispatchUnits)} units
+                        </div>
+                      ) : null}
                     </td>
 
                     <td className="p-2 text-center">
-                      {formatPackUnit(item)}
+                      {item.dispatch_entry_mode === 'qty' && looseQtyPerUnit
+                        ? `QTY (${formatDecimal(looseQtyPerUnit, 0)} / ${formatPackUnit(item)})`
+                        : formatPackUnit(item)}
                     </td>
 
                     <td className="p-2">
@@ -954,7 +1079,8 @@ const CreateDispatchOrderSection = ({
                       </button>
                     </td>
                   </tr>
-                ))
+                  );
+                })
               )}
             </tbody>
           </table>

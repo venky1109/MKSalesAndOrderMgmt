@@ -120,27 +120,45 @@ const POSDispatchButtons = ({ buttonClass = "" }) => {
   };
 
   const getPurchasePrice = (item) =>
-    toNumberOrNull(
+    getUnitLikePrice(
+      item,
       firstValue(
         item.package_amount,
         item.dprice,
         item.discount_price,
         item.discounted_price,
         item.selling_price,
+        getPriceFromNotes(item.notes, "purchase"),
         item.unit_price,
-        item.unitPrice,
-        getPriceFromNotes(item.notes, "purchase")
+        item.unitPrice
       )
     );
+
+  const getUnitLikePrice = (item, value) => {
+    const price = toNumberOrNull(value);
+    if (!price) return null;
+
+    const qty = Number(firstValue(item.no_of_units, item.qty, 0));
+    const possibleTotal = Number(item.total_price || item.totalPrice || 0);
+
+    if (qty > 1 && possibleTotal > 0 && Math.abs(price - possibleTotal) < 0.01) {
+      return null;
+    }
+
+    return price;
+  };
 
   const getMrpPrice = (item) => {
     const explicitMrp = toNumberOrNull(
       firstValue(
         item.mrp_amount,
+        item.unit_mrp,
+        item.unitMRP,
+        item.inventory_unit_mrp,
         item.mrp,
         item.MRP,
-        item.price,
-        getPriceFromNotes(item.notes, "mrp")
+        getPriceFromNotes(item.notes, "mrp"),
+        item.price
       )
     );
 
@@ -148,6 +166,11 @@ const POSDispatchButtons = ({ buttonClass = "" }) => {
 
     const purchasePrice = getPurchasePrice(item);
     return purchasePrice ? Math.round(purchasePrice * 1.25) : null;
+  };
+
+  const formatPrice = (value) => {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) && numeric > 0 ? numeric.toFixed(2) : "-";
   };
 
   const getReceivePricePayload = (order) =>
@@ -802,6 +825,10 @@ const POSDispatchButtons = ({ buttonClass = "" }) => {
                                 </th>
                                 <th className="px-3 py-2 text-left">Expiry</th>
                                 <th className="px-3 py-2 text-center">Qty</th>
+                                <th className="px-3 py-2 text-right">
+                                  Unit Price
+                                </th>
+                                <th className="px-3 py-2 text-right">MRP</th>
                                 <th className="px-3 py-2 text-left">Notes</th>
                               </tr>
                             </thead>
@@ -837,6 +864,14 @@ const POSDispatchButtons = ({ buttonClass = "" }) => {
                                     {item.qty}
                                   </td>
 
+                                  <td className="px-3 py-2 text-right">
+                                    {formatPrice(getPurchasePrice(item))}
+                                  </td>
+
+                                  <td className="px-3 py-2 text-right">
+                                    {formatPrice(getMrpPrice(item))}
+                                  </td>
+
                                   <td className="px-3 py-2">
                                     {item.notes || "-"}
                                   </td>
@@ -846,7 +881,7 @@ const POSDispatchButtons = ({ buttonClass = "" }) => {
                               {(!order.items || order.items.length === 0) && (
                                 <tr>
                                   <td
-                                    colSpan="8"
+                                    colSpan="10"
                                     className="px-3 py-6 text-center text-gray-500"
                                   >
                                     No items

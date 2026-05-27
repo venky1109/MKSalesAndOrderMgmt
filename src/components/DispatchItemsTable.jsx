@@ -18,6 +18,26 @@ const getCatalogBarcode = (catalogBarcodes, config) =>
       String(config.product_barcode_id)
   );
 
+const firstValue = (...values) =>
+  values.find((value) => value !== undefined && value !== null && value !== '');
+
+const formatPrice = (value) => {
+  if (value === undefined || value === null || value === '') return '-';
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return String(value);
+  return numeric.toFixed(2);
+};
+
+const getPriceFromNotes = (notes, label) => {
+  const text = String(notes || '');
+  const pattern =
+    label === 'mrp'
+      ? /MRP\s*Rs\.?\s*([0-9]+(?:\.[0-9]+)?)/i
+      : /Purchase\s*Rs\.?\s*([0-9]+(?:\.[0-9]+)?)/i;
+
+  return text.match(pattern)?.[1] || '';
+};
+
 const getPackageRows = (items, catalogBarcodes = []) =>
   items.flatMap((item) => {
     const configs =
@@ -75,6 +95,26 @@ const getPackageRows = (items, catalogBarcodes = []) =>
       qty: mergedConfig.pack_count || mergedConfig.qty || '-',
       unit: getPackingConfigUnit(mergedConfig),
       expDate: item.exp_date,
+      unitPrice: firstValue(
+        mergedConfig.package_amount,
+        mergedConfig.packageAmount,
+        mergedConfig.purchase_amount,
+        mergedConfig.purchaseAmount,
+        getPriceFromNotes(mergedConfig.notes, 'purchase'),
+        getPriceFromNotes(item.notes, 'purchase'),
+        item.package_amount,
+        item.unit_price
+      ),
+      mrp: firstValue(
+        mergedConfig.mrp_amount,
+        mergedConfig.mrpAmount,
+        mergedConfig.MRP,
+        mergedConfig.mrp,
+        getPriceFromNotes(mergedConfig.notes, 'mrp'),
+        getPriceFromNotes(item.notes, 'mrp'),
+        item.mrp_amount,
+        item.unit_mrp
+      ),
       notes: [
         mergedConfig.package_amount ? `Purchase Rs ${mergedConfig.package_amount}` : '',
         mergedConfig.mrp_amount ? `MRP Rs ${mergedConfig.mrp_amount}` : '',
@@ -95,10 +135,27 @@ const sourceRows = (items) =>
     qty: item.qty,
     unit: getDispatchItemUnit(item),
     expDate: item.exp_date,
+    unitPrice: firstValue(
+      item.package_amount,
+      item.packageAmount,
+      item.purchase_amount,
+      item.purchaseAmount,
+      getPriceFromNotes(item.notes, 'purchase'),
+      item.unit_price,
+      item.price
+    ),
+    mrp: firstValue(
+      item.mrp_amount,
+      item.mrpAmount,
+      item.MRP,
+      item.mrp,
+      getPriceFromNotes(item.notes, 'mrp'),
+      item.unit_mrp
+    ),
     notes: item.notes || '-',
   }));
 
-const DispatchItemsTable = ({ items = [], emptyColSpan = 8, catalogBarcodes = [] }) => {
+const DispatchItemsTable = ({ items = [], emptyColSpan = 10, catalogBarcodes = [] }) => {
   const packageRows = getPackageRows(items, catalogBarcodes);
   const rows = packageRows.length ? packageRows : sourceRows(items);
 
@@ -119,6 +176,10 @@ const DispatchItemsTable = ({ items = [], emptyColSpan = 8, catalogBarcodes = []
           <td className="px-3 py-2 text-center">{item.unit}</td>
 
           <td className="px-3 py-2">{formatDispatchDate(item.expDate)}</td>
+
+          <td className="px-3 py-2 text-right">{formatPrice(item.unitPrice)}</td>
+
+          <td className="px-3 py-2 text-right">{formatPrice(item.mrp)}</td>
 
           <td className="px-3 py-2">{item.notes}</td>
         </tr>
