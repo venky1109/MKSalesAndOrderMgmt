@@ -12,6 +12,7 @@ import {
   fetchInventoryProducts,
   fetchInventoryDispatchOrders,
   fetchCatalogBarcodes,
+  fetchRatePlans,
 } from '../features/inventory/stockManagerInventorySlice';
 
 const DispatchPage = () => {
@@ -25,6 +26,7 @@ const DispatchPage = () => {
     warehouses = [],
     outlets = [],
     catalogBarcodes = [],
+    ratePlans = [],
     inventoryDispatchOrders = [],
     inventoryDispatchLoading = false,
     inventoryDispatchError = null,
@@ -38,6 +40,7 @@ const DispatchPage = () => {
       dispatch(fetchWarehouses());
       dispatch(fetchOutlets());
       dispatch(fetchCatalogBarcodes());
+      dispatch(fetchRatePlans());
       dispatch(fetchInventoryDispatchOrders());
     }
   }, [dispatch, userInfo?.token]);
@@ -70,6 +73,7 @@ const DispatchPage = () => {
           warehouses={warehouses}
           outlets={outlets}
           catalogBarcodes={catalogBarcodes}
+          ratePlans={ratePlans}
           loading={inventoryDispatchLoading}
         />
 

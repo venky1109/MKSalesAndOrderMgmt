@@ -12,6 +12,7 @@ import catalogCrudReducer from '../features/inventory/catalogCrudSlice';
 import inventoryMovementReducer from '../features/inventory/inventoryMovementSlice';
 import inventoryDashboardReducer from '../features/inventory/inventoryDashboardSlice';
 import topProductsReportReducer from '../features/reports/topProductsReportSlice';
+import advertisementReducer from '../features/marketing/advertisementSlice';
 const stateMutationLogger = store => next => action => {
   const result = next(action);
   const state = store.getState();
@@ -38,6 +39,7 @@ export const store = configureStore({
     inventoryMovement: inventoryMovementReducer,
     inventoryDashboard: inventoryDashboardReducer,
     topProductsReport: topProductsReportReducer,
+    advertisements: advertisementReducer,
   },
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware().concat(stateMutationLogger),

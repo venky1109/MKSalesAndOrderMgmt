@@ -185,6 +185,30 @@ const catalogSections = [
       { name: 'updated_at', label: 'Updated At', readOnly: true },
     ],
   },
+  {
+    key: 'rate_plans',
+    title: 'Rate Plans',
+    entity: 'rate-plans',
+    fields: [
+      {
+        name: 'product_barcode_id',
+        label: 'Product Barcode',
+        type: 'select',
+        optionsKey: 'product-barcodes',
+        valueKey: 'id',
+        labelKey: 'mk_barcode',
+        required: true,
+      },
+      { name: 'rate_for', label: 'Rate For', required: true },
+      { name: 'gst_rate', label: 'GST %', type: 'number' },
+      { name: 'margin_percentage', label: 'Margin %', type: 'number' },
+      { name: 'labour_percentage', label: 'Labour %', type: 'number' },
+      { name: 'transport_percentage', label: 'Transport %', type: 'number' },
+      { name: 'load_percentage', label: 'Load %', type: 'number' },
+      { name: 'unload_percentage', label: 'Unload %', type: 'number' },
+      { name: 'notes', label: 'Notes' },
+    ],
+  },
 ];
 
 const StockManagerCatalogPage = () => {
@@ -204,6 +228,7 @@ const StockManagerCatalogPage = () => {
     dispatch(fetchCatalogEntity('warehouses'));
     dispatch(fetchCatalogEntity('product-barcodes'));
     dispatch(fetchCatalogEntity('images'));
+    dispatch(fetchCatalogEntity('rate-plans'));
   }, [dispatch]);
 
   const catalogOptions = {
@@ -216,6 +241,8 @@ const StockManagerCatalogPage = () => {
     stakeholders: data.stakeholders || [],
     warehouses: data.warehouses || [],
     images: data.images || [],
+    'product-barcodes': data['product-barcodes'] || [],
+    'rate-plans': data['rate-plans'] || [],
   };
 
   const activeSection = catalogSections.find((item) => item.key === activeKey);
@@ -229,7 +256,7 @@ const StockManagerCatalogPage = () => {
         </h1>
         <p className="text-sm text-gray-500">
           Manage catalog products, brands, categories, employees, outlets,
-          units, stakeholders, warehouses, product barcodes and images.
+          units, stakeholders, warehouses, product barcodes, images and rate plans.
         </p>
       </section>
 

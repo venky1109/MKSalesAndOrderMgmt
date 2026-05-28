@@ -261,6 +261,24 @@ export const fetchCatalogBarcodes = createAsyncThunk(
   }
 );
 
+export const fetchRatePlans = createAsyncThunk(
+  'stockManagerInventory/fetchRatePlans',
+  async (_, thunkAPI) => {
+    try {
+      const { data } = await axios.get(
+        apiUrl('/catalog-pg/rate-plans'),
+        authConfig(thunkAPI.getState)
+      );
+
+      return data;
+    } catch (error) {
+      return thunkAPI.rejectWithValue(
+        error.response?.data?.message || error.message
+      );
+    }
+  }
+);
+
 /* =========================
    PURCHASE ORDERS
 ========================= */
@@ -651,6 +669,7 @@ const initialState = {
   warehouses: [],
   categories: [],
   catalogBarcodes: [],
+  ratePlans: [],
   outlets: [],
 
   inventoryDispatchOrders: [],
@@ -749,6 +768,9 @@ const stockManagerInventorySlice = createSlice({
       })
       .addCase(fetchCatalogBarcodes.fulfilled, (state, action) => {
         state.catalogBarcodes = normalizeArray(action.payload);
+      })
+      .addCase(fetchRatePlans.fulfilled, (state, action) => {
+        state.ratePlans = normalizeArray(action.payload);
       })
 
       /* PURCHASE ORDERS */

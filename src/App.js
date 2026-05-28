@@ -28,10 +28,12 @@ import InventoryDashboardPage from "./pages/InventoryDashboardPage";
 import PwaLinkPage from "./pages/PwaLinkPage";
 import OrderManagementPage from "./pages/OrderManagementPage";
 import ApplicationMigrationHelperPage from "./pages/ApplicationMigrationHelperPage";
+import AdvertisementsPage from "./pages/AdvertisementsPage";
 import PwaInstallPrompt from "./components/PwaInstallPrompt";
 
 const ALL_MANAGER_ROLES = ["ADMIN", "STOCKMANAGER", "DIRECTOR", "SUPERVISOR"];
 const POS_ROLES = ["ADMIN", "ONLINE_CASHIER", "CASHIER", "HYBRID_CASHIER", "STOCKMANAGER", "DIRECTOR", "SUPERVISOR"];
+const ADMIN_ROLES = ["ADMIN", "DIRECTOR"];
 
 function App() {
   function AppBootHydrator() {
@@ -186,6 +188,14 @@ function App() {
   element={
     <ProtectedRoute role={POS_ROLES}>
       <OrderManagementPage />
+    </ProtectedRoute>
+  }
+/>
+<Route
+  path="/advertisements"
+  element={
+    <ProtectedRoute role={ADMIN_ROLES}>
+      <AdvertisementsPage />
     </ProtectedRoute>
   }
 />

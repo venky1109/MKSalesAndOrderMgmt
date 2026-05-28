@@ -16,6 +16,7 @@ import {
   ExternalLink,
   PackagePlus,
   Warehouse,
+  MonitorPlay,
 } from 'lucide-react';
 import { logout } from '../features/auth/posUserSlice';
 import logo from '../assests/ManaKiranaLogo1024x1024.png';
@@ -78,6 +79,7 @@ const navSections = [
         icon: ShoppingCart,
       },
       { to: '/orders/manage', label: 'Order Management', icon: ShoppingBag },
+      { to: '/advertisements', label: 'Advertisements', icon: MonitorPlay },
       { to: '/packing', label: 'Packing', icon: Package },
       { to: '/dispatch', label: 'Dispatch', icon: Truck },
       { to: '/delivery', label: 'Delivery', icon: Truck },

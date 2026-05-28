@@ -329,6 +329,18 @@ const CatalogCrudSection = ({
       }`.trim();
     }
 
+    if (field.optionsKey === 'product-barcodes') {
+      return [
+        item.product_name_eng || item.product_name,
+        item.quantity && item.unit_short_code
+          ? `${item.quantity} ${item.unit_short_code}`
+          : null,
+        item.mk_barcode || item.barcode || `ID ${item.id}`,
+      ]
+        .filter(Boolean)
+        .join(' | ');
+    }
+
     return item[field.labelKey] || item.name || item.id || '';
   }, []);
 
@@ -360,6 +372,18 @@ const CatalogCrudSection = ({
             row.unit_short_code ? `(${row.unit_short_code})` : ''
           }`.trim();
         }
+      }
+
+      if (entity === 'rate-plans' && field.name === 'product_barcode_id') {
+        return [
+          row.product_name_eng,
+          row.barcode_quantity && row.unit_short_code
+            ? `${row.barcode_quantity} ${row.unit_short_code}`
+            : null,
+          row.mk_barcode || row.barcode || row.product_barcode_id,
+        ]
+          .filter(Boolean)
+          .join(' | ');
       }
 
       if (field.type === 'checkbox') {

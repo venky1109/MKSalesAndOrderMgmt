@@ -28,6 +28,7 @@ const CreateDispatchOrderSection = ({
   warehouses = [],
   outlets = [],
   loading = false,
+  ratePlans = [],
 }) => {
   const dispatch = useDispatch();
 
@@ -84,6 +85,17 @@ const CreateDispatchOrderSection = ({
   );
 
   const isInternalPacking = destinationType === 'internal_packing';
+  const ratePlansByBarcodeId = useMemo(
+    () =>
+      (ratePlans || []).reduce((acc, plan) => {
+        const key = String(plan.product_barcode_id);
+        const list = acc.get(key) || [];
+        list.push(plan);
+        acc.set(key, list);
+        return acc;
+      }, new Map()),
+    [ratePlans]
+  );
 
   const normalizeText = (value) =>
     String(value || '').toLowerCase().replace(/\s+/g, ' ').trim();
@@ -239,32 +251,6 @@ const CreateDispatchOrderSection = ({
       .sort((a, b) => getItemUnitQtyInGrams(a) - getItemUnitQtyInGrams(b));
   };
 
-  const calculatePackAmount = (sourceItem, config) => {
-    const sourceUnitPrice = getSourceUnitPrice(sourceItem);
-    const sourceGrams = getItemUnitQtyInGrams(sourceItem);
-    const packGrams = getItemUnitQtyInGrams(config);
-
-    if (!sourceUnitPrice || !sourceGrams || !packGrams) return '';
-
-    const baseAmount = (sourceUnitPrice / sourceGrams) * packGrams;
-    const percentTotal =
-      Number(config.margin_percentage || 0) +
-      Number(config.labour_percentage || 0) +
-      Number(config.transport_percentage || 0) +
-      Number(config.load_percentage || 0) +
-      Number(config.unload_percentage || 0);
-
-    return String(Math.ceil(baseAmount + (baseAmount * percentTotal) / 100));
-  };
-
-  const calculatePackMrp = (sourceItem, config) => {
-    const amount = Number(calculatePackAmount(sourceItem, config));
-
-    if (!amount) return '';
-
-    return String(Math.round(amount * 1.25));
-  };
-
   const getConfiguredSourceUnits = (item) => {
     const sourceGrams = getItemUnitQtyInGrams(item);
 
@@ -313,6 +299,22 @@ const CreateDispatchOrderSection = ({
     return unit === 'qty' && qty > 1 ? qty : 0;
   };
 
+  const getRatePlansForConfig = (config) =>
+    ratePlansByBarcodeId.get(String(config.product_barcode_id)) || [];
+
+  const applyRatePlanToConfig = (config, ratePlan) => ({
+    ...config,
+    rate_plan_id: ratePlan?.id || '',
+    rate_for: ratePlan?.rate_for || '',
+    gst_rate: ratePlan?.gst_rate || '',
+    margin_percentage: ratePlan?.margin_percentage || '',
+    labour_percentage: ratePlan?.labour_percentage || '',
+    transport_percentage: ratePlan?.transport_percentage || '',
+    load_percentage: ratePlan?.load_percentage || '',
+    unload_percentage: ratePlan?.unload_percentage || '',
+    notes: ratePlan?.notes || config.notes || null,
+  });
+
   const getDispatchUnitsFromEntry = (item) => {
     if (isInternalPacking) return getConfiguredSourceUnits(item);
 
@@ -332,8 +334,7 @@ const CreateDispatchOrderSection = ({
         [
           `${config.product_name || item.product_name} ${formatPackUnit(config)}`,
           `x ${Number(config.pack_count || 0)}`,
-          `Purchase Rs ${calculatePackAmount(item, config)}`,
-          `MRP Rs ${calculatePackMrp(item, config)}`,
+          config.rate_plan_id ? `RatePlan ${config.rate_plan_id}` : '',
         ].join(' ')
       )
       .join('; ');
@@ -581,7 +582,13 @@ const CreateDispatchOrderSection = ({
 
         if (alreadyAdded) return item;
 
-        const newConfig = {
+        const availableRatePlans =
+          ratePlansByBarcodeId.get(
+            String(barcodeConfig.id || barcodeConfig.product_barcode_id)
+          ) || [];
+        const ratePlan = availableRatePlans[0] || null;
+
+        const newConfig = applyRatePlanToConfig({
           product_barcode_id: Number(
             barcodeConfig.id || barcodeConfig.product_barcode_id
           ),
@@ -606,12 +613,7 @@ const CreateDispatchOrderSection = ({
             barcodeConfig.units ||
             '',
           pack_count: 1,
-          margin_percentage: '',
-          labour_percentage: '',
-          transport_percentage: '',
-          load_percentage: '',
-          unload_percentage: '',
-        };
+        }, ratePlan);
 
         return {
           ...item,
@@ -629,7 +631,16 @@ const CreateDispatchOrderSection = ({
         return {
           ...item,
           packing_configs: (item.packing_configs || []).map((config, cIndex) =>
-            cIndex === configIndex ? { ...config, [field]: value } : config
+            cIndex === configIndex
+              ? field === 'rate_plan_id'
+                ? applyRatePlanToConfig(
+                    config,
+                    getRatePlansForConfig(config).find(
+                      (plan) => String(plan.id) === String(value)
+                    ) || null
+                  )
+                : { ...config, [field]: value }
+              : config
           ),
         };
       })
@@ -695,13 +706,13 @@ const CreateDispatchOrderSection = ({
             (config) =>
               !config.product_barcode_id ||
               Number(config.pack_count || 0) <= 0 ||
-              calculatePackAmount(item, config) === ''
+              !config.rate_plan_id
           )
       );
 
       if (invalidPackingConfig) {
         alert(
-          'Please add valid packing configurations and source price for every internal packing item.'
+          'Please add valid packing configurations and select a rate plan for every internal packing item.'
         );
         return;
       }
@@ -740,13 +751,9 @@ const CreateDispatchOrderSection = ({
               barcode_quantity: Number(config.barcode_quantity || 0),
               unit_short_code: config.unit_short_code || null,
               pack_count: Number(config.pack_count || 0),
-              margin_percentage: Number(config.margin_percentage || 0),
-              labour_percentage: Number(config.labour_percentage || 0),
-              transport_percentage: Number(config.transport_percentage || 0),
-              load_percentage: Number(config.load_percentage || 0),
-              unload_percentage: Number(config.unload_percentage || 0),
-              package_amount: Number(calculatePackAmount(item, config)),
-              mrp_amount: Number(calculatePackMrp(item, config)),
+              rate_plan_id: config.rate_plan_id
+                ? Number(config.rate_plan_id)
+                : null,
             }))
           : undefined,
       })),
@@ -1093,7 +1100,7 @@ const CreateDispatchOrderSection = ({
                 Packing Configuration
               </h3>
               <p className="text-sm text-gray-500">
-                Choose pack sizes from product barcodes and enter count plus cost percentages.
+                Choose pack sizes from product barcodes. Count stays on the dispatch; prices and percentages come from catalog rate plans.
               </p>
             </div>
 
@@ -1183,16 +1190,16 @@ const CreateDispatchOrderSection = ({
                       <table className="min-w-[1180px] w-full text-xs">
                         <thead className="bg-gray-100 text-gray-700">
                           <tr>
-                            <th className="p-2 text-left">Packing</th>
-                            <th className="p-2 text-left">Barcode</th>
+                            <th className="p-2 text-left">Product</th>
+                            <th className="p-2 text-left">Pack Size</th>
                             <th className="p-2 text-center">Pack Count</th>
+                            <th className="p-2 text-left">Rate Plan</th>
+                            <th className="p-2 text-center">GST %</th>
                             <th className="p-2 text-center">Margin %</th>
                             <th className="p-2 text-center">Labour %</th>
                             <th className="p-2 text-center">Transport %</th>
                             <th className="p-2 text-center">Load %</th>
                             <th className="p-2 text-center">Unload %</th>
-                            <th className="p-2 text-right">Package Amount</th>
-                            <th className="p-2 text-right">MRP</th>
                             <th className="p-2 text-center">Remove</th>
                           </tr>
                         </thead>
@@ -1208,25 +1215,71 @@ const CreateDispatchOrderSection = ({
                               </td>
                             </tr>
                           ) : (
-                            item.packing_configs.map((config, configIndex) => (
+                            item.packing_configs.map((config, configIndex) => {
+                              const configRatePlans = getRatePlansForConfig(config);
+
+                              return (
                               <tr
                                 key={`${config.product_barcode_id}-${configIndex}`}
                                 className="border-t"
                               >
                                 <td className="p-2 font-semibold">
-                                  {config.product_name || item.product_name} -{' '}
-                                  {formatPackUnit(config)}
-                                </td>
-                                  <td className="p-2">
                                   {config.mk_barcode ||
                                     config.mkBarcode ||
                                     config.MKBarcode ||
                                     config.bar_code ||
                                     config.barcode ||
                                     '-'}
+                                </td>
+                                  <td className="p-2">
+                                    {config.product_name || item.product_name} -{' '}
+                                    {formatPackUnit(config)}
                                   </td>
+                                <td className="p-2 text-center">
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="1"
+                                    value={config.pack_count}
+                                    onChange={(e) =>
+                                      updatePackingConfig(
+                                        itemIndex,
+                                        configIndex,
+                                        'pack_count',
+                                        e.target.value
+                                      )
+                                    }
+                                    className="w-20 rounded border px-2 py-1 text-center"
+                                  />
+                                </td>
+                                <td className="p-2">
+                                  <select
+                                    value={config.rate_plan_id || ''}
+                                    onChange={(e) =>
+                                      updatePackingConfig(
+                                        itemIndex,
+                                        configIndex,
+                                        'rate_plan_id',
+                                        e.target.value
+                                      )
+                                    }
+                                    className="w-40 rounded border px-2 py-1"
+                                  >
+                                    <option value="">Select rate</option>
+                                    {configRatePlans.map((plan) => (
+                                      <option key={plan.id} value={plan.id}>
+                                        {[
+                                          plan.rate_for,
+                                          plan.gst_rate ? `GST ${plan.gst_rate}%` : null,
+                                        ]
+                                          .filter(Boolean)
+                                          .join(' | ')}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </td>
                                 {[
-                                  'pack_count',
+                                  'gst_rate',
                                   'margin_percentage',
                                   'labour_percentage',
                                   'transport_percentage',
@@ -1234,33 +1287,9 @@ const CreateDispatchOrderSection = ({
                                   'unload_percentage',
                                 ].map((field) => (
                                   <td key={field} className="p-2 text-center">
-                                    <input
-                                      type="number"
-                                      min="0"
-                                      step={field === 'pack_count' ? '1' : '0.01'}
-                                      value={config[field]}
-                                      onChange={(e) =>
-                                        updatePackingConfig(
-                                          itemIndex,
-                                          configIndex,
-                                          field,
-                                          e.target.value
-                                        )
-                                      }
-                                      className="w-20 rounded border px-2 py-1 text-center"
-                                    />
+                                    {config[field] || 0}
                                   </td>
                                 ))}
-                                <td className="p-2 text-right font-bold text-green-700">
-                                  {calculatePackAmount(item, config)
-                                    ? `Rs ${calculatePackAmount(item, config)}`
-                                    : '-'}
-                                </td>
-                                <td className="p-2 text-right font-bold text-blue-700">
-                                  {calculatePackMrp(item, config)
-                                    ? `Rs ${calculatePackMrp(item, config)}`
-                                    : '-'}
-                                </td>
                                 <td className="p-2 text-center">
                                   <button
                                     type="button"
@@ -1273,7 +1302,8 @@ const CreateDispatchOrderSection = ({
                                   </button>
                                 </td>
                               </tr>
-                            ))
+                              );
+                            })
                           )}
                         </tbody>
                       </table>
