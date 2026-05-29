@@ -39,6 +39,32 @@ export const createRepository = createAsyncThunk(
   }
 );
 
+export const updateRepository = createAsyncThunk(
+  'advertisements/updateRepository',
+  async ({ id, payload }, { getState, dispatch, rejectWithValue }) => {
+    try {
+      const { data } = await axios.put(`${API_BASE}/repositories/${id}`, payload, getConfig(getState));
+      dispatch(fetchRepositories());
+      return data;
+    } catch (error) {
+      return rejectWithValue(error.response?.data?.message || error.message);
+    }
+  }
+);
+
+export const deleteRepository = createAsyncThunk(
+  'advertisements/deleteRepository',
+  async (id, { getState, dispatch, rejectWithValue }) => {
+    try {
+      await axios.delete(`${API_BASE}/repositories/${id}`, getConfig(getState));
+      dispatch(fetchRepositories());
+      return id;
+    } catch (error) {
+      return rejectWithValue(error.response?.data?.message || error.message);
+    }
+  }
+);
+
 export const fetchAdvertisements = createAsyncThunk(
   'advertisements/fetchAdvertisements',
   async (_, { getState, rejectWithValue }) => {
@@ -113,6 +139,18 @@ export const deleteAdvertisement = createAsyncThunk(
   }
 );
 
+export const generateCanvaAdvertisementExport = createAsyncThunk(
+  'advertisements/generateCanvaExport',
+  async (id, { getState, rejectWithValue }) => {
+    try {
+      const { data } = await axios.post(`${API_BASE}/${id}/canva-export`, {}, getConfig(getState));
+      return data;
+    } catch (error) {
+      return rejectWithValue(error.response?.data || { message: error.message });
+    }
+  }
+);
+
 const advertisementSlice = createSlice({
   name: 'advertisements',
   initialState: {
@@ -122,11 +160,13 @@ const advertisementSlice = createSlice({
     saving: false,
     error: null,
     successMessage: null,
+    canvaExportMessage: null,
   },
   reducers: {
     clearAdvertisementMessage: (state) => {
       state.error = null;
       state.successMessage = null;
+      state.canvaExportMessage = null;
     },
   },
   extraReducers: (builder) => {
@@ -153,6 +193,10 @@ const advertisementSlice = createSlice({
         (state, action) => {
           state.loading = false;
           state.saving = false;
+          if (action.type.includes('generateCanvaExport')) {
+            state.canvaExportMessage = action.payload?.message || 'Canva export started';
+            return;
+          }
           if (!action.type.includes('fetch')) {
             state.successMessage = 'Advertisement saved successfully';
           }
@@ -163,7 +207,10 @@ const advertisementSlice = createSlice({
         (state, action) => {
           state.loading = false;
           state.saving = false;
-          state.error = action.payload || 'Something went wrong';
+          state.error = action.payload?.message || action.payload || 'Something went wrong';
+          if (action.type.includes('generateCanvaExport') && action.payload?.canvaPayload) {
+            state.canvaExportMessage = `${state.error} Configuration payload is ready.`;
+          }
         }
       );
   },

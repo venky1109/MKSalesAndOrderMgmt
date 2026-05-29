@@ -440,6 +440,25 @@ export const verifyReceivedPurchaseOrder = createAsyncThunk(
   }
 );
 
+export const rollbackPurchaseInventory = createAsyncThunk(
+  'stockManagerInventory/rollbackPurchaseInventory',
+  async ({ purchaseOrderId, reason, items = [] }, thunkAPI) => {
+    try {
+      const { data } = await axios.put(
+        apiUrl(`/purchases/orders/${purchaseOrderId}/rollback`),
+        { reason, items },
+        authConfig(thunkAPI.getState)
+      );
+
+      return data;
+    } catch (error) {
+      return thunkAPI.rejectWithValue(
+        error.response?.data?.message || error.message
+      );
+    }
+  }
+);
+
 /* =========================
    INVENTORY DISPATCH
 ========================= */
@@ -650,6 +669,25 @@ export const deleteInventoryDispatchOrder = createAsyncThunk(
   }
 );
 
+export const rollbackInventoryDispatch = createAsyncThunk(
+  'stockManagerInventory/rollbackInventoryDispatch',
+  async ({ dispatchOrderId, stakeholder_type, reason, items = [] }, thunkAPI) => {
+    try {
+      const { data } = await axios.put(
+        apiUrl(`/dispatch-pg/orders/${dispatchOrderId}/rollback`),
+        { stakeholder_type, reason, items },
+        authConfig(thunkAPI.getState)
+      );
+
+      return data;
+    } catch (error) {
+      return thunkAPI.rejectWithValue(
+        error.response?.data?.message || error.message
+      );
+    }
+  }
+);
+
 /* =========================
    INITIAL STATE
 ========================= */
@@ -819,6 +857,20 @@ const stockManagerInventorySlice = createSlice({
       })
       .addCase(verifyReceivedPurchaseOrder.rejected, (state, action) => {
         state.error = action.payload;
+      })
+      .addCase(rollbackPurchaseInventory.pending, (state) => {
+        state.loading = true;
+        state.error = null;
+        state.successMessage = null;
+      })
+      .addCase(rollbackPurchaseInventory.fulfilled, (state, action) => {
+        state.loading = false;
+        state.successMessage =
+          action.payload?.message || 'Purchase rollback completed';
+      })
+      .addCase(rollbackPurchaseInventory.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.payload || 'Failed to rollback purchase';
       })
 
       /* INVENTORY DISPATCH */
@@ -1013,6 +1065,35 @@ const stockManagerInventorySlice = createSlice({
       .addCase(deleteInventoryDispatchOrder.rejected, (state, action) => {
         state.inventoryDispatchError =
           action.payload || 'Failed to delete dispatch order';
+      })
+      .addCase(rollbackInventoryDispatch.pending, (state) => {
+        state.inventoryDispatchLoading = true;
+        state.inventoryDispatchError = null;
+        state.inventoryDispatchSuccess = null;
+      })
+      .addCase(rollbackInventoryDispatch.fulfilled, (state, action) => {
+        state.inventoryDispatchLoading = false;
+        state.inventoryDispatchSuccess =
+          action.payload?.message || 'Dispatch rollback completed';
+
+        const updatedOrder = action.payload?.order;
+        if (updatedOrder?.id) {
+          const index = state.inventoryDispatchOrders.findIndex(
+            (order) => String(order.id) === String(updatedOrder.id)
+          );
+
+          if (index !== -1) {
+            state.inventoryDispatchOrders[index] = {
+              ...state.inventoryDispatchOrders[index],
+              ...updatedOrder,
+            };
+          }
+        }
+      })
+      .addCase(rollbackInventoryDispatch.rejected, (state, action) => {
+        state.inventoryDispatchLoading = false;
+        state.inventoryDispatchError =
+          action.payload || 'Failed to rollback dispatch';
       });
   },
 });

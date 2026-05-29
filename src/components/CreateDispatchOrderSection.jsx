@@ -371,6 +371,7 @@ const CreateDispatchOrderSection = ({
           available_units: Number(item.no_of_units || item.count_in_stock || 0),
           product_barcode_id: item.product_barcode_id,
           display_barcode: item.mk_barcode || item.bar_code || item.barcode || '',
+          image_url: item.image_url || item.imageUrl || '',
           display_product_name: getDispatchItemProductName(item),
           searchText: [
             item.product_code,
@@ -443,6 +444,8 @@ const CreateDispatchOrderSection = ({
       barcode: inventoryRow.barcode || inventoryRow.bar_code || '',
       barcode_quantity: inventoryRow.barcode_quantity || '',
       mkid: inventoryRow.mkid || inventoryRow.MKID || inventoryRow.sku_id || '',
+      image_url: inventoryRow.image_url || inventoryRow.imageUrl || '',
+      imageUrl: inventoryRow.image_url || inventoryRow.imageUrl || '',
       product_id: inventoryRow.product_id || inventoryRow.catalog_product_id || '',
       purchase_price: inventoryRow.purchase_price,
       purchasePrice: inventoryRow.purchasePrice,
@@ -732,6 +735,9 @@ const CreateDispatchOrderSection = ({
       items: items.map((item) => ({
         inventory_product_id: Number(item.inventory_product_id),
         product_barcode_id: Number(item.product_barcode_id),
+        MK_BARCODE: item.mk_barcode || item.barcode || '',
+        mk_barcode: item.mk_barcode || item.barcode || '',
+        image_url: item.image_url || item.imageUrl || null,
         qty: getSourceUnitsForPayload(item),
         no_of_units: getSourceUnitsForPayload(item),
         exp_date: item.exp_date,

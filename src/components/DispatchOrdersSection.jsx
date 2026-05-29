@@ -386,7 +386,9 @@ const DispatchOrdersSection = ({ orders = [], loading = false, catalogBarcodes =
           {
             dispatch_order_item_id: item.id,
             product_barcode_id: item.product_barcode_id,
+            MK_BARCODE: item.mk_barcode || item.barcode || item.bar_code || '',
             barcode: item.mk_barcode || item.barcode || item.bar_code || '',
+            image_url: item.image_url || item.imageUrl || '',
             qty: Number(item.qty || item.no_of_units || 0),
             no_of_units: Number(item.no_of_units || item.qty || 0),
             price: Number(firstValue(item.mrp_amount, item.mrp, item.price, 0)),
@@ -409,7 +411,9 @@ const DispatchOrdersSection = ({ orders = [], loading = false, catalogBarcodes =
       return configs.map((config) => ({
         dispatch_order_item_id: item.id,
         product_barcode_id: config.product_barcode_id,
+        MK_BARCODE: config.mk_barcode || config.barcode || config.bar_code || '',
         barcode: config.mk_barcode || config.barcode || config.bar_code || '',
+        image_url: config.image_url || config.imageUrl || item.image_url || item.imageUrl || '',
         qty: Number(config.pack_count || config.qty || 0),
         no_of_units: Number(config.pack_count || config.qty || 0),
         price: Number(firstValue(config.mrp_amount, config.mrp, 0)),

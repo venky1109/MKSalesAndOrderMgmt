@@ -9,18 +9,24 @@ import {
   fetchWarehouses,
   fetchPurchaseOrders,
   fetchStockTransactions,
+  fetchInventoryDispatchOrders,
   clearStockManagerMessage,
 } from '../features/inventory/stockManagerInventorySlice';
 
 import StockManagerLayout from '../components/StockManagerLayout';
-import InventorySummaryCards from '../components/InventorySummaryCards';
-// import InventoryProductsTable from '../components/InventoryProductsTable';
-import PurchaseOrdersSection from '../components/PurchaseOrdersSection';
-// import ReceivePurchaseOrderSection from '../components/ReceivePurchaseOrderSection';
-import StockTransactionsTable from '../components/StockTransactionsTable';
-// import CreateDispatchOrderSection from '../components/CreateDispatchOrderSection';
 
 const number = (value) => Number(value || 0);
+
+const asArray = (value) => (Array.isArray(value) ? value : []);
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+const DISPATCHED_STATUSES = new Set([
+  'dispatched',
+  'received_to_outlet',
+  'received_by_stakeholder',
+  'received_to_warehouse',
+]);
 
 const countByStatus = (items = [], statusKey = 'status') =>
   items.reduce((acc, item) => {
@@ -28,6 +34,233 @@ const countByStatus = (items = [], statusKey = 'status') =>
     acc[status] = (acc[status] || 0) + 1;
     return acc;
   }, {});
+
+const firstValue = (...values) =>
+  values.find((value) => value !== undefined && value !== null && value !== '');
+
+const formatDate = (value) => {
+  if (!value) return 'No date';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'No date';
+
+  return date.toLocaleDateString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+  });
+};
+
+const parseDate = (value) => {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
+const getItemQty = (item) =>
+  number(firstValue(item?.no_of_units, item?.qty, item?.quantity, item?.qty_out));
+
+const getProductLabel = (item) =>
+  firstValue(
+    item?.product_name,
+    item?.product_name_eng,
+    item?.name,
+    item?.product_code,
+    item?.product_id,
+    item?.product_barcode_id,
+    'Product'
+  );
+
+const getProductKey = (item) =>
+  String(
+    firstValue(
+      item?.product_barcode_id,
+      item?.mk_barcode,
+      item?.barcode,
+      item?.product_id,
+      getProductLabel(item)
+    )
+  );
+
+const getOrderDate = (order) =>
+  firstValue(
+    order?.arrived_date,
+    order?.order_date,
+    order?.expected_date,
+    order?.created_at,
+    order?.updated_at
+  );
+
+const isShDestination = (destination) => {
+  const normalized = String(destination || '').trim().toLowerCase();
+
+  return (
+    normalized.includes('sh') ||
+    normalized.startsWith('stakeholder') ||
+    normalized.startsWith('vendor') ||
+    normalized.startsWith('customer')
+  );
+};
+
+const buildProductDayRows = (orders = [], options = {}) => {
+  const groups = new Map();
+
+  asArray(orders).forEach((order) => {
+    if (options.dispatchedOnly) {
+      const status = String(order?.dispatch_status || '').toLowerCase();
+      if (!DISPATCHED_STATUSES.has(status)) return;
+    }
+
+    const rawDate = options.getDate?.(order) || getOrderDate(order);
+    const date = parseDate(rawDate);
+    const dateLabel = formatDate(rawDate);
+
+    asArray(order?.items).forEach((item) => {
+      const qty = getItemQty(item);
+      if (!qty) return;
+
+      const product = getProductLabel(item);
+      const productKey = getProductKey(item);
+      const key = `${dateLabel}|${productKey}`;
+      const current = groups.get(key) || {
+        date: dateLabel,
+        dateValue: date?.getTime() || 0,
+        product,
+        productKey,
+        qty: 0,
+        count: 0,
+      };
+
+      current.qty += qty;
+      current.count += 1;
+      groups.set(key, current);
+    });
+  });
+
+  return [...groups.values()]
+    .sort((a, b) => b.qty - a.qty || a.product.localeCompare(b.product))
+};
+
+const buildShTransactionRows = (transactions = []) => {
+  const groups = new Map();
+
+  asArray(transactions)
+    .filter((transaction) => isShDestination(transaction?.destination))
+    .forEach((transaction) => {
+      const destination = transaction.destination || 'SH';
+      const product = getProductLabel(transaction);
+      const key = `${destination}|${product}`;
+      const current = groups.get(key) || {
+        destination,
+        product,
+        qtyIn: 0,
+        qtyOut: 0,
+        transactions: 0,
+      };
+
+      current.qtyIn += number(transaction.qty_in);
+      current.qtyOut += number(transaction.qty_out);
+      current.transactions += 1;
+      groups.set(key, current);
+    });
+
+  return [...groups.values()]
+    .sort((a, b) => b.qtyOut + b.qtyIn - (a.qtyOut + a.qtyIn))
+};
+
+const buildProductTotals = (rows = [], dateFilter = () => true) => {
+  const groups = new Map();
+
+  rows.filter(dateFilter).forEach((row) => {
+    const key = row.productKey || row.product;
+    const current = groups.get(key) || {
+      product: row.product,
+      productKey: key,
+      qty: 0,
+      firstDateValue: row.dateValue || 0,
+      lastDateValue: row.dateValue || 0,
+      firstDate: row.date,
+      lastDate: row.date,
+    };
+
+    current.qty += number(row.qty);
+
+    if (row.dateValue && (!current.firstDateValue || row.dateValue < current.firstDateValue)) {
+      current.firstDateValue = row.dateValue;
+      current.firstDate = row.date;
+    }
+
+    if (row.dateValue && row.dateValue > current.lastDateValue) {
+      current.lastDateValue = row.dateValue;
+      current.lastDate = row.date;
+    }
+
+    groups.set(key, current);
+  });
+
+  return groups;
+};
+
+const buildNotDispatchedMoreThanWeekRows = (purchaseRows = [], dispatchRows = []) => {
+  const cutoff = Date.now() - 7 * DAY_MS;
+  const oldPurchases = buildProductTotals(
+    purchaseRows,
+    (row) => row.dateValue && row.dateValue < cutoff
+  );
+  const allDispatches = buildProductTotals(dispatchRows);
+
+  return [...oldPurchases.values()]
+    .map((purchase) => {
+      const dispatchedQty = number(allDispatches.get(purchase.productKey)?.qty);
+      const pendingQty = Math.max(number(purchase.qty) - dispatchedQty, 0);
+
+      return {
+        product: purchase.product,
+        purchaseQty: number(purchase.qty),
+        dispatchedQty,
+        pendingQty,
+        firstPurchaseDate: purchase.firstDate,
+        lastPurchaseDate: purchase.lastDate,
+      };
+    })
+    .filter((row) => row.pendingQty > 0)
+    .sort((a, b) => b.pendingQty - a.pendingQty || a.product.localeCompare(b.product));
+};
+
+const buildDispatchedEightyPercentRows = (purchaseRows = [], dispatchRows = []) => {
+  const cutoff = Date.now() - 7 * DAY_MS;
+  const recentPurchases = buildProductTotals(
+    purchaseRows,
+    (row) => row.dateValue && row.dateValue >= cutoff
+  );
+  const recentDispatches = buildProductTotals(
+    dispatchRows,
+    (row) => row.dateValue && row.dateValue >= cutoff
+  );
+
+  return [...recentPurchases.values()]
+    .map((purchase) => {
+      const dispatchedQty = number(recentDispatches.get(purchase.productKey)?.qty);
+      const purchaseQty = number(purchase.qty);
+      const dispatchPercent = purchaseQty
+        ? Number(((dispatchedQty / purchaseQty) * 100).toFixed(1))
+        : 0;
+
+      return {
+        product: purchase.product,
+        purchaseQty,
+        dispatchedQty,
+        dispatchPercent,
+        firstPurchaseDate: purchase.firstDate,
+        lastPurchaseDate: purchase.lastDate,
+      };
+    })
+    .filter((row) => row.purchaseQty > 0 && row.dispatchPercent >= 80)
+    .sort(
+      (a, b) =>
+        b.dispatchPercent - a.dispatchPercent ||
+        b.dispatchedQty - a.dispatchedQty ||
+        a.product.localeCompare(b.product)
+    );
+};
 
 const DashboardCard = ({ title, value, subtitle, color = 'blue' }) => {
   const colors = {
@@ -72,6 +305,98 @@ const StatusBox = ({ title, data = {}, color = 'bg-gray-50' }) => (
   </div>
 );
 
+const ProductMovementTable = ({ title, rows = [], mode }) => (
+  <div className="rounded-xl border bg-white p-4 shadow-sm">
+    <h3 className="mb-4 text-sm font-bold text-gray-900">{title}</h3>
+
+    {rows.length === 0 ? (
+      <p className="text-sm text-gray-500">No records</p>
+    ) : (
+      <div className="overflow-x-auto">
+        <table className="min-w-full text-sm">
+          <thead className="bg-gray-100 text-gray-700">
+            <tr>
+              <th className="p-3 text-left">Product</th>
+              <th className="p-3 text-right text-emerald-700">Purchased Qty</th>
+              <th className="p-3 text-right text-blue-700">Dispatched Qty</th>
+              {mode === 'pending' ? (
+                <th className="p-3 text-right text-red-700">Pending Qty</th>
+              ) : (
+                <th className="p-3 text-right text-blue-700">Dispatch %</th>
+              )}
+              <th className="p-3 text-left">Purchase Dates</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={`${title}-${row.product}`} className="border-b hover:bg-gray-50">
+                <td className="p-3 font-semibold text-gray-900">{row.product}</td>
+                <td className="p-3 text-right font-semibold text-emerald-700">
+                  {row.purchaseQty}
+                </td>
+                <td className="p-3 text-right font-semibold text-blue-700">
+                  {row.dispatchedQty}
+                </td>
+                {mode === 'pending' ? (
+                  <td className="p-3 text-right font-bold text-red-700">
+                    {row.pendingQty}
+                  </td>
+                ) : (
+                  <td className="p-3 text-right font-bold text-blue-700">
+                    {row.dispatchPercent}%
+                  </td>
+                )}
+                <td className="p-3 text-gray-700">
+                  {row.firstPurchaseDate === row.lastPurchaseDate
+                    ? row.firstPurchaseDate
+                    : `${row.firstPurchaseDate} to ${row.lastPurchaseDate}`}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )}
+  </div>
+);
+
+const ShTransactionReport = ({ rows = [] }) => (
+  <div className="rounded-xl border bg-white p-4 shadow-sm">
+    <h3 className="mb-4 text-sm font-bold text-gray-900">
+      Stock Transaction Qty by Destination SH
+    </h3>
+
+    {rows.length === 0 ? (
+      <p className="text-sm text-gray-500">No SH destination transactions</p>
+    ) : (
+      <div className="overflow-x-auto">
+        <table className="min-w-full text-sm">
+          <thead className="bg-gray-100 text-gray-700">
+            <tr>
+              <th className="p-3 text-left">Destination</th>
+              <th className="p-3 text-left">Product</th>
+              <th className="p-3 text-right">Qty In</th>
+              <th className="p-3 text-right">Qty Out</th>
+              <th className="p-3 text-right">Transactions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={`${row.destination}-${row.product}`} className="border-b">
+                <td className="p-3">{row.destination}</td>
+                <td className="p-3">{row.product}</td>
+                <td className="p-3 text-right font-semibold">{row.qtyIn}</td>
+                <td className="p-3 text-right font-semibold">{row.qtyOut}</td>
+                <td className="p-3 text-right">{row.transactions}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )}
+  </div>
+);
+
 const StockManagerInventoryPage = () => {
   const dispatch = useDispatch();
 
@@ -81,7 +406,7 @@ const StockManagerInventoryPage = () => {
     catalogProducts = [],
     inventoryProducts = [],
     purchaseOrders = [],
-    dispatchOrders = [],
+    inventoryDispatchOrders = [],
     transactions = [],
     warehouses = [],
     suppliers = [],
@@ -101,6 +426,7 @@ const StockManagerInventoryPage = () => {
       dispatch(fetchWarehouses());
       dispatch(fetchPurchaseOrders());
       dispatch(fetchStockTransactions());
+      dispatch(fetchInventoryDispatchOrders());
     }
   }, [dispatch, userInfo]);
 
@@ -151,9 +477,46 @@ const StockManagerInventoryPage = () => {
       warehouseQty,
       outletQty,
       purchaseStatus: countByStatus(purchaseOrders, 'status'),
-      dispatchStatus: countByStatus(dispatchOrders, 'dispatch_status'),
+      dispatchStatus: countByStatus(inventoryDispatchOrders, 'dispatch_status'),
     };
-  }, [catalogProducts, inventoryProducts, purchaseOrders, dispatchOrders]);
+  }, [catalogProducts, inventoryProducts, purchaseOrders, inventoryDispatchOrders]);
+
+  const purchaseProductDayRows = useMemo(
+    () => buildProductDayRows(purchaseOrders),
+    [purchaseOrders]
+  );
+
+  const dispatchProductDayRows = useMemo(
+    () =>
+      buildProductDayRows(inventoryDispatchOrders, {
+        dispatchedOnly: true,
+        getDate: (order) => firstValue(order?.updated_at, order?.created_at),
+      }),
+    [inventoryDispatchOrders]
+  );
+
+  const notDispatchedMoreThanWeekRows = useMemo(
+    () =>
+      buildNotDispatchedMoreThanWeekRows(
+        purchaseProductDayRows,
+        dispatchProductDayRows
+      ),
+    [purchaseProductDayRows, dispatchProductDayRows]
+  );
+
+  const dispatchedEightyPercentRows = useMemo(
+    () =>
+      buildDispatchedEightyPercentRows(
+        purchaseProductDayRows,
+        dispatchProductDayRows
+      ),
+    [purchaseProductDayRows, dispatchProductDayRows]
+  );
+
+  const shTransactionRows = useMemo(
+    () => buildShTransactionRows(transactions),
+    [transactions]
+  );
 
   if (!userInfo) {
     return (
@@ -211,14 +574,14 @@ const StockManagerInventoryPage = () => {
           <DashboardCard
             title="Products in Warehouse"
             value={dashboard.warehouseProducts}
-            subtitle={`Total stock qty: ${dashboard.warehouseQty}`}
+            subtitle="Warehouse product lines"
             color="green"
           />
 
           <DashboardCard
             title="Products in Outlets"
             value={dashboard.outletProducts}
-            subtitle={`Total stock qty: ${dashboard.outletQty}`}
+            subtitle="Outlet product lines"
             color="orange"
           />
 
@@ -267,24 +630,20 @@ const StockManagerInventoryPage = () => {
           />
         </div>
 
-        <InventorySummaryCards
-          products={catalogProducts}
-          purchaseOrders={purchaseOrders}
-          transactions={transactions}
-        />
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+          <ProductMovementTable
+            title="Products Purchased but Not Dispatched More Than a Week"
+            rows={notDispatchedMoreThanWeekRows}
+            mode="pending"
+          />
+          <ProductMovementTable
+            title="Products Purchased and Dispatched 80% in Last Week"
+            rows={dispatchedEightyPercentRows}
+            mode="percent"
+          />
+        </div>
 
-        {/* <CreateDispatchOrderSection products={catalogProducts} /> */}
-
-        {/* <ReceivePurchaseOrderSection purchaseOrders={purchaseOrders} /> */}
-
-        <PurchaseOrdersSection purchaseOrders={purchaseOrders} />
-
-        {/* <InventoryProductsTable
-          products={inventoryProducts?.length ? inventoryProducts : catalogProducts}
-          loading={loading}
-        /> */}
-
-        <StockTransactionsTable transactions={transactions} />
+        <ShTransactionReport rows={shTransactionRows} />
       </section>
     </StockManagerLayout>
   );

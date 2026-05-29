@@ -20,6 +20,7 @@ import StockPage from './pages/StockPage';
 import CreatePurchaseOrderPage  from './pages/CreatePurchaseOrderPage';
 import StockManagerCatalogPage from './pages/StockManagerCatalogPage';
 import DispatchPage from "./pages/DispatchPage";
+import RollbackPage from "./pages/RollbackPage";
 import PrinterSettingsPage from "./pages/PrinterSettingsPage";  
 import AccountsPage from "./pages/AccountsPage";
 import AccountsBillsPage from "./pages/AccountsBillsPage";
@@ -152,6 +153,14 @@ function App() {
   }
 />
 <Route
+  path="/ecosystem/rollback"
+  element={
+    <ProtectedRoute role={ALL_MANAGER_ROLES}>
+      <RollbackPage />
+    </ProtectedRoute>
+  }
+/>
+<Route
   path="/printer-settings"
   element={
     <ProtectedRoute role={["ADMIN", "ONLINE_CASHIER", "CASHIER", "HYBRID_CASHIER", "SUPERVISOR"]}>
@@ -222,6 +231,7 @@ function App() {
 <Route path="/stock-manager/purchase-orders/create" element={<Navigate to="/ecosystem/purchase-orders/create" replace />} />
 <Route path="/inventory/stock" element={<Navigate to="/ecosystem/stock" replace />} />
 <Route path="/inventory/dispatch" element={<Navigate to="/ecosystem/dispatch" replace />} />
+<Route path="/inventory/rollback" element={<Navigate to="/ecosystem/rollback" replace />} />
           {/* Catch-all fallback */}
           <Route path="*" element={<Navigate to="/login" />} />
         </Routes>

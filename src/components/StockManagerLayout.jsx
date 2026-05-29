@@ -17,6 +17,7 @@ import {
   PackagePlus,
   Warehouse,
   MonitorPlay,
+  RotateCcw,
 } from 'lucide-react';
 import { logout } from '../features/auth/posUserSlice';
 import logo from '../assests/ManaKiranaLogo1024x1024.png';
@@ -53,6 +54,7 @@ const navSections = [
       },
       { to: '/ecosystem/stock', label: 'Stock', icon: Warehouse },
       { to: '/ecosystem/dispatch', label: 'Dispatch', icon: Truck },
+      { to: '/ecosystem/rollback', label: 'Rollback', icon: RotateCcw },
     ],
   },
   {
