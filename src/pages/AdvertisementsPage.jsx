@@ -192,6 +192,7 @@ const AdvertisementsPage = () => {
   const [editingAdId, setEditingAdId] = useState(null);
   const [minimumDiscount, setMinimumDiscount] = useState(5);
   const [productSearch, setProductSearch] = useState('');
+  const [tvScreenUrl, setTvScreenUrl] = useState('');
 
   const activeTemplate = useMemo(
     () => templates.find((template) => template.id === form.template) || templates[0],
@@ -372,6 +373,7 @@ const AdvertisementsPage = () => {
         template: form.template,
         areas: activeTemplate.areas,
         products_per_slide: activeTemplate.productsPerSlide,
+        tv_screen_url: tvScreenUrl.trim() || null,
         slides: details,
       },
     };
@@ -382,6 +384,7 @@ const AdvertisementsPage = () => {
   const resetAdvertisementForm = () => {
     setForm(defaultForm);
     setSlides([emptySlide(1)]);
+    setTvScreenUrl('');
     setEditingAdId(null);
   };
 
@@ -408,6 +411,30 @@ const AdvertisementsPage = () => {
     }
 
     resetAdvertisementForm();
+  };
+
+  const getHadavidiTvUrl = () => {
+    const url = new URL('https://hadavidi-manakirana.web.app/');
+    url.searchParams.set('tv_screen', '1');
+    url.searchParams.set('live_sync', '1');
+    if (tvScreenUrl.trim()) {
+      url.searchParams.set('tv_url', tvScreenUrl.trim());
+    }
+    return url.toString();
+  };
+
+  const openHadavidiTvScreen = () => {
+    window.open(getHadavidiTvUrl(), '_blank', 'noopener,noreferrer');
+  };
+
+  const handleTvScreenFile = async (file) => {
+    if (!file) return;
+    try {
+      const uploaded = await dispatch(uploadAdvertisementMedia(file)).unwrap();
+      setTvScreenUrl(uploaded.media_path);
+    } catch (uploadError) {
+      alert(`Upload failed: ${uploadError}`);
+    }
   };
 
   const createRepo = async () => {
@@ -462,6 +489,7 @@ const AdvertisementsPage = () => {
       status: item.status || 'draft',
       generated_video_path: item.generated_video_path || '',
     });
+    setTvScreenUrl(item.config?.tv_screen_url || item.config?.tvUrl || item.config?.screen_url || '');
     setSlides(
       (item.details?.length ? item.details : [emptySlide(1)]).map((detail, index) => ({
         title: detail.title || '',
@@ -1111,6 +1139,45 @@ const AdvertisementsPage = () => {
                   </div>
                 </div>
                 <div className="mt-4 space-y-2">
+                  <button
+                    type="button"
+                    onClick={() => saveAdvertisement('active')}
+                    disabled={saving}
+                    className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-blue-700 text-sm font-semibold text-white hover:bg-blue-800 disabled:bg-gray-400"
+                  >
+                    <MonitorPlay size={16} />
+                    Publish to Hadavidi
+                  </button>
+                  <div className="rounded-lg border border-blue-100 bg-blue-50 p-3">
+                    <p className="text-sm font-bold text-blue-950">Hadavidi TV Screen</p>
+                    <input
+                      value={tvScreenUrl}
+                      onChange={(event) => setTvScreenUrl(event.target.value)}
+                      className="mt-2 h-10 w-full rounded-lg border px-3 text-sm"
+                      placeholder="YouTube URL or uploaded video path"
+                    />
+                    <label className="mt-2 inline-flex h-10 w-full cursor-pointer items-center justify-center gap-2 rounded-lg border bg-white text-sm font-semibold text-blue-700">
+                      <Upload size={16} />
+                      Choose local video
+                      <input
+                        type="file"
+                        accept="video/*"
+                        className="hidden"
+                        onChange={(event) => handleTvScreenFile(event.target.files?.[0])}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      onClick={openHadavidiTvScreen}
+                      className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-blue-700 text-sm font-semibold text-white hover:bg-blue-800"
+                    >
+                      <MonitorPlay size={16} />
+                      Open TV Screen
+                    </button>
+                    <p className="mt-2 break-all text-xs font-semibold text-blue-700">
+                      {getHadavidiTvUrl()}
+                    </p>
+                  </div>
                   <button
                     type="button"
                     onClick={() => saveAdvertisement('draft')}
