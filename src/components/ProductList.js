@@ -128,6 +128,9 @@ const shouldShowTouchNumberPad = () => {
   const userAgent = navigator.userAgent || "";
   const isMobileOrTablet =
     /Android|iPad|iPhone|iPod|Mobile|Tablet/i.test(userAgent);
+  const isDesktopPlatform =
+    /Windows NT|Macintosh|X11|CrOS/i.test(userAgent) ||
+    (/Linux/i.test(userAgent) && !/Android/i.test(userAgent));
   const hasTouch =
     navigator.maxTouchPoints > 0 ||
     window.matchMedia?.("(any-pointer: coarse)")?.matches ||
@@ -136,7 +139,9 @@ const shouldShowTouchNumberPad = () => {
     window.matchMedia?.("(hover: hover)")?.matches &&
     window.matchMedia?.("(pointer: fine)")?.matches;
 
-  if (isMobileOrTablet || hasTouch) return true;
+  if (isDesktopPlatform && !isMobileOrTablet) return false;
+  if (isMobileOrTablet) return true;
+  if (hasTouch && !desktopPointer && width < 1024) return true;
   return !(width >= 1024 && desktopPointer);
 };
 
@@ -424,7 +429,7 @@ const ProductList = forwardRef((props, ref) => {
   const [showSearchKeyboard, setShowSearchKeyboard] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(270);
   const [useCustomSearchKeyboard, setUseCustomSearchKeyboard] = useState(false);
-  const [showNumberPad, setShowNumberPad] = useState(true);
+  const [showNumberPad, setShowNumberPad] = useState(false);
 
   const barcodeRef = useRef(null);
   const searchInputRef = useRef(null);
@@ -454,13 +459,12 @@ const ProductList = forwardRef((props, ref) => {
 
   useEffect(() => {
     const updateKeyboardMode = () => {
-      const isTabletOrMobile = window.innerWidth < 1024;
       const useTouchControls = shouldShowTouchNumberPad();
 
-      setUseCustomSearchKeyboard(isTabletOrMobile || useTouchControls);
+      setUseCustomSearchKeyboard(useTouchControls);
       setShowNumberPad(useTouchControls);
 
-      if (!isTabletOrMobile && !useTouchControls) {
+      if (!useTouchControls) {
         setShowSearchKeyboard(false);
       }
     };

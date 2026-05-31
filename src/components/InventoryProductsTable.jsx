@@ -43,8 +43,7 @@ const getInventoryStockQuantity = (item) =>
     item?.stock,
     item?.qty,
     item?.quantityInStock,
-    item?.no_of_units,
-    item?.purchase_qty
+    item?.no_of_units
   );
 
 const getInventoryStockDisplay = (item) =>
@@ -58,6 +57,13 @@ const moneyFormat = new Intl.NumberFormat('en-IN', {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
 });
+
+const getMoneyDisplay = (value) => {
+  if (value === undefined) return '-';
+  const numericValue = Number(String(value).replace(/,/g, '').trim());
+  if (!Number.isFinite(numericValue)) return value || '-';
+  return moneyFormat.format(numericValue);
+};
 
 const getInventoryPackQuantity = (item) =>
   firstValue(item?.quantity, item?.catalogQuantity, item?.barcode_quantity);
@@ -80,12 +86,43 @@ const getInventoryUnitMrp = (item) =>
 
 const getInventoryUnitMrpDisplay = (item) => {
   const value = getInventoryUnitMrp(item);
-  if (value === undefined) return '-';
+  return getMoneyDisplay(value);
+};
 
-  const numericValue = Number(String(value).replace(/,/g, '').trim());
-  if (!Number.isFinite(numericValue)) return value || '-';
+const getInventoryPurchasePrice = (item) =>
+  firstValue(
+    item?.unit_price,
+    item?.inventory_unit_price,
+    item?.purchase_price,
+    item?.purchasePrice,
+    item?.actual_unit_price,
+    item?.expected_unit_price
+  );
 
-  return moneyFormat.format(numericValue);
+const getInventoryPurchaseStockQuantity = (item) =>
+  firstValue(
+    item?.count_in_stock,
+    item?.countInStock,
+    item?.stock,
+    item?.no_of_units,
+    item?.quantityInStock
+  );
+
+const getInventoryPurchaseAmount = (item) => {
+  const directAmount = firstValue(
+    item?.total_purchase_amount,
+    item?.totalPurchaseAmount,
+    item?.purchase_amount,
+    item?.purchaseAmount,
+    item?.total_cost,
+    item?.totalCost
+  );
+
+  if (directAmount !== undefined) return directAmount;
+
+  const unitPrice = Number(getInventoryPurchasePrice(item) || 0);
+  const stock = Number(getInventoryPurchaseStockQuantity(item) || 0);
+  return unitPrice * stock;
 };
 
 const columns = [
@@ -121,6 +158,20 @@ const columns = [
     align: 'right',
     type: 'number',
     getValue: getInventoryStockQuantity,
+  },
+  {
+    key: 'purchase_price',
+    label: 'Purchase Price',
+    align: 'right',
+    type: 'number',
+    getValue: getInventoryPurchasePrice,
+  },
+  {
+    key: 'purchase_amount',
+    label: 'Purchase Stock',
+    align: 'right',
+    type: 'number',
+    getValue: getInventoryPurchaseAmount,
   },
   {
     key: 'unit_mrp',
@@ -268,6 +319,8 @@ const InventoryProductsTable = ({
                   <td className="p-3 text-right font-semibold">
                     {getInventoryStockDisplay(item)}
                   </td>
+                  <td className="p-3 text-right">{getMoneyDisplay(getInventoryPurchasePrice(item))}</td>
+                  <td className="p-3 text-right">{getMoneyDisplay(getInventoryPurchaseAmount(item))}</td>
                   <td className="p-3 text-right">{getInventoryUnitMrpDisplay(item)}</td>
                   <td className="p-3">{item.warehouse_id || '-'}</td>
                   <td className="p-3">
@@ -280,7 +333,7 @@ const InventoryProductsTable = ({
 
               {sortedProducts.length === 0 && (
                 <tr>
-                  <td colSpan="9" className="p-4 text-center text-gray-500">
+                  <td colSpan="11" className="p-4 text-center text-gray-500">
                     No inventory products found
                   </td>
                 </tr>

@@ -43,6 +43,13 @@ const formatNumber = (value) => formatStockQuantity(value);
 
 const formatMoney = (value) => currencyFormat.format(number(value));
 
+const formatDate = (value) => {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleDateString('en-IN');
+};
+
 const normalizeText = (value) =>
   String(value || '')
     .trim()
@@ -213,8 +220,7 @@ const getPurchaseUnitPrice = (item) =>
       item?.unit_price,
       item?.unitPrice,
       item?.landing_cost,
-      item?.landingCost,
-      item?.price
+      item?.landingCost
     )
   );
 
@@ -232,6 +238,14 @@ const getPurchaseAmount = (item) => {
 
   return getStockQty(item) * getPurchaseUnitPrice(item);
 };
+
+const getMrpUnitPrice = (item) =>
+  number(firstValue(item?.mrp, item?.MRP, item?.unit_mrp, item?.unitMrp, item?.price));
+
+const getSellingUnitPrice = (item) =>
+  number(firstValue(item?.dprice, item?.selling_price, item?.sellingPrice, item?.salePrice));
+
+const getSellingAmount = (item) => getStockQty(item) * getSellingUnitPrice(item);
 
 const getStockBrandName = (item) =>
   firstValue(
@@ -317,10 +331,10 @@ const flattenOutletProducts = (
         units: financial?.units,
         price: financial?.price,
         dprice: financial?.dprice,
-        purchasePrice: financial?.purchasePrice,
-        purchase_price: financial?.purchase_price,
         costPrice: financial?.costPrice,
         cost_price: financial?.cost_price,
+        mrp: financial?.price,
+        unit_mrp: financial?.unit_mrp,
       }))
     )
   );
@@ -384,11 +398,37 @@ const outletColumns = [
     getValue: getStockQty,
   },
   {
-    key: 'purchaseAmount',
-    label: 'Purchase Amount',
+    key: 'purchaseUnit',
+    label: 'Selling / Unit',
     align: 'right',
     type: 'number',
-    getValue: getPurchaseAmount,
+    getValue: getSellingUnitPrice,
+  },
+  {
+    key: 'purchaseStock',
+    label: 'Selling / Stock',
+    align: 'right',
+    type: 'number',
+    getValue: getSellingAmount,
+  },
+  {
+    key: 'mrpUnit',
+    label: 'MRP / Unit',
+    align: 'right',
+    type: 'number',
+    getValue: getMrpUnitPrice,
+  },
+  {
+    key: 'mfgDate',
+    label: 'MFG Date',
+    align: 'left',
+    getValue: (item) => item.mfg_date,
+  },
+  {
+    key: 'expDate',
+    label: 'Expiry Date',
+    align: 'left',
+    getValue: (item) => item.exp_date,
   },
 ];
 
@@ -512,14 +552,22 @@ const OutletStockTable = ({
                     {formatNumber(getStockQty(item))}
                   </td>
                   <td className="p-3 text-right font-semibold">
-                    {formatMoney(getPurchaseAmount(item))}
+                    {formatMoney(getSellingUnitPrice(item))}
                   </td>
+                  <td className="p-3 text-right font-semibold">
+                    {formatMoney(getSellingAmount(item))}
+                  </td>
+                  <td className="p-3 text-right font-semibold">
+                    {formatMoney(getMrpUnitPrice(item))}
+                  </td>
+                  <td className="p-3">{formatDate(item.mfg_date)}</td>
+                  <td className="p-3">{formatDate(item.exp_date)}</td>
                 </tr>
               ))}
 
               {sortedProducts.length === 0 && (
                 <tr>
-                  <td colSpan="7" className="p-4 text-center text-gray-500">
+                  <td colSpan="11" className="p-4 text-center text-gray-500">
                     No outlet stock products found
                   </td>
                 </tr>

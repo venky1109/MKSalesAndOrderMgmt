@@ -5,9 +5,7 @@ import {
   Activity,
   AlertTriangle,
   Barcode,
-  CheckCircle2,
   Clock3,
-  Edit3,
   ImagePlus,
   ListChecks,
   PackagePlus,
@@ -84,13 +82,31 @@ const getCategoryName = (product) =>
   product?.categoryName ||
   product?.product?.category_name_english ||
   "";
-const getProductImageUrl = (product) =>
-  asArray(product?.images)[0]?.image ||
-  asArray(product?.images)[0]?.url ||
-  product?.image ||
-  product?.imageUrl ||
-  product?.product?.image ||
-  "";
+const getImageUrlFromImages = (images) => {
+  for (const image of asArray(images)) {
+    const url = image?.image || image?.url || image?.imageUrl || image?.downloadURL;
+    if (url) return url;
+  }
+
+  return "";
+};
+
+const getProductImageUrl = (product) => {
+  const productImage =
+    getImageUrlFromImages(product?.images) ||
+    product?.image ||
+    product?.imageUrl ||
+    product?.product?.image;
+
+  if (productImage) return productImage;
+
+  for (const detail of asArray(product?.details || product?.brands)) {
+    const detailImage = getImageUrlFromImages(detail?.images);
+    if (detailImage) return detailImage;
+  }
+
+  return "";
+};
 
 const getProductBarcodes = (product) => [
   ...asArray(product?.barcode),
@@ -737,6 +753,77 @@ const calculateSellingPrice = (price, discount) => {
   return toWholeRupees(mrp - (mrp * discountPercent) / 100);
 };
 
+const calculateDiscountPercent = (price, sellingPrice) => {
+  const mrp = Number(price);
+  const sale = Number(sellingPrice);
+
+  if (!Number.isFinite(mrp) || mrp <= 0 || !Number.isFinite(sale)) return "";
+  if (sale >= mrp) return 0;
+
+  return Number((((mrp - sale) / mrp) * 100).toFixed(2));
+};
+
+const toPercentNumber = (value) => {
+  const next = Number(value);
+  return Number.isFinite(next) ? next : 0;
+};
+
+const DEFAULT_OUTLET_RATE_PLAN = {
+  margin_percentage: "5",
+  gst_rate: "5",
+  labour_percentage: "1",
+  transport_percentage: "1",
+  load_percentage: "1",
+  unload_percentage: "1",
+};
+
+const formatMoneyInput = (value) => {
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return "";
+  return String(Number(amount.toFixed(2)));
+};
+
+const calculateDispatchPricing = ({ purchasePrice, sellingPrice, mrp, ratePlan }) => {
+  const saleInput = Number(sellingPrice || 0);
+  const purchaseInput = Number(purchasePrice || 0);
+  const unitMrp = Number(mrp || 0);
+  const marginRate = toPercentNumber(ratePlan?.margin_percentage) / 100;
+  const packingRate = toPercentNumber(ratePlan?.labour_percentage) / 100;
+  const transportRate = toPercentNumber(ratePlan?.transport_percentage) / 100;
+  const loadRate = toPercentNumber(ratePlan?.load_percentage) / 100;
+  const unloadRate = toPercentNumber(ratePlan?.unload_percentage) / 100;
+  const gstRate = toPercentNumber(ratePlan?.gst_rate) / 100;
+  const nonGstRate = marginRate + packingRate + transportRate + loadRate + unloadRate;
+
+  let salePrice = saleInput;
+  let calculatedPurchasePrice = purchaseInput;
+
+  if (Number.isFinite(saleInput) && saleInput > 0) {
+    const divisor = 1 + nonGstRate - gstRate;
+    calculatedPurchasePrice =
+      divisor > 0 ? (saleInput * (1 - gstRate)) / divisor : saleInput;
+    salePrice = saleInput;
+  } else if (Number.isFinite(purchaseInput) && purchaseInput > 0) {
+    const grossWithoutGst = purchaseInput + purchaseInput * nonGstRate;
+    salePrice = grossWithoutGst + (grossWithoutGst - purchaseInput) * gstRate;
+  }
+
+  if (!Number.isFinite(salePrice) || salePrice <= 0) {
+    return { purchasePrice: "", salePrice: "", discount: "" };
+  }
+
+  const discount =
+    Number.isFinite(unitMrp) && unitMrp > 0 && unitMrp > salePrice
+      ? Number((((unitMrp - salePrice) / unitMrp) * 100).toFixed(2))
+      : 0;
+
+  return {
+    purchasePrice: formatMoneyInput(calculatedPurchasePrice),
+    salePrice: formatMoneyInput(salePrice),
+    discount,
+  };
+};
+
 const makeBatchId = () => {
   const d = new Date();
   const ymd = d.toISOString().slice(0, 10).replaceAll("-", "");
@@ -891,12 +978,14 @@ const ApplicationMigrationHelperPage = () => {
   });
 
   const [barcode, setBarcode] = useState("");
+  const [lastOutletSearchBarcode, setLastOutletSearchBarcode] = useState("");
+  const [barcodeAssignSearch, setBarcodeAssignSearch] = useState("");
+  const [barcodeAssignLookupOpen, setBarcodeAssignLookupOpen] = useState(false);
   const [migrationMode, setMigrationMode] = useState("outlet");
   const [productLookupOpen, setProductLookupOpen] = useState(false);
   const [legacyProductMatches, setLegacyProductMatches] = useState([]);
   const [scannedProduct, setScannedProduct] = useState(null);
   const [scanMessage, setScanMessage] = useState("");
-  const [activeAction, setActiveAction] = useState("stock");
   const [productName, setProductName] = useState("");
   const [selectedCatalogProductId, setSelectedCatalogProductId] = useState("");
   const [productForm, setProductForm] = useState({
@@ -918,6 +1007,11 @@ const ApplicationMigrationHelperPage = () => {
     no_of_units: "1",
     unit_price: "",
     unit_mrp: "",
+    dispatch_price: "",
+    dispatch_discount: "",
+    rate_plan_id: "",
+    rate_plan_mode: "manual",
+    ...DEFAULT_OUTLET_RATE_PLAN,
     mfg_date: "",
     exp_date: "",
     sku_id: "",
@@ -963,6 +1057,7 @@ const ApplicationMigrationHelperPage = () => {
   const [productEditBusy, setProductEditBusy] = useState(false);
   const [inventorySaveBusy, setInventorySaveBusy] = useState(false);
   const [outletSaveBusy, setOutletSaveBusy] = useState(false);
+  const [barcodeAssignBusy, setBarcodeAssignBusy] = useState(false);
   const [bulkFileName, setBulkFileName] = useState("");
   const [bulkRows, setBulkRows] = useState([]);
   const [bulkRunning, setBulkRunning] = useState(false);
@@ -988,6 +1083,7 @@ const ApplicationMigrationHelperPage = () => {
   const [rollbackForm, setRollbackForm] = useState({
     request_id: "",
     transaction_id: "",
+    dispatch_order_id: "",
     product_id: "",
     product_barcode_id: "",
     mk_barcode: "",
@@ -1012,6 +1108,7 @@ const ApplicationMigrationHelperPage = () => {
     dispatch(fetchCatalogEntity("outlets"));
     dispatch(fetchCatalogEntity("stakeholders"));
     dispatch(fetchCatalogEntity("images"));
+    dispatch(fetchCatalogEntity("rate-plans"));
     if (token) dispatch(fetchAllProductsFresh({ token }));
     if (token) {
       dispatch(fetchInventoryProducts());
@@ -1052,6 +1149,7 @@ const ApplicationMigrationHelperPage = () => {
   );
   const units = useMemo(() => asArray(catalogData.units), [catalogData.units]);
   const catalogImages = useMemo(() => asArray(catalogData.images), [catalogData.images]);
+  const ratePlans = useMemo(() => asArray(catalogData["rate-plans"]), [catalogData]);
   const selectedTrackingRequestId = getRequestId(trackingSelectedRequest);
 
   useEffect(() => {
@@ -1135,6 +1233,15 @@ const ApplicationMigrationHelperPage = () => {
       .filter((item) => getProductSearchText(item).includes(q))
       .slice(0, 10);
   }, [barcode, productsList]);
+
+  const barcodeAssignMatches = useMemo(() => {
+    const q = normalizeText(barcodeAssignSearch);
+    if (!q || q.length < 2) return [];
+
+    return productsList
+      .filter((item) => getProductSearchText(item).includes(q))
+      .slice(0, 12);
+  }, [barcodeAssignSearch, productsList]);
 
   useEffect(() => {
     const q = barcode.trim();
@@ -1638,7 +1745,7 @@ const ApplicationMigrationHelperPage = () => {
     return () => clearTimeout(timer);
   }, [getCatalogImageSuggestions, imageName, mergeImageSuggestions, token]);
 
-  const hydrateFormsFromProduct = (product) => {
+  const hydrateFormsFromProduct = (product, preferredVendorBarcode = "") => {
     const brand = getFirstBrand(product);
     const financial = getFirstFinancial(brand);
     const name = getProductName(product);
@@ -1647,7 +1754,7 @@ const ApplicationMigrationHelperPage = () => {
 
     setProductName(name);
     setExistingImageUrl(image);
-    setResolvedImageUrl("");
+    setResolvedImageUrl(image);
     setImageUrl(image);
     setProductForm(
       applyHsnGstFallback(
@@ -1665,33 +1772,60 @@ const ApplicationMigrationHelperPage = () => {
         getCategoryName(product)
       )
     );
+    const price = pickId(product?.MRP, financial?.price, "");
+    const sellingPrice = pickId(product?.dprice, financial?.dprice, financial?.sellingPrice, price);
+    const discount = pickId(
+      product?.discount,
+      product?.Discount,
+      financial?.discount,
+      financial?.Discount,
+      calculateDiscountPercent(price, sellingPrice)
+    );
     setFinancialForm({
       quantity: pickId(product?.quantity, product?.catalogQuantity, financial?.quantity, financial?.weight, ""),
       unit_id: findCatalogUnit(units, pickId(product?.units, financial?.units))?.id || "",
-      price: pickId(product?.MRP, financial?.price, ""),
-      dprice: pickId(product?.dprice, financial?.dprice, financial?.sellingPrice, ""),
-      discount: pickId(product?.discount, financial?.discount, ""),
+      price,
+      dprice: sellingPrice,
+      discount,
       countInStock: pickId(product?.countInStock, financial?.countInStock, financial?.quantityInStock, ""),
-      barcode: asArray(product?.barcode)[0] || asArray(financial?.barcode)[0] || barcode,
+      barcode: preferredVendorBarcode || asArray(product?.barcode)[0] || asArray(financial?.barcode)[0] || barcode,
     });
-    setOutletPostingForm((prev) => ({
-      ...prev,
-      no_of_units: pickId(
-        product?.countInStock,
-        financial?.countInStock,
-        financial?.quantityInStock,
-        prev.no_of_units
-      ),
-      unit_price: prev.unit_price || pickId(product?.MRP, financial?.price, ""),
-      unit_mrp: prev.unit_mrp || sanitizeMoneyInput(unitMrp),
-      mk_barcode: prev.mk_barcode || product?.mk_barcode || "",
-      vendor_barcode:
-        prev.vendor_barcode ||
-        asArray(product?.barcode)[0] ||
-        asArray(financial?.barcode)[0] ||
-        barcode ||
-        "",
-    }));
+    setOutletPostingForm((prev) => {
+      const pricing = calculateDispatchPricing({
+        sellingPrice,
+        mrp: price,
+        ratePlan: DEFAULT_OUTLET_RATE_PLAN,
+      });
+
+      return {
+        ...prev,
+        no_of_units: pickId(
+          product?.countInStock,
+          financial?.countInStock,
+          financial?.quantityInStock,
+          prev.no_of_units
+        ),
+        unit_price: pricing.purchasePrice || prev.unit_price,
+        unit_mrp: sanitizeMoneyInput(price || unitMrp),
+        dispatch_price: sanitizeMoneyInput(sellingPrice),
+        dispatch_discount:
+          pricing.discount !== "" ? String(pricing.discount) : "",
+        rate_plan_id: "",
+        rate_plan_mode: "manual",
+        ...DEFAULT_OUTLET_RATE_PLAN,
+        mk_barcode: prev.mk_barcode || product?.mk_barcode || "",
+        vendor_barcode:
+          preferredVendorBarcode ||
+          (prev.vendor_barcode &&
+          normalizeText(prev.vendor_barcode) === normalizeText(barcode)
+            ? prev.vendor_barcode
+            : "") ||
+          asArray(product?.barcode)[0] ||
+          asArray(financial?.barcode)[0] ||
+          barcode ||
+          "",
+      };
+    });
   };
 
   const resolveProductImageFromName = async (name) => {
@@ -1721,17 +1855,40 @@ const ApplicationMigrationHelperPage = () => {
     }
   };
 
-  const selectLookupProduct = (product) => {
+  const selectLookupProduct = (product, preferredVendorBarcode = "") => {
     const firstBarcode = getProductBarcodes(product)[0] || "";
     const name = getProductName(product) || "";
 
-    setBarcode(String(firstBarcode || name));
+    setBarcode(String(preferredVendorBarcode || firstBarcode || name));
+    if (preferredVendorBarcode) setLastOutletSearchBarcode(String(preferredVendorBarcode));
     setScannedProduct(product);
-    hydrateFormsFromProduct(product);
+    hydrateFormsFromProduct(product, preferredVendorBarcode);
+    if (preferredVendorBarcode) {
+      setFinancialForm((prev) => ({ ...prev, barcode: preferredVendorBarcode }));
+      setOutletPostingForm((prev) => ({
+        ...prev,
+        vendor_barcode: preferredVendorBarcode,
+      }));
+    }
     resolveProductImageFromName(name);
-    setActiveAction("stock");
     setProductLookupOpen(false);
-    setScanMessage("Product selected. Choose stock update or product edit.");
+    setScanMessage("Product selected. Review details and start outlet migration.");
+  };
+
+  const selectBarcodeAssignProduct = (product) => {
+    const name = getProductName(product) || "";
+    const currentScannerBarcode = outletPostingForm.vendor_barcode;
+
+    setBarcodeAssignSearch(name);
+    setScannedProduct(product);
+    hydrateFormsFromProduct(product, "");
+    setOutletPostingForm((prev) => ({
+      ...prev,
+      vendor_barcode: currentScannerBarcode || "",
+      mk_barcode: "",
+    }));
+    setBarcodeAssignLookupOpen(false);
+    setStatus("Product financial selected. Scan or enter vendor barcode, then assign.");
   };
 
   const selectLegacyOutletProduct = (legacyProduct) => {
@@ -1759,24 +1916,43 @@ const ApplicationMigrationHelperPage = () => {
         getCategoryName(legacyProduct)
       )
     );
+    const legacyPrice = getLegacyPrice(legacyProduct);
+    const legacySellingPrice = getLegacySellingPrice(legacyProduct);
     setFinancialForm({
       quantity: splitWeightPack(getLegacyWeightPack(legacyProduct)).quantity,
       unit_id: findCatalogUnit(units, splitWeightPack(getLegacyWeightPack(legacyProduct)).units)?.id || "",
-      price: getLegacyPrice(legacyProduct),
-      dprice: getLegacySellingPrice(legacyProduct),
-      discount: pickId(legacyProduct?.discount, legacyProduct?.Discount, ""),
+      price: legacyPrice,
+      dprice: legacySellingPrice,
+      discount: pickId(
+        legacyProduct?.discount,
+        legacyProduct?.Discount,
+        calculateDiscountPercent(legacyPrice, legacySellingPrice)
+      ),
       countInStock: pickId(legacyProduct?.countInStock, legacyProduct?.stock, "0"),
       barcode: barcodeValue,
     });
-    setOutletPostingForm((prev) => ({
-      ...prev,
-      no_of_units: pickId(legacyProduct?.countInStock, legacyProduct?.stock, prev.no_of_units),
-      unit_price: prev.unit_price || getLegacyPrice(legacyProduct) || "",
-      unit_mrp: prev.unit_mrp || sanitizeMoneyInput(getUnitMrpValue(legacyProduct)),
-      vendor_barcode: barcodeValue || prev.vendor_barcode,
-      mk_barcode: legacyProduct?.mk_barcode || prev.mk_barcode,
-    }));
-    setActiveAction("new");
+    setOutletPostingForm((prev) => {
+      const pricing = calculateDispatchPricing({
+        sellingPrice: legacySellingPrice,
+        mrp: legacyPrice,
+        ratePlan: DEFAULT_OUTLET_RATE_PLAN,
+      });
+
+      return {
+        ...prev,
+        no_of_units: pickId(legacyProduct?.countInStock, legacyProduct?.stock, prev.no_of_units),
+        unit_price: pricing.purchasePrice || prev.unit_price,
+        unit_mrp: sanitizeMoneyInput(legacyPrice || getUnitMrpValue(legacyProduct)),
+        dispatch_price: sanitizeMoneyInput(legacySellingPrice),
+        dispatch_discount:
+          pricing.discount !== "" ? String(pricing.discount) : "",
+        rate_plan_id: "",
+        rate_plan_mode: "manual",
+        ...DEFAULT_OUTLET_RATE_PLAN,
+        vendor_barcode: barcodeValue || prev.vendor_barcode,
+        mk_barcode: legacyProduct?.mk_barcode || prev.mk_barcode,
+      };
+    });
     setProductLookupOpen(false);
     setLegacyProductMatches([]);
     setScanMessage("Legacy product selected. Review and add to outlet migration.");
@@ -1788,6 +1964,7 @@ const ApplicationMigrationHelperPage = () => {
     const scanned = barcode.trim();
     if (!scanned) return;
 
+    setLastOutletSearchBarcode(scanned);
     setBusy(true);
     setScanMessage("");
     setStatus("");
@@ -1796,8 +1973,8 @@ const ApplicationMigrationHelperPage = () => {
       const product = await dispatch(
         fetchProductByBarcode({ barcode: scanned, token })
       ).unwrap();
-      selectLookupProduct(product);
-      setScanMessage("Product found. Choose stock update or product edit.");
+      selectLookupProduct(product, scanned);
+      setScanMessage("Product found. Review details and start outlet migration.");
     } catch (error) {
       const q = normalizeText(scanned);
       const productNameMatch = productsList.find((item) =>
@@ -1805,8 +1982,74 @@ const ApplicationMigrationHelperPage = () => {
       );
 
       if (productNameMatch) {
-        selectLookupProduct(productNameMatch);
-        setScanMessage("Product found by name. Choose stock update or product edit.");
+        selectLookupProduct(productNameMatch, scanned);
+        setScanMessage("Product found by name. Review details and start outlet migration.");
+        setBusy(false);
+        return;
+      }
+
+      const catalogBarcodeMatch = catalogBarcodes.find(
+        (item) => normalizeText(item.mk_barcode) === q || normalizeText(item.barcode) === q
+      );
+
+      if (catalogBarcodeMatch) {
+        setScannedProduct(null);
+        setExistingImageUrl(catalogBarcodeMatch.image_url || "");
+        setResolvedImageUrl(catalogBarcodeMatch.image_url || "");
+        setImageUrl(catalogBarcodeMatch.image_url || "");
+        setProductName(catalogBarcodeMatch.product_name_eng || "");
+        setProductForm((prev) =>
+          applyHsnGstFallback(
+            {
+              ...prev,
+              product_name_eng: catalogBarcodeMatch.product_name_eng || "",
+              product_name_tel: catalogBarcodeMatch.product_name_tel || "",
+              gst_rate: catalogBarcodeMatch.gst_rate || catalogBarcodeMatch.gst || "",
+              hsn_code: catalogBarcodeMatch.hsncode || catalogBarcodeMatch.hsn_code || "",
+              brand_id: catalogBarcodeMatch.brand_id || "",
+              brand_name: catalogBarcodeMatch.brand_name_english || "",
+              category_id: catalogBarcodeMatch.category_id || "",
+              category_name: catalogBarcodeMatch.category_name_english || "",
+            },
+            catalogBarcodeMatch.product_name_eng,
+            catalogBarcodeMatch.category_name_english
+          )
+        );
+        setFinancialForm((prev) => ({
+          ...prev,
+          quantity: catalogBarcodeMatch.quantity || catalogBarcodeMatch.barcode_quantity || "",
+          unit_id: catalogBarcodeMatch.unit_id || "",
+          price: pickId(catalogBarcodeMatch.MRP, catalogBarcodeMatch.mrp, catalogBarcodeMatch.price, prev.price),
+          dprice: pickId(
+            catalogBarcodeMatch.dprice,
+            catalogBarcodeMatch.selling_price,
+            catalogBarcodeMatch.sellingPrice,
+            catalogBarcodeMatch.MRP,
+            catalogBarcodeMatch.mrp,
+            catalogBarcodeMatch.price,
+            prev.dprice
+          ),
+          barcode: catalogBarcodeMatch.barcode || scanned,
+        }));
+        setOutletPostingForm((prev) => {
+          const mrp = pickId(catalogBarcodeMatch.MRP, catalogBarcodeMatch.mrp, catalogBarcodeMatch.price, prev.unit_mrp);
+          const sale = pickId(
+            catalogBarcodeMatch.dprice,
+            catalogBarcodeMatch.selling_price,
+            catalogBarcodeMatch.sellingPrice,
+            mrp,
+            prev.dispatch_price
+          );
+          return recalculateOutletDispatchPricing({
+            ...prev,
+            unit_mrp: sanitizeMoneyInput(mrp),
+            dispatch_price: sanitizeMoneyInput(sale),
+            vendor_barcode: catalogBarcodeMatch.barcode || scanned,
+            mk_barcode: catalogBarcodeMatch.mk_barcode || "",
+          });
+        });
+        applyOutletRatePlanToForm(findRatePlanForBarcode(catalogBarcodeMatch.id), "existing");
+        setScanMessage("Product found in PostgreSQL catalogue. Review outlet details and migrate.");
         setBusy(false);
         return;
       }
@@ -1823,9 +2066,13 @@ const ApplicationMigrationHelperPage = () => {
       setScannedProduct(null);
       setExistingImageUrl("");
       setResolvedImageUrl("");
-      setActiveAction("new");
       setProductName("");
       setFinancialForm((prev) => ({ ...prev, barcode: scanned }));
+      setOutletPostingForm((prev) => ({
+        ...prev,
+        vendor_barcode: scanned,
+        mk_barcode: "",
+      }));
       setScanMessage("Barcode was not found. Continue with product name.");
     } finally {
       setBusy(false);
@@ -1886,6 +2133,11 @@ const ApplicationMigrationHelperPage = () => {
         stockProductName,
         stockProductForm.category_name
       );
+      const migrationVendorBarcode =
+        lastOutletSearchBarcode ||
+        barcode.trim() ||
+        stockOutletPostingForm.vendor_barcode ||
+        stockFinancialForm.barcode;
       const base = await ensureSupplyChainBase({
         productName: stockProductForm.product_name_eng,
         productTeluguName: stockProductForm.product_name_tel,
@@ -1895,7 +2147,7 @@ const ApplicationMigrationHelperPage = () => {
         gstRate: taxFallback.gst_rate,
         pack,
         mkBarcode: stockOutletPostingForm.mk_barcode,
-        vendorBarcode: stockOutletPostingForm.vendor_barcode || stockFinancialForm.barcode,
+        vendorBarcode: migrationVendorBarcode,
         existingProductId:
           bulkContext?.selectedCatalogProductId ||
           stockScannedProduct?.catalogProductId ||
@@ -1909,43 +2161,51 @@ const ApplicationMigrationHelperPage = () => {
         setOutletPostingForm((prev) => ({
           ...prev,
           mk_barcode: prev.mk_barcode || base.mkBarcode,
-          vendor_barcode: prev.vendor_barcode || base.vendorBarcode,
+          vendor_barcode: migrationVendorBarcode || base.vendorBarcode,
         }));
       }
 
-      if (productID && brandID && financialID) {
-        const mongoBarcodes = uniqueValues([
-          base.mkBarcode,
-          base.vendorBarcode,
-          stockOutletPostingForm.vendor_barcode,
-          stockFinancialForm.barcode,
-          ...asArray(stockSelectedFinancial?.barcode),
-        ]);
-        await dispatch(
-          updateProduct({
-            data: {
-              productId: productID,
-              detailId: brandID,
-              financialId: financialID,
-              updateFields: {
-                catalogProductBarcodeId: base.productBarcodeId,
-                mkid: numberOrNull(base.mkBarcode),
-                price: numberOrNull(stockFinancialForm.price),
-                dprice: numberOrNull(stockFinancialForm.dprice),
-                Discount: numberOrNull(stockFinancialForm.discount),
-                quantity: numberOrNull(pack.quantity),
-                units: pack.units,
-                barcode: mongoBarcodes,
-              },
-            },
-            token,
+      let dispatchRatePlan = findRatePlanForBarcode(base.productBarcodeId);
+      if (dispatchRatePlan) {
+        applyOutletRatePlanToForm(dispatchRatePlan, "existing");
+      } else {
+        const manualPlan = {
+          ...getManualOutletRatePlan(stockOutletPostingForm),
+          product_barcode_id: base.productBarcodeId,
+        };
+        const createdRatePlan = await dispatch(
+          createCatalogEntity({
+            entity: "rate-plans",
+            payload: manualPlan,
           })
         ).unwrap();
+        dispatchRatePlan = createdRatePlan?.data || createdRatePlan;
+        dispatch(fetchCatalogEntity("rate-plans"));
+        applyOutletRatePlanToForm(dispatchRatePlan || manualPlan, "created");
       }
 
-      const inventoryUnitPrice = Number(stockOutletPostingForm.unit_price || stockFinancialForm.price || 0);
       const inventoryUnitMrp = toMoneyNumber(stockOutletPostingForm.unit_mrp);
-      const migrationPurchaseUnitPrice = toWholeRupees(inventoryUnitPrice);
+      const dispatchPricing = calculateDispatchPricing({
+        sellingPrice: stockOutletPostingForm.dispatch_price || stockFinancialForm.dprice,
+        mrp: inventoryUnitMrp,
+        ratePlan: dispatchRatePlan || getManualOutletRatePlan(stockOutletPostingForm),
+      });
+      const inventoryUnitPrice = Number(
+        stockOutletPostingForm.unit_price ||
+          dispatchPricing.purchasePrice ||
+          stockFinancialForm.dprice ||
+          stockFinancialForm.price ||
+          0
+      );
+      const migrationPurchaseUnitPrice = toMoneyNumber(inventoryUnitPrice);
+      const dispatchSalePrice = Number(stockOutletPostingForm.dispatch_price || dispatchPricing.salePrice || inventoryUnitPrice);
+      const dispatchDiscount = Number(stockOutletPostingForm.dispatch_discount || dispatchPricing.discount || 0);
+      if (inventoryUnitMrp > 0 && dispatchSalePrice > inventoryUnitMrp) {
+        throw new Error(
+          `Selling price ${dispatchSalePrice} is greater than MRP ${inventoryUnitMrp}. Please adjust the selling price or rate plan before migration.`
+        );
+      }
+
       const purchaseProductName = joinBrandAndProductName(
         stockProductForm.brand_name,
         stockProductForm.product_name_eng
@@ -1977,7 +2237,7 @@ const ApplicationMigrationHelperPage = () => {
               brand_name: stockProductForm.brand_name,
               unit_name: pack.units,
               mk_barcode: base.mkBarcode,
-              barcode: base.vendorBarcode,
+              barcode: migrationVendorBarcode || base.vendorBarcode,
             },
           ],
         })
@@ -2034,8 +2294,8 @@ const ApplicationMigrationHelperPage = () => {
         const warehouse = warehouses.find((item) => String(item.id) === String(stockOutletPostingForm.warehouse_id));
         currentStage = "dispatch";
         markMigrationStage("outlet", "dispatch", "running", "Creating and dispatching stock to outlet.");
-        const dispatchOrder = await dispatch(
-          createInventoryDispatchOrder({
+      const dispatchOrder = await dispatch(
+        createInventoryDispatchOrder({
             purchase_order_id: order?.id || null,
             source: `warehouse:${stockOutletPostingForm.warehouse_id}:${warehouse?.warehouse_name || "Migration"}`,
             destination: `outlet:${stockOutletPostingForm.outlet_id}:${outlet?.outlet_name || "Outlet"}`,
@@ -2050,13 +2310,18 @@ const ApplicationMigrationHelperPage = () => {
                 no_of_units: Number(stockOutletPostingForm.no_of_units || newQuantity || 1),
                 unit_mrp: inventoryUnitMrp,
                 exp_date: stockOutletPostingForm.exp_date,
-                notes: "Migration dispatch",
+                notes: `Migration dispatch | Sale Rs ${dispatchSalePrice} | Discount ${dispatchDiscount}%`,
               },
             ],
           })
         ).unwrap();
-        const dispatchId = getEntityId(dispatchOrder) || dispatchOrder?.id || dispatchOrder?.order?.id;
-        if (dispatchId) {
+      const dispatchId = getEntityId(dispatchOrder) || dispatchOrder?.id || dispatchOrder?.order?.id;
+      const dispatchOrderItem =
+        asArray(dispatchOrder?.items)[0] ||
+        asArray(dispatchOrder?.order?.items)[0] ||
+        asArray(dispatchOrder?.data?.items)[0] ||
+        asArray(dispatchOrder?.data?.order?.items)[0];
+      if (dispatchId) {
           await dispatch(
             updateInventoryDispatchStatus({
               id: dispatchId,
@@ -2079,14 +2344,51 @@ const ApplicationMigrationHelperPage = () => {
             "Checking outlet Mongo product; insert if missing, otherwise update stock count."
           );
           try {
+            if (!bulkContext) {
+              const outletName = outlet?.outlet_name || stockOutletPostingForm.outlet_id;
+              const confirmMessage = [
+                "Update outlet Mongo product with these details?",
+                `Product: ${purchaseProductName}`,
+                `Vendor barcode: ${migrationVendorBarcode || base.vendorBarcode || "-"}`,
+                `MK barcode: ${base.mkBarcode || "-"}`,
+                `Outlet: ${outletName || "-"}`,
+                `Stock add: ${stockOutletPostingForm.no_of_units || newQuantity || 1}`,
+                `MRP: Rs ${inventoryUnitMrp || 0}`,
+                `Selling price: Rs ${dispatchSalePrice || 0}`,
+                `Discount: ${dispatchDiscount || 0}%`,
+              ].join("\n");
+
+              if (!window.confirm(confirmMessage)) {
+                markMigrationStage("outlet", "mongoOutlet", "skipped", "Mongo update cancelled by user.");
+                setStatus("Purchase, inventory and dispatch completed. Mongo outlet update was cancelled.");
+                return;
+              }
+            }
+
             const receiveResult = await dispatch(
               receiveDispatchToOutlet({
                 dispatchOrderId: dispatchId,
                 items: [
                   {
+                    dispatch_order_item_id: getEntityId(dispatchOrderItem) || dispatchOrderItem?.id || null,
                     inventory_product_id: Number(inventoryProductId),
                     product_barcode_id: dispatchProductBarcodeId,
+                    mongo_product_id: productID || null,
+                    mongo_detail_id: brandID || null,
+                    mongo_financial_id: financialID || null,
+                    mk_barcode: base.mkBarcode,
+                    vendor_barcode: migrationVendorBarcode || base.vendorBarcode,
+                    barcode: migrationVendorBarcode || base.vendorBarcode,
                     unit_mrp: inventoryUnitMrp,
+                    dprice: dispatchSalePrice,
+                    package_amount: dispatchSalePrice,
+                    selling_price: dispatchSalePrice,
+                    price: inventoryUnitMrp,
+                    discount: dispatchDiscount,
+                    countInStock: Number(stockOutletPostingForm.no_of_units || newQuantity || 0),
+                    mfg_date: stockOutletPostingForm.mfg_date || null,
+                    exp_date: stockOutletPostingForm.exp_date || null,
+                    image_url: resolvedImageUrl || existingImageUrl || imageUrl || null,
                   },
                 ],
               })
@@ -2216,6 +2518,102 @@ const ApplicationMigrationHelperPage = () => {
     }
   };
 
+  const handleBarcodeAssign = async () => {
+    const productID = pickId(scannedProduct?._id, scannedProduct?.id);
+    const brand = getFirstBrand(scannedProduct);
+    const financial = getFirstFinancial(brand);
+    const brandID = pickId(scannedProduct?.brandId, brand?._id, brand?.id);
+    const financialID = pickId(scannedProduct?.financialId, financial?._id, financial?.id);
+    const assignUnit = units.find((unit) => String(unit.id) === String(financialForm.unit_id));
+    const pack = {
+      quantity: financialForm.quantity,
+      units: assignUnit?.unit_short_code || assignUnit?.unit_name || "",
+    };
+    const vendorBarcode =
+      outletPostingForm.vendor_barcode;
+
+    if (!productID || !brandID || !financialID) {
+      setStatus("Select a Mongo product financial before assigning barcode.");
+      return;
+    }
+
+    if (!vendorBarcode) {
+      setStatus("Enter vendor barcode before assigning.");
+      return;
+    }
+
+    if (!pack.quantity || !financialForm.unit_id) {
+      setStatus("Pack quantity and pack unit are required for catalog barcode assignment.");
+      return;
+    }
+
+    setBarcodeAssignBusy(true);
+    setBusy(true);
+    try {
+      const taxFallback = applyHsnGstFallback(
+        {
+          hsn_code: productForm.hsn_code,
+          gst_rate: productForm.gst_rate,
+        },
+        productForm.product_name_eng,
+        productName,
+        productForm.category_name
+      );
+      const base = await ensureSupplyChainBase({
+        productName: productForm.product_name_eng || productName,
+        productTeluguName: productForm.product_name_tel,
+        brandName: productForm.brand_name,
+        categoryName: productForm.category_name,
+        hsnCode: taxFallback.hsn_code,
+        gstRate: taxFallback.gst_rate,
+        pack,
+        mkBarcode: outletPostingForm.mk_barcode,
+        vendorBarcode,
+        existingProductId: selectedCatalogProductId || scannedProduct?.catalogProductId,
+        existingBrandId: productForm.brand_id,
+        existingCategoryId: productForm.category_id,
+        existingUnitId: financialForm.unit_id,
+        stageMode: null,
+      });
+
+      await dispatch(
+        updateProduct({
+          data: {
+            productId: productID,
+            detailId: brandID,
+            financialId: financialID,
+            updateFields: {
+              catalogProductBarcodeId: base.productBarcodeId,
+              mkid: base.productBarcodeId,
+              MK_BARCODE: base.mkBarcode,
+              mkBarcode: base.mkBarcode,
+              barcode: uniqueValues([vendorBarcode, base.mkBarcode]),
+            },
+          },
+          token,
+        })
+      ).unwrap();
+
+      setOutletPostingForm((prev) => ({
+        ...prev,
+        mk_barcode: base.mkBarcode,
+        vendor_barcode: vendorBarcode,
+      }));
+      setFinancialForm((prev) => ({
+        ...prev,
+        barcode: vendorBarcode,
+      }));
+      setStatus(`Barcode assigned. Product barcode ${base.productBarcodeId}, MK barcode ${base.mkBarcode}.`);
+      dispatch(fetchCatalogEntity("product-barcodes"));
+      if (token) dispatch(fetchAllProductsFresh({ token }));
+    } catch (error) {
+      setStatus(error?.message || "Unable to assign barcode.");
+    } finally {
+      setBarcodeAssignBusy(false);
+      setBusy(false);
+    }
+  };
+
   const handleCatalogSelect = (catalogProduct) => {
     setSelectedCatalogProductId(catalogProduct.id);
     setProductName(catalogProduct.product_name_eng || "");
@@ -2258,6 +2656,93 @@ const ApplicationMigrationHelperPage = () => {
     }));
   };
 
+  const getManualOutletRatePlan = (form = outletPostingForm) => ({
+    product_barcode_id: form.product_barcode_id || null,
+    rate_for: "customer",
+    gst_rate: toPercentNumber(form.gst_rate),
+    margin_percentage: toPercentNumber(form.margin_percentage),
+    labour_percentage: toPercentNumber(form.labour_percentage),
+    transport_percentage: toPercentNumber(form.transport_percentage),
+    load_percentage: toPercentNumber(form.load_percentage),
+    unload_percentage: toPercentNumber(form.unload_percentage),
+    notes: "Created from outlet migration",
+  });
+
+  const getSelectedOutletProductBarcodeId = (product = scannedProduct) => {
+    const brand = getFirstBrand(product);
+    const financial = getFirstFinancial(brand);
+
+    return pickId(
+      product?.catalogProductBarcodeId,
+      product?.product_barcode_id,
+      product?.barcode_id,
+      financial?.catalogProductBarcodeId,
+      financial?.product_barcode_id,
+      financial?.barcode_id
+    );
+  };
+
+  const findRatePlanForBarcode = (productBarcodeId) =>
+    ratePlans.find(
+      (item) =>
+        String(item.product_barcode_id) === String(productBarcodeId) &&
+        normalizeText(item.rate_for || "customer") === "customer"
+    ) ||
+    ratePlans.find((item) => String(item.product_barcode_id) === String(productBarcodeId));
+
+  const applyOutletRatePlanToForm = (ratePlan, mode = "existing") => {
+    if (!ratePlan) return;
+
+    setOutletPostingForm((prev) => {
+      const pricing = calculateDispatchPricing({
+        sellingPrice: prev.dispatch_price || financialForm.dprice,
+        mrp: prev.unit_mrp,
+        ratePlan,
+      });
+
+      return {
+        ...prev,
+        rate_plan_id: ratePlan.id || prev.rate_plan_id || "",
+        rate_plan_mode: mode,
+        margin_percentage: String(ratePlan.margin_percentage ?? ""),
+        gst_rate: String(ratePlan.gst_rate ?? ""),
+        labour_percentage: String(ratePlan.labour_percentage ?? ""),
+        transport_percentage: String(ratePlan.transport_percentage ?? ""),
+        load_percentage: String(ratePlan.load_percentage ?? ""),
+        unload_percentage: String(ratePlan.unload_percentage ?? ""),
+        unit_price: pricing.purchasePrice || prev.unit_price,
+        dispatch_price: pricing.salePrice || prev.dispatch_price || financialForm.dprice,
+        dispatch_discount:
+          pricing.discount !== "" ? String(pricing.discount) : prev.dispatch_discount,
+      };
+    });
+  };
+
+  useEffect(() => {
+    const productBarcodeId = getSelectedOutletProductBarcodeId();
+    if (!productBarcodeId || outletPostingForm.rate_plan_id) return;
+
+    const ratePlan = findRatePlanForBarcode(productBarcodeId);
+    if (ratePlan) {
+      applyOutletRatePlanToForm(ratePlan, "existing");
+    }
+  }, [scannedProduct, ratePlans, outletPostingForm.rate_plan_id]);
+
+  const recalculateOutletDispatchPricing = (form) => {
+    const pricing = calculateDispatchPricing({
+      sellingPrice: form.dispatch_price || financialForm.dprice,
+      mrp: form.unit_mrp,
+      ratePlan: getManualOutletRatePlan(form),
+    });
+
+    return {
+      ...form,
+      unit_price: pricing.purchasePrice || form.unit_price,
+      dispatch_price: pricing.salePrice ? String(pricing.salePrice) : "",
+      dispatch_discount: pricing.discount !== "" ? String(pricing.discount) : "",
+    };
+  };
+
   const handleOutletPostingFormChange = (field, value) => {
     setOutletPostingForm((prev) => {
       const next = {
@@ -2273,6 +2758,25 @@ const ApplicationMigrationHelperPage = () => {
         });
       }
 
+      if (
+        [
+          "unit_price",
+          "dispatch_price",
+          "unit_mrp",
+          "margin_percentage",
+          "gst_rate",
+          "labour_percentage",
+          "transport_percentage",
+          "load_percentage",
+          "unload_percentage",
+        ].includes(field)
+      ) {
+        return recalculateOutletDispatchPricing({
+          ...next,
+          rate_plan_mode: next.rate_plan_id ? next.rate_plan_mode : "manual",
+        });
+      }
+
       return next;
     });
   };
@@ -2281,6 +2785,129 @@ const ApplicationMigrationHelperPage = () => {
     setFinancialForm((prev) => ({ ...prev, countInStock: value }));
     setOutletPostingForm((prev) => ({ ...prev, no_of_units: value || "0" }));
   };
+
+  const handleFinancialPriceChange = (field, value) => {
+    setFinancialForm((prev) => {
+      const next = { ...prev, [field]: value };
+      const discount = calculateDiscountPercent(next.price, next.dprice);
+
+      return {
+        ...next,
+        discount: discount === "" ? next.discount : discount,
+      };
+    });
+
+    if (field === "price") {
+      setOutletPostingForm((prev) =>
+        recalculateOutletDispatchPricing({
+          ...prev,
+          unit_mrp: sanitizeMoneyInput(value),
+        })
+      );
+    }
+
+    if (field === "dprice") {
+      setOutletPostingForm((prev) =>
+        recalculateOutletDispatchPricing({
+          ...prev,
+          dispatch_price: sanitizeMoneyInput(value),
+        })
+      );
+    }
+  };
+
+  const handleLiteDiscountChange = (value) => {
+    setFinancialForm((prev) => {
+      const nextSellingPrice = calculateSellingPrice(prev.price, value);
+      const nextDprice =
+        nextSellingPrice === "" ? prev.dprice : sanitizeMoneyInput(nextSellingPrice);
+
+      setOutletPostingForm((outletPrev) =>
+        recalculateOutletDispatchPricing({
+          ...outletPrev,
+          dispatch_price: nextDprice,
+          dispatch_discount: value,
+        })
+      );
+
+      return {
+        ...prev,
+        discount: value,
+        dprice: nextDprice,
+      };
+    });
+  };
+
+  const handleLiteMrpChange = (value) => {
+    setFinancialForm((prev) => {
+      const nextSellingPrice =
+        prev.discount !== "" ? calculateSellingPrice(value, prev.discount) : prev.dprice;
+      const nextDprice =
+        nextSellingPrice === "" ? prev.dprice : sanitizeMoneyInput(nextSellingPrice);
+      const nextDiscount = calculateDiscountPercent(value, nextDprice);
+
+      setOutletPostingForm((outletPrev) =>
+        recalculateOutletDispatchPricing({
+          ...outletPrev,
+          unit_mrp: sanitizeMoneyInput(value),
+          dispatch_price: nextDprice,
+          dispatch_discount:
+            nextDiscount === "" ? outletPrev.dispatch_discount : String(nextDiscount),
+        })
+      );
+
+      return {
+        ...prev,
+        price: value,
+        dprice: nextDprice,
+        discount: nextDiscount === "" ? prev.discount : nextDiscount,
+      };
+    });
+  };
+
+  const getEntitySearchText = (item) =>
+    normalizeText(
+      [
+        item?.warehouse_name,
+        item?.warehouse_code,
+        item?.outlet_name,
+        item?.unit_code,
+        item?.stakeholder_name,
+        item?.stackholder_code,
+        item?.supplier_name,
+        item?.name,
+        item?.id,
+      ]
+        .filter(Boolean)
+        .join(" ")
+    );
+
+  useEffect(() => {
+    if (migrationMode !== "lite") return;
+
+    const defaultWarehouse = warehouses.find((item) =>
+      getEntitySearchText(item).includes("gouthami")
+    );
+    const defaultOutlet =
+      outlets.find((item) => getEntitySearchText(item).includes("gollavelli")) ||
+      outlets.find((item) => getEntitySearchText(item).includes("gollaveli"));
+    const defaultSupplier = suppliers.find((item) =>
+      getEntitySearchText(item).includes("migration")
+    );
+
+    setOutletPostingForm((prev) =>
+      recalculateOutletDispatchPricing({
+        ...prev,
+        warehouse_id: defaultWarehouse?.id ? String(defaultWarehouse.id) : prev.warehouse_id,
+        outlet_id: defaultOutlet?.id ? String(defaultOutlet.id) : prev.outlet_id,
+        supplier_id: defaultSupplier?.id ? String(defaultSupplier.id) : prev.supplier_id,
+        rate_plan_id: "",
+        rate_plan_mode: "manual",
+        ...DEFAULT_OUTLET_RATE_PLAN,
+        remarks: prev.remarks || "Lite outlet migration stock entry",
+      })
+    );
+  }, [migrationMode, warehouses, outlets, suppliers]);
 
   const handleInventoryFormChange = (field, value) => {
     setInventoryForm((prev) => {
@@ -2619,12 +3246,18 @@ const ApplicationMigrationHelperPage = () => {
       request_id: getRequestId(trackingSelectedRequest) || rollbackForm.request_id,
       transaction_id:
         pickId(
-          trackingSelectedRequest?.reference_id,
           payload.transaction_id,
           payload.stock_transaction_id,
-          payload.dispatch_order_id,
           firstItem.transaction_id
         ) || rollbackForm.transaction_id,
+      dispatch_order_id:
+        pickId(
+          payload.dispatch_order_id,
+          trackingSelectedRequest?.dispatch_order_id,
+          getRequestType(trackingSelectedRequest) === "inventory_dispatch_to_outlet"
+            ? trackingSelectedRequest?.reference_id
+            : null
+        ) || rollbackForm.dispatch_order_id,
       product_id:
         pickId(firstItem.product_id, payload.product_id, trackingSelectedRequest?.product_id) ||
         rollbackForm.product_id,
@@ -2654,11 +3287,12 @@ const ApplicationMigrationHelperPage = () => {
       ? Number(form.rollback_quantity)
       : null;
 
-    if (!form.request_id && !form.transaction_id) {
-      throw new Error("Enter a request id or transaction id to rollback.");
+    if (!form.request_id && !form.transaction_id && !form.dispatch_order_id) {
+      throw new Error("Enter a request id, transaction id, or dispatch order id to rollback.");
     }
 
     if (
+      !form.dispatch_order_id &&
       !form.product_id &&
       !form.product_barcode_id &&
       !form.mk_barcode
@@ -2673,6 +3307,7 @@ const ApplicationMigrationHelperPage = () => {
     return {
       request_id: form.request_id || null,
       transaction_id: form.transaction_id || null,
+      dispatch_order_id: form.dispatch_order_id || null,
       product_id: form.product_id || null,
       product_barcode_id: form.product_barcode_id || null,
       mk_barcode: form.mk_barcode || null,
@@ -3016,12 +3651,22 @@ const ApplicationMigrationHelperPage = () => {
 
     let barcodeRow = catalogBarcodes.find(
       (item) =>
+        vendorBarcode &&
+        (String(item.barcode || "") === String(vendorBarcode) ||
+          String(item.mk_barcode || "") === String(vendorBarcode))
+    );
+
+    if (!barcodeRow) {
+      barcodeRow = catalogBarcodes.find(
+      (item) =>
         String(item.product_id) === String(productIdNumber) &&
         String(item.brand_id) === String(brandIdNumber) &&
         String(item.category_id) === String(categoryIdNumber) &&
         String(item.unit_id) === String(unitIdNumber) &&
-        Number(item.quantity) === Number(pack.quantity)
-    );
+        Number(item.quantity) === Number(pack.quantity) &&
+        (!vendorBarcode || !item.barcode || String(item.barcode) === String(vendorBarcode))
+      );
+    }
 
     const barcodeInserted = !barcodeRow;
 
@@ -4544,6 +5189,18 @@ const ApplicationMigrationHelperPage = () => {
           </button>
           <button
             type="button"
+            onClick={() => setMigrationMode("lite")}
+            className={`${buttonClass} ${
+              migrationMode === "lite"
+                ? "bg-blue-600 text-white"
+                : "border bg-white text-gray-700 hover:bg-gray-50"
+            }`}
+          >
+            <PackagePlus size={17} />
+            Lite Migration
+          </button>
+          <button
+            type="button"
             onClick={() => setMigrationMode("inventory")}
             className={`${buttonClass} ${
               migrationMode === "inventory"
@@ -4566,11 +5223,539 @@ const ApplicationMigrationHelperPage = () => {
             <RotateCcw size={17} />
             Product Rollback
           </button>
+          <button
+            type="button"
+            onClick={() => setMigrationMode("barcodeAssign")}
+            className={`${buttonClass} ${
+              migrationMode === "barcodeAssign"
+                ? "bg-blue-600 text-white"
+                : "border bg-white text-gray-700 hover:bg-gray-50"
+            }`}
+          >
+            <Barcode size={17} />
+            Barcode Assigner
+          </button>
         </section>
 
         {renderBulkMigrationPanel()}
 
-        {migrationMode === "outlet" ? (
+        {migrationMode === "lite" ? (
+          <section className="rounded-lg border bg-white p-4 shadow-sm">
+            <div className="mb-4 flex items-center gap-2">
+              <PackagePlus size={19} className="text-blue-700" />
+              <h2 className="font-bold text-gray-900">Lite Migration</h2>
+            </div>
+
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (barcodeAssignMatches[0]) selectBarcodeAssignProduct(barcodeAssignMatches[0]);
+              }}
+              className="mb-4 flex flex-col gap-3 sm:flex-row"
+            >
+              <div className="relative flex-1">
+                <input
+                  value={barcodeAssignSearch}
+                  onChange={(event) => {
+                    setBarcodeAssignSearch(event.target.value);
+                    setBarcodeAssignLookupOpen(true);
+                  }}
+                  onFocus={() => {
+                    if (barcodeAssignMatches.length > 0) setBarcodeAssignLookupOpen(true);
+                  }}
+                  className={fieldClass}
+                  placeholder="Search Mongo product / financial"
+                />
+                {barcodeAssignLookupOpen && barcodeAssignMatches.length > 0 ? (
+                  <div className="absolute z-50 mt-1 max-h-72 w-full overflow-auto rounded-lg border bg-white shadow-lg">
+                    {barcodeAssignMatches.map((item) => {
+                      const image = getProductImageUrl(item);
+                      const firstBarcode = getProductBarcodes(item)[0] || "";
+                      const financial = getFirstFinancial(getFirstBrand(item));
+
+                      return (
+                        <button
+                          key={`${pickId(item.id, item._id, getProductName(item))}-${firstBarcode}`}
+                          type="button"
+                          onMouseDown={(clickEvent) => clickEvent.preventDefault()}
+                          onClick={() => selectBarcodeAssignProduct(item)}
+                          className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-blue-50"
+                        >
+                          {image ? (
+                            <img
+                              src={image}
+                              alt={getProductName(item) || "Product"}
+                              className="h-10 w-10 rounded border object-cover"
+                            />
+                          ) : (
+                            <span className="h-10 w-10 rounded border bg-gray-50" />
+                          )}
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-sm font-semibold text-gray-900">
+                              {getProductName(item) || "Unnamed product"}
+                            </span>
+                            <span className="block truncate text-xs text-gray-500">
+                              {getBrandName(getFirstBrand(item)) || "-"} | {getCategoryName(item) || "-"} | {firstBarcode || "-"}
+                            </span>
+                            <span className="block truncate text-xs font-semibold text-blue-700">
+                              Financial: {financial?._id || "-"}
+                            </span>
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : null}
+              </div>
+              <button
+                type="submit"
+                disabled={busy}
+                className={`${buttonClass} bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-300`}
+              >
+                <Search size={17} />
+                Search
+              </button>
+            </form>
+
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <label className="text-sm font-semibold text-gray-800">
+                Product Name
+                <input value={productForm.product_name_eng} readOnly className={`${fieldClass} mt-1 bg-gray-50`} />
+              </label>
+              <label className="text-sm font-semibold text-gray-800">
+                Brand
+                <input value={productForm.brand_name} readOnly className={`${fieldClass} mt-1 bg-gray-50`} />
+              </label>
+              <label className="text-sm font-semibold text-gray-800">
+                Category
+                <input value={productForm.category_name} readOnly className={`${fieldClass} mt-1 bg-gray-50`} />
+              </label>
+              <label className="text-sm font-semibold text-gray-800">
+                Vendor Barcode
+                <input
+                  value={outletPostingForm.vendor_barcode}
+                  onChange={(event) =>
+                    handleOutletPostingFormChange("vendor_barcode", event.target.value)
+                  }
+                  className={`${fieldClass} mt-1`}
+                  placeholder="Scan barcode"
+                />
+              </label>
+              <label className="text-sm font-semibold text-gray-800">
+                MFG Date
+                <input
+                  type="date"
+                  value={outletPostingForm.mfg_date}
+                  onChange={(event) =>
+                    handleOutletPostingFormChange("mfg_date", event.target.value)
+                  }
+                  className={`${fieldClass} mt-1`}
+                />
+              </label>
+              <label className="text-sm font-semibold text-gray-800">
+                Expiry Date
+                <input
+                  type="date"
+                  value={outletPostingForm.exp_date}
+                  onChange={(event) =>
+                    handleOutletPostingFormChange("exp_date", event.target.value)
+                  }
+                  className={`${fieldClass} mt-1`}
+                />
+              </label>
+              <label className="text-sm font-semibold text-gray-800">
+                MRP / Unit
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={financialForm.price}
+                  onChange={(event) => handleLiteMrpChange(event.target.value)}
+                  className={`${fieldClass} mt-1`}
+                />
+              </label>
+              <label className="text-sm font-semibold text-gray-800">
+                Selling Price / Unit
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={financialForm.dprice}
+                  onChange={(event) => handleFinancialPriceChange("dprice", event.target.value)}
+                  className={`${fieldClass} mt-1`}
+                />
+              </label>
+              <label className="text-sm font-semibold text-gray-800">
+                Discount %
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={financialForm.discount}
+                  onChange={(event) => handleLiteDiscountChange(event.target.value)}
+                  className={`${fieldClass} mt-1`}
+                />
+              </label>
+              <label className="text-sm font-semibold text-gray-800">
+                Stock Count
+                <input
+                  type="number"
+                  min="0"
+                  value={financialForm.countInStock}
+                  onChange={(event) => handleOutletCountInStockChange(event.target.value)}
+                  className={`${fieldClass} mt-1`}
+                />
+              </label>
+              <label className="text-sm font-semibold text-gray-800">
+                Warehouse
+                <select
+                  value={outletPostingForm.warehouse_id}
+                  onChange={(event) =>
+                    handleOutletPostingFormChange("warehouse_id", event.target.value)
+                  }
+                  className={`${fieldClass} mt-1`}
+                >
+                  <option value="">Select warehouse</option>
+                  {warehouses.map((warehouse) => (
+                    <option key={warehouse.id} value={warehouse.id}>
+                      {warehouse.warehouse_name || warehouse.warehouse_code || warehouse.id}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-sm font-semibold text-gray-800">
+                Outlet
+                <select
+                  value={outletPostingForm.outlet_id}
+                  onChange={(event) =>
+                    handleOutletPostingFormChange("outlet_id", event.target.value)
+                  }
+                  className={`${fieldClass} mt-1`}
+                >
+                  <option value="">Select outlet</option>
+                  {outlets.map((outlet) => (
+                    <option key={outlet.id} value={outlet.id}>
+                      {outlet.outlet_name || outlet.unit_code || outlet.id}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-sm font-semibold text-gray-800">
+                Supplier
+                <select
+                  value={outletPostingForm.supplier_id}
+                  onChange={(event) =>
+                    handleOutletPostingFormChange("supplier_id", event.target.value)
+                  }
+                  className={`${fieldClass} mt-1`}
+                >
+                  <option value="">Select supplier</option>
+                  {suppliers.map((supplier) => (
+                    <option key={supplier.id} value={supplier.id}>
+                      {supplier.stakeholder_name || supplier.stackholder_code || supplier.id}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-sm font-semibold text-gray-800">
+                Pack Quantity
+                <input
+                  value={financialForm.quantity}
+                  onChange={(event) =>
+                    setFinancialForm((prev) => ({ ...prev, quantity: event.target.value }))
+                  }
+                  className={`${fieldClass} mt-1`}
+                />
+              </label>
+              <label className="text-sm font-semibold text-gray-800">
+                Pack Unit
+                <select
+                  value={financialForm.unit_id}
+                  onChange={(event) =>
+                    setFinancialForm((prev) => ({ ...prev, unit_id: event.target.value }))
+                  }
+                  className={`${fieldClass} mt-1`}
+                >
+                  <option value="">Select unit</option>
+                  {units.map((unit) => (
+                    <option key={unit.id} value={unit.id}>
+                      {getUnitLabel(unit)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-sm font-semibold text-gray-800">
+                Margin %
+                <input
+                  type="number"
+                  step="0.01"
+                  value={outletPostingForm.margin_percentage}
+                  onChange={(event) =>
+                    handleOutletPostingFormChange("margin_percentage", event.target.value)
+                  }
+                  className={`${fieldClass} mt-1`}
+                />
+              </label>
+              <label className="text-sm font-semibold text-gray-800">
+                GST %
+                <input
+                  type="number"
+                  step="0.01"
+                  value={outletPostingForm.gst_rate}
+                  onChange={(event) =>
+                    handleOutletPostingFormChange("gst_rate", event.target.value)
+                  }
+                  className={`${fieldClass} mt-1`}
+                />
+              </label>
+              <label className="text-sm font-semibold text-gray-800">
+                Packing %
+                <input
+                  type="number"
+                  step="0.01"
+                  value={outletPostingForm.labour_percentage}
+                  onChange={(event) =>
+                    handleOutletPostingFormChange("labour_percentage", event.target.value)
+                  }
+                  className={`${fieldClass} mt-1`}
+                />
+              </label>
+              <label className="text-sm font-semibold text-gray-800">
+                Transport %
+                <input
+                  type="number"
+                  step="0.01"
+                  value={outletPostingForm.transport_percentage}
+                  onChange={(event) =>
+                    handleOutletPostingFormChange("transport_percentage", event.target.value)
+                  }
+                  className={`${fieldClass} mt-1`}
+                />
+              </label>
+              <label className="text-sm font-semibold text-gray-800">
+                Load %
+                <input
+                  type="number"
+                  step="0.01"
+                  value={outletPostingForm.load_percentage}
+                  onChange={(event) =>
+                    handleOutletPostingFormChange("load_percentage", event.target.value)
+                  }
+                  className={`${fieldClass} mt-1`}
+                />
+              </label>
+              <label className="text-sm font-semibold text-gray-800">
+                Unload %
+                <input
+                  type="number"
+                  step="0.01"
+                  value={outletPostingForm.unload_percentage}
+                  onChange={(event) =>
+                    handleOutletPostingFormChange("unload_percentage", event.target.value)
+                  }
+                  className={`${fieldClass} mt-1`}
+                />
+              </label>
+              <label className="text-sm font-semibold text-gray-800">
+                Purchase Price / Unit
+                <input value={outletPostingForm.unit_price} readOnly className={`${fieldClass} mt-1 bg-gray-50`} />
+              </label>
+              <label className="text-sm font-semibold text-gray-800">
+                Batch ID
+                <input
+                  value={outletPostingForm.batch_id}
+                  onChange={(event) =>
+                    handleOutletPostingFormChange("batch_id", event.target.value)
+                  }
+                  className={`${fieldClass} mt-1`}
+                />
+              </label>
+            </div>
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => handleStockUpdate()}
+                disabled={outletSaveBusy || busy || productLoading}
+                className={`${buttonClass} bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-300`}
+              >
+                <PackagePlus size={17} />
+                Run Lite Migration
+              </button>
+            </div>
+
+            <MigrationStagePanel mode="outlet" stages={migrationStages.outlet} />
+
+            {status ? (
+              <p className="mt-4 rounded-lg bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-800">
+                {status}
+              </p>
+            ) : null}
+          </section>
+        ) : migrationMode === "barcodeAssign" ? (
+          <section className="rounded-lg border bg-white p-4 shadow-sm">
+            <div className="mb-4 flex items-center gap-2">
+              <Barcode size={19} className="text-blue-700" />
+              <h2 className="font-bold text-gray-900">Barcode Assigner</h2>
+            </div>
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (barcodeAssignMatches[0]) selectBarcodeAssignProduct(barcodeAssignMatches[0]);
+              }}
+              className="mb-4 flex flex-col gap-3 sm:flex-row"
+            >
+              <div className="relative flex-1">
+                <input
+                  value={barcodeAssignSearch}
+                  onChange={(event) => {
+                    setBarcodeAssignSearch(event.target.value);
+                    setBarcodeAssignLookupOpen(true);
+                  }}
+                  onFocus={() => {
+                    if (barcodeAssignMatches.length > 0) setBarcodeAssignLookupOpen(true);
+                  }}
+                  className={fieldClass}
+                  placeholder="Search Mongo product / financial"
+                />
+                {barcodeAssignLookupOpen && barcodeAssignMatches.length > 0 ? (
+                  <div className="absolute z-50 mt-1 max-h-72 w-full overflow-auto rounded-lg border bg-white shadow-lg">
+                    {barcodeAssignMatches.map((item) => {
+                      const image = getProductImageUrl(item);
+                      const firstBarcode = getProductBarcodes(item)[0] || "";
+                      const financial = getFirstFinancial(getFirstBrand(item));
+
+                      return (
+                        <button
+                          key={`${pickId(item.id, item._id, getProductName(item))}-${firstBarcode}`}
+                          type="button"
+                          onMouseDown={(clickEvent) => clickEvent.preventDefault()}
+                          onClick={() => selectBarcodeAssignProduct(item)}
+                          className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-blue-50"
+                        >
+                          {image ? (
+                            <img
+                              src={image}
+                              alt={getProductName(item) || "Product"}
+                              className="h-10 w-10 rounded border object-cover"
+                            />
+                          ) : (
+                            <span className="h-10 w-10 rounded border bg-gray-50" />
+                          )}
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-sm font-semibold text-gray-900">
+                              {getProductName(item) || "Unnamed product"}
+                            </span>
+                            <span className="block truncate text-xs text-gray-500">
+                              {getBrandName(getFirstBrand(item)) || "-"} | {getCategoryName(item) || "-"} | {firstBarcode || "-"}
+                            </span>
+                            <span className="block truncate text-xs font-semibold text-blue-700">
+                              Financial: {financial?._id || "-"}
+                            </span>
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : null}
+              </div>
+              <button
+                type="submit"
+                disabled={busy}
+                className={`${buttonClass} bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-300`}
+              >
+                <Search size={17} />
+                Search
+              </button>
+            </form>
+
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <label className="text-sm font-semibold text-gray-800">
+                Product Name
+                <input value={productForm.product_name_eng} readOnly className={`${fieldClass} mt-1 bg-gray-50`} />
+              </label>
+              <label className="text-sm font-semibold text-gray-800">
+                Brand
+                <input value={productForm.brand_name} readOnly className={`${fieldClass} mt-1 bg-gray-50`} />
+              </label>
+              <label className="text-sm font-semibold text-gray-800">
+                Category
+                <input value={productForm.category_name} readOnly className={`${fieldClass} mt-1 bg-gray-50`} />
+              </label>
+              <label className="text-sm font-semibold text-gray-800">
+                Pack Quantity
+                <input
+                  value={financialForm.quantity}
+                  onChange={(event) => setFinancialForm((prev) => ({ ...prev, quantity: event.target.value }))}
+                  className={`${fieldClass} mt-1`}
+                />
+              </label>
+              <label className="text-sm font-semibold text-gray-800">
+                Pack Unit
+                <select
+                  value={financialForm.unit_id}
+                  onChange={(event) => setFinancialForm((prev) => ({ ...prev, unit_id: event.target.value }))}
+                  className={`${fieldClass} mt-1`}
+                >
+                  <option value="">Select unit</option>
+                  {units.map((unit) => (
+                    <option key={unit.id} value={unit.id}>
+                      {unit.unit_short_code || unit.unit_name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-sm font-semibold text-gray-800">
+                Vendor Barcode
+                <input
+                  value={outletPostingForm.vendor_barcode}
+                  onChange={(event) =>
+                    setOutletPostingForm((prev) => ({ ...prev, vendor_barcode: event.target.value }))
+                  }
+                  className={`${fieldClass} mt-1`}
+                  placeholder="Scan barcode to assign"
+                />
+              </label>
+              <label className="text-sm font-semibold text-gray-800">
+                MK Barcode
+                <input
+                  value={outletPostingForm.mk_barcode}
+                  onChange={(event) =>
+                    setOutletPostingForm((prev) => ({ ...prev, mk_barcode: event.target.value }))
+                  }
+                  className={`${fieldClass} mt-1`}
+                  placeholder="Leave empty to generate"
+                />
+              </label>
+              <label className="text-sm font-semibold text-gray-800">
+                Financial ID
+                <input
+                  value={pickId(scannedProduct?.financialId, getFirstFinancial(getFirstBrand(scannedProduct))?._id) || ""}
+                  readOnly
+                  className={`${fieldClass} mt-1 bg-gray-50`}
+                />
+              </label>
+            </div>
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={handleBarcodeAssign}
+                disabled={barcodeAssignBusy || productLoading}
+                className={`${buttonClass} bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-300`}
+              >
+                <Barcode size={17} />
+                Assign Barcode
+              </button>
+            </div>
+
+            {status ? (
+              <p className="mt-4 rounded-lg bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-800">
+                {status}
+              </p>
+            ) : null}
+          </section>
+        ) : migrationMode === "outlet" ? (
         <section className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(320px,0.95fr)_minmax(420px,1.4fr)]">
           <div className="space-y-4">
             <section className="rounded-lg border bg-white p-4 shadow-sm">
@@ -4936,45 +6121,6 @@ const ApplicationMigrationHelperPage = () => {
           </div>
 
           <section className="rounded-lg border bg-white p-4 shadow-sm">
-            <div className="mb-4 flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => setActiveAction("stock")}
-                className={`${buttonClass} ${
-                  activeAction === "stock"
-                    ? "bg-blue-600 text-white"
-                    : "border bg-white text-gray-700 hover:bg-gray-50"
-                }`}
-              >
-                <CheckCircle2 size={17} />
-                Update Stock
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveAction("edit")}
-                className={`${buttonClass} ${
-                  activeAction === "edit"
-                    ? "bg-blue-600 text-white"
-                    : "border bg-white text-gray-700 hover:bg-gray-50"
-                }`}
-              >
-                <Edit3 size={17} />
-                Edit Product
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveAction("new")}
-                className={`${buttonClass} ${
-                  activeAction === "new"
-                    ? "bg-blue-600 text-white"
-                    : "border bg-white text-gray-700 hover:bg-gray-50"
-                }`}
-              >
-                <PackagePlus size={17} />
-                New Migration
-              </button>
-            </div>
-
             {scannedProduct ? (
               <div className="mb-4 grid grid-cols-1 gap-3 rounded-lg bg-gray-50 p-3 text-sm sm:grid-cols-[88px_repeat(3,1fr)]">
                 <div>
@@ -5149,7 +6295,7 @@ const ApplicationMigrationHelperPage = () => {
                   type="number"
                   value={financialForm.price}
                   onChange={(event) =>
-                    setFinancialForm((prev) => ({ ...prev, price: event.target.value }))
+                    handleFinancialPriceChange("price", event.target.value)
                   }
                   className={`${fieldClass} mt-1`}
                 />
@@ -5161,7 +6307,7 @@ const ApplicationMigrationHelperPage = () => {
                     type="number"
                     value={financialForm.dprice}
                     onChange={(event) =>
-                      setFinancialForm((prev) => ({ ...prev, dprice: event.target.value }))
+                      handleFinancialPriceChange("dprice", event.target.value)
                     }
                     className={fieldClass}
                   />
@@ -5262,18 +6408,16 @@ const ApplicationMigrationHelperPage = () => {
                   />
                 </label>
                 <label className="text-sm font-medium text-gray-700">
-                  Unit Price
+                  Purchase Price
                   <input
                     type="number"
                     value={outletPostingForm.unit_price}
-                    onChange={(event) =>
-                      handleOutletPostingFormChange("unit_price", event.target.value)
-                    }
-                    className={`${fieldClass} mt-1`}
+                    readOnly
+                    className={`${fieldClass} mt-1 bg-gray-100 font-semibold text-gray-700`}
                   />
                 </label>
                 <label className="text-sm font-medium text-gray-700">
-                  Unit MRP
+                  MRP
                   <input
                     type="number"
                     min="0"
@@ -5284,6 +6428,103 @@ const ApplicationMigrationHelperPage = () => {
                     }
                     className={`${fieldClass} mt-1`}
                   />
+                </label>
+                <label className="text-sm font-medium text-gray-700">
+                  Margin %
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={outletPostingForm.margin_percentage}
+                    onChange={(event) =>
+                      handleOutletPostingFormChange("margin_percentage", event.target.value)
+                    }
+                    className={`${fieldClass} mt-1`}
+                  />
+                </label>
+                <label className="text-sm font-medium text-gray-700">
+                  GST %
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={outletPostingForm.gst_rate}
+                    onChange={(event) =>
+                      handleOutletPostingFormChange("gst_rate", event.target.value)
+                    }
+                    className={`${fieldClass} mt-1`}
+                  />
+                </label>
+                <label className="text-sm font-medium text-gray-700">
+                  Packing %
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={outletPostingForm.labour_percentage}
+                    onChange={(event) =>
+                      handleOutletPostingFormChange("labour_percentage", event.target.value)
+                    }
+                    className={`${fieldClass} mt-1`}
+                  />
+                </label>
+                <label className="text-sm font-medium text-gray-700">
+                  Transport %
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={outletPostingForm.transport_percentage}
+                    onChange={(event) =>
+                      handleOutletPostingFormChange("transport_percentage", event.target.value)
+                    }
+                    className={`${fieldClass} mt-1`}
+                  />
+                </label>
+                <label className="text-sm font-medium text-gray-700">
+                  Load %
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={outletPostingForm.load_percentage}
+                    onChange={(event) =>
+                      handleOutletPostingFormChange("load_percentage", event.target.value)
+                    }
+                    className={`${fieldClass} mt-1`}
+                  />
+                </label>
+                <label className="text-sm font-medium text-gray-700">
+                  Unload %
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={outletPostingForm.unload_percentage}
+                    onChange={(event) =>
+                      handleOutletPostingFormChange("unload_percentage", event.target.value)
+                    }
+                    className={`${fieldClass} mt-1`}
+                  />
+                </label>
+                <label className="text-sm font-medium text-gray-700">
+                  Selling Price
+                  <input
+                    type="number"
+                    value={outletPostingForm.dispatch_price}
+                    onChange={(event) =>
+                      handleOutletPostingFormChange("dispatch_price", event.target.value)
+                    }
+                    className={`${fieldClass} mt-1`}
+                  />
+                </label>
+                <label className="text-sm font-medium text-gray-700">
+                  Discount %
+                  <input
+                    type="number"
+                    value={outletPostingForm.dispatch_discount}
+                    readOnly
+                    className={`${fieldClass} mt-1 bg-gray-100 font-semibold text-gray-700`}
+                  />
+                  <span className="mt-1 block text-[11px] font-semibold text-blue-700">
+                    {outletPostingForm.rate_plan_id
+                      ? `Rate plan ${outletPostingForm.rate_plan_id} ${outletPostingForm.rate_plan_mode === "created" ? "created" : "loaded"}`
+                      : "Rate plan will be created for this barcode if none exists."}
+                  </span>
                 </label>
                 <label className="text-sm font-medium text-gray-700">
                   Batch ID
@@ -5457,36 +6698,15 @@ const ApplicationMigrationHelperPage = () => {
             </div>
 
             <div className="mt-4 flex flex-wrap gap-2">
-              {activeAction === "stock" ? (
-                <button
-                  type="button"
-                  onClick={handleStockUpdate}
-                  disabled={outletSaveBusy || productLoading}
-                  className={`${buttonClass} bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-300`}
-                >
-                  Update Mongo Stock
-                </button>
-              ) : null}
-              {activeAction === "edit" ? (
-                <button
-                  type="button"
-                  onClick={handleProductEdit}
-                  disabled={productEditBusy}
-                  className={`${buttonClass} bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-300`}
-                >
-                  Save Catalog Then Mongo
-                </button>
-              ) : null}
-              {activeAction === "new" ? (
-                <button
-                  type="button"
-                  onClick={handleCreateNewProduct}
-                  disabled={outletSaveBusy}
-                  className={`${buttonClass} bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-300`}
-                >
-                  Add To Catalog And Mongo
-                </button>
-              ) : null}
+              <button
+                type="button"
+                onClick={() => handleStockUpdate()}
+                disabled={outletSaveBusy || productLoading || productEditBusy}
+                className={`${buttonClass} bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-300`}
+              >
+                <PackagePlus size={17} />
+                Start Outlet Migration
+              </button>
             </div>
 
             {status ? (
@@ -6222,6 +7442,15 @@ const ApplicationMigrationHelperPage = () => {
                   onChange={(event) => handleRollbackFormChange("transaction_id", event.target.value)}
                   className={`${fieldClass} mt-1`}
                   placeholder="stock transaction / dispatch / purchase id"
+                />
+              </label>
+              <label className="text-sm font-medium text-gray-700">
+                Dispatch Order ID
+                <input
+                  value={rollbackForm.dispatch_order_id}
+                  onChange={(event) => handleRollbackFormChange("dispatch_order_id", event.target.value)}
+                  className={`${fieldClass} mt-1`}
+                  placeholder="Outlet migration dispatch id"
                 />
               </label>
               <label className="text-sm font-medium text-gray-700">
