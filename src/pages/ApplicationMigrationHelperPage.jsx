@@ -66,8 +66,10 @@ const getProductName = (product) =>
   product?.product?.product_name_eng ||
   "";
 
-const getFirstBrand = (product) => asArray(product?.details || product?.brands)[0] || {};
-const getFirstFinancial = (brand) => asArray(brand?.financials)[0] || {};
+const getFirstBrand = (product) =>
+  product?.__selectedBrand || asArray(product?.details || product?.brands)[0] || {};
+const getFirstFinancial = (brand) =>
+  brand?.__selectedFinancial || asArray(brand?.financials)[0] || {};
 const getBrandName = (brand) =>
   brand?.brand ||
   brand?.brand_name ||
@@ -116,6 +118,36 @@ const getProductBarcodes = (product) => [
   ...asArray(getFirstFinancial(getFirstBrand(product))?.barcode),
 ].filter(Boolean);
 
+const makeFinancialProductOption = (product, brand, financial) => ({
+  ...product,
+  __selectedBrand: {
+    ...brand,
+    __selectedFinancial: financial,
+    financials: [financial],
+  },
+  brand: getBrandName(brand) || product?.brand,
+  financialId: financial?._id || financial?.id,
+});
+
+const getProductFinancialOptions = (product) => {
+  const details = asArray(product?.details || product?.brands);
+  if (!details.length) return [product];
+
+  return details.flatMap((brand) => {
+    const financials = asArray(brand?.financials);
+    if (!financials.length) return [makeFinancialProductOption(product, brand, {})];
+    return financials.map((financial) => makeFinancialProductOption(product, brand, financial));
+  });
+};
+
+const getFinancialPackText = (product) => {
+  const financial = getFirstFinancial(getFirstBrand(product));
+  return makeWeightPack(
+    pickId(product?.quantity, product?.catalogQuantity, financial?.quantity, financial?.weight, ""),
+    pickId(product?.units, financial?.units, "")
+  );
+};
+
 const uniqueValues = (values) =>
   Array.from(new Set(values.filter(Boolean).map((value) => String(value).trim()).filter(Boolean)));
 
@@ -130,6 +162,8 @@ const getProductSearchText = (product) =>
     product?.brand_name,
     product?.category,
     product?.category_name,
+    getBrandName(getFirstBrand(product)),
+    getFinancialPackText(product),
     ...getProductBarcodes(product),
   ]
     .filter(Boolean)
@@ -1255,6 +1289,7 @@ const ApplicationMigrationHelperPage = () => {
     if (!q || q.length < 2) return [];
 
     return productsList
+      .flatMap((item) => getProductFinancialOptions(item))
       .filter((item) => getProductSearchText(item).includes(q))
       .slice(0, 12);
   }, [barcodeAssignSearch, productsList]);
@@ -1829,6 +1864,8 @@ const ApplicationMigrationHelperPage = () => {
         rate_plan_id: "",
         rate_plan_mode: "manual",
         ...DEFAULT_OUTLET_RATE_PLAN,
+        mfg_date: migrationMode === "lite" ? getRelativeDateInput(-1) : prev.mfg_date,
+        exp_date: migrationMode === "lite" ? getRelativeDateInput(90) : prev.exp_date,
         mk_barcode: prev.mk_barcode || product?.mk_barcode || "",
         vendor_barcode:
           preferredVendorBarcode ||
@@ -1893,9 +1930,10 @@ const ApplicationMigrationHelperPage = () => {
 
   const selectBarcodeAssignProduct = (product) => {
     const name = getProductName(product) || "";
+    const packText = getFinancialPackText(product);
     const currentScannerBarcode = outletPostingForm.vendor_barcode;
 
-    setBarcodeAssignSearch(name);
+    setBarcodeAssignSearch([name, packText].filter(Boolean).join(" - "));
     setScannedProduct(product);
     hydrateFormsFromProduct(product, "");
     setOutletPostingForm((prev) => ({
@@ -2909,6 +2947,33 @@ const ApplicationMigrationHelperPage = () => {
       liteCountInputRef.current?.focus();
       liteCountInputRef.current?.select?.();
     }, 50);
+  };
+
+  const resetLiteDefaultDates = () => {
+    setOutletPostingForm((prev) => ({
+      ...prev,
+      mfg_date: getRelativeDateInput(-1),
+      exp_date: getRelativeDateInput(90),
+    }));
+  };
+
+  const focusNextLiteField = (event) => {
+    if (event.key !== "Enter") return;
+    const current = event.target?.closest?.("[data-lite-field]");
+    if (!current) return;
+
+    event.preventDefault();
+    const fields = Array.from(
+      event.currentTarget.querySelectorAll("[data-lite-field]")
+    ).filter((item) => !item.disabled && item.offsetParent !== null);
+    const currentIndex = fields.indexOf(current);
+    const next = fields[currentIndex + 1] || fields[0];
+
+    if (next) {
+      next.focus();
+      next.select?.();
+      next.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
   };
 
   useEffect(() => {
@@ -5220,7 +5285,10 @@ const ApplicationMigrationHelperPage = () => {
           </button>
           <button
             type="button"
-            onClick={() => setMigrationMode("lite")}
+            onClick={() => {
+              setMigrationMode("lite");
+              resetLiteDefaultDates();
+            }}
             className={`${buttonClass} ${
               migrationMode === "lite"
                 ? "bg-blue-600 text-white"
@@ -5271,7 +5339,10 @@ const ApplicationMigrationHelperPage = () => {
         {renderBulkMigrationPanel()}
 
         {migrationMode === "lite" ? (
-          <section className="rounded-lg border bg-white p-4 shadow-sm">
+          <section
+            className="rounded-lg border bg-white p-4 shadow-sm"
+            onKeyDown={focusNextLiteField}
+          >
             <div className="mb-4 flex items-center gap-2">
               <PackagePlus size={19} className="text-blue-700" />
               <h2 className="font-bold text-gray-900">Lite Migration</h2>
@@ -5303,10 +5374,11 @@ const ApplicationMigrationHelperPage = () => {
                       const image = getProductImageUrl(item);
                       const firstBarcode = getProductBarcodes(item)[0] || "";
                       const financial = getFirstFinancial(getFirstBrand(item));
+                      const packText = getFinancialPackText(item);
 
                       return (
                         <button
-                          key={`${pickId(item.id, item._id, getProductName(item))}-${firstBarcode}`}
+                          key={`${pickId(item.id, item._id, getProductName(item))}-${financial?._id || firstBarcode}`}
                           type="button"
                           onMouseDown={(clickEvent) => clickEvent.preventDefault()}
                           onClick={() => selectBarcodeAssignProduct(item)}
@@ -5326,10 +5398,10 @@ const ApplicationMigrationHelperPage = () => {
                               {getProductName(item) || "Unnamed product"}
                             </span>
                             <span className="block truncate text-xs text-gray-500">
-                              {getBrandName(getFirstBrand(item)) || "-"} | {getCategoryName(item) || "-"} | {firstBarcode || "-"}
+                              {getBrandName(getFirstBrand(item)) || "-"} | {getCategoryName(item) || "-"} | {packText || "-"} | {firstBarcode || "-"}
                             </span>
                             <span className="block truncate text-xs font-semibold text-blue-700">
-                              Financial: {financial?._id || "-"}
+                              Financial: {financial?._id || "-"} | MRP: {financial?.price ?? "-"} | SP: {financial?.dprice ?? "-"}
                             </span>
                           </span>
                         </button>
@@ -5364,6 +5436,7 @@ const ApplicationMigrationHelperPage = () => {
               <label className="text-sm font-semibold text-gray-800">
                 Vendor Barcode
                 <input
+                  data-lite-field
                   value={outletPostingForm.vendor_barcode}
                   onChange={(event) =>
                     handleOutletPostingFormChange("vendor_barcode", event.target.value)
@@ -5371,6 +5444,7 @@ const ApplicationMigrationHelperPage = () => {
                   onKeyDown={(event) => {
                     if (event.key === "Enter") {
                       event.preventDefault();
+                      event.stopPropagation();
                       focusLiteCountInStock();
                     }
                   }}
@@ -5381,6 +5455,7 @@ const ApplicationMigrationHelperPage = () => {
               <label className="text-sm font-semibold text-gray-800">
                 MFG Date
                 <input
+                  data-lite-field
                   type="date"
                   value={outletPostingForm.mfg_date}
                   onChange={(event) =>
@@ -5392,6 +5467,7 @@ const ApplicationMigrationHelperPage = () => {
               <label className="text-sm font-semibold text-gray-800">
                 Expiry Date
                 <input
+                  data-lite-field
                   type="date"
                   value={outletPostingForm.exp_date}
                   onChange={(event) =>
@@ -5403,6 +5479,7 @@ const ApplicationMigrationHelperPage = () => {
               <label className="text-sm font-semibold text-gray-800">
                 MRP / Unit
                 <input
+                  data-lite-field
                   type="number"
                   min="0"
                   step="0.01"
@@ -5414,6 +5491,7 @@ const ApplicationMigrationHelperPage = () => {
               <label className="text-sm font-semibold text-gray-800">
                 Selling Price / Unit
                 <input
+                  data-lite-field
                   type="number"
                   min="0"
                   step="0.01"
@@ -5425,6 +5503,7 @@ const ApplicationMigrationHelperPage = () => {
               <label className="text-sm font-semibold text-gray-800">
                 Discount %
                 <input
+                  data-lite-field
                   type="number"
                   min="0"
                   step="0.01"
@@ -5437,6 +5516,7 @@ const ApplicationMigrationHelperPage = () => {
                 Stock Count
                 <input
                   ref={liteCountInputRef}
+                  data-lite-field
                   type="number"
                   min="0"
                   value={financialForm.countInStock}
@@ -5451,6 +5531,7 @@ const ApplicationMigrationHelperPage = () => {
               <label className="text-sm font-semibold text-gray-800">
                 Warehouse
                 <select
+                  data-lite-field
                   value={outletPostingForm.warehouse_id}
                   onChange={(event) =>
                     handleOutletPostingFormChange("warehouse_id", event.target.value)
@@ -5468,6 +5549,7 @@ const ApplicationMigrationHelperPage = () => {
               <label className="text-sm font-semibold text-gray-800">
                 Outlet
                 <select
+                  data-lite-field
                   value={outletPostingForm.outlet_id}
                   onChange={(event) =>
                     handleOutletPostingFormChange("outlet_id", event.target.value)
@@ -5485,6 +5567,7 @@ const ApplicationMigrationHelperPage = () => {
               <label className="text-sm font-semibold text-gray-800">
                 Supplier
                 <select
+                  data-lite-field
                   value={outletPostingForm.supplier_id}
                   onChange={(event) =>
                     handleOutletPostingFormChange("supplier_id", event.target.value)
@@ -5502,6 +5585,7 @@ const ApplicationMigrationHelperPage = () => {
               <label className="text-sm font-semibold text-gray-800">
                 Pack Quantity
                 <input
+                  data-lite-field
                   value={financialForm.quantity}
                   onChange={(event) =>
                     setFinancialForm((prev) => ({ ...prev, quantity: event.target.value }))
@@ -5512,6 +5596,7 @@ const ApplicationMigrationHelperPage = () => {
               <label className="text-sm font-semibold text-gray-800">
                 Pack Unit
                 <select
+                  data-lite-field
                   value={financialForm.unit_id}
                   onChange={(event) =>
                     setFinancialForm((prev) => ({ ...prev, unit_id: event.target.value }))
@@ -5529,6 +5614,7 @@ const ApplicationMigrationHelperPage = () => {
               <label className="text-sm font-semibold text-gray-800">
                 Margin %
                 <input
+                  data-lite-field
                   type="number"
                   step="0.01"
                   value={outletPostingForm.margin_percentage}
@@ -5541,6 +5627,7 @@ const ApplicationMigrationHelperPage = () => {
               <label className="text-sm font-semibold text-gray-800">
                 GST %
                 <input
+                  data-lite-field
                   type="number"
                   step="0.01"
                   value={outletPostingForm.gst_rate}
@@ -5553,6 +5640,7 @@ const ApplicationMigrationHelperPage = () => {
               <label className="text-sm font-semibold text-gray-800">
                 Packing %
                 <input
+                  data-lite-field
                   type="number"
                   step="0.01"
                   value={outletPostingForm.labour_percentage}
@@ -5565,6 +5653,7 @@ const ApplicationMigrationHelperPage = () => {
               <label className="text-sm font-semibold text-gray-800">
                 Transport %
                 <input
+                  data-lite-field
                   type="number"
                   step="0.01"
                   value={outletPostingForm.transport_percentage}
@@ -5577,6 +5666,7 @@ const ApplicationMigrationHelperPage = () => {
               <label className="text-sm font-semibold text-gray-800">
                 Load %
                 <input
+                  data-lite-field
                   type="number"
                   step="0.01"
                   value={outletPostingForm.load_percentage}
@@ -5589,6 +5679,7 @@ const ApplicationMigrationHelperPage = () => {
               <label className="text-sm font-semibold text-gray-800">
                 Unload %
                 <input
+                  data-lite-field
                   type="number"
                   step="0.01"
                   value={outletPostingForm.unload_percentage}
@@ -5605,6 +5696,7 @@ const ApplicationMigrationHelperPage = () => {
               <label className="text-sm font-semibold text-gray-800">
                 Batch ID
                 <input
+                  data-lite-field
                   value={outletPostingForm.batch_id}
                   onChange={(event) =>
                     handleOutletPostingFormChange("batch_id", event.target.value)
@@ -5666,10 +5758,11 @@ const ApplicationMigrationHelperPage = () => {
                       const image = getProductImageUrl(item);
                       const firstBarcode = getProductBarcodes(item)[0] || "";
                       const financial = getFirstFinancial(getFirstBrand(item));
+                      const packText = getFinancialPackText(item);
 
                       return (
                         <button
-                          key={`${pickId(item.id, item._id, getProductName(item))}-${firstBarcode}`}
+                          key={`${pickId(item.id, item._id, getProductName(item))}-${financial?._id || firstBarcode}`}
                           type="button"
                           onMouseDown={(clickEvent) => clickEvent.preventDefault()}
                           onClick={() => selectBarcodeAssignProduct(item)}
@@ -5689,10 +5782,10 @@ const ApplicationMigrationHelperPage = () => {
                               {getProductName(item) || "Unnamed product"}
                             </span>
                             <span className="block truncate text-xs text-gray-500">
-                              {getBrandName(getFirstBrand(item)) || "-"} | {getCategoryName(item) || "-"} | {firstBarcode || "-"}
+                              {getBrandName(getFirstBrand(item)) || "-"} | {getCategoryName(item) || "-"} | {packText || "-"} | {firstBarcode || "-"}
                             </span>
                             <span className="block truncate text-xs font-semibold text-blue-700">
-                              Financial: {financial?._id || "-"}
+                              Financial: {financial?._id || "-"} | MRP: {financial?.price ?? "-"} | SP: {financial?.dprice ?? "-"}
                             </span>
                           </span>
                         </button>
