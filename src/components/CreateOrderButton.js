@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { fetchLatestOrders, queueOrder } from '../features/orders/orderSlice';
 import { clearCart } from '../features/cart/cartSlice';
@@ -96,9 +96,13 @@ function DiscountModal({ total, onCancel, onConfirm }) {
       className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40 px-4"
       onClick={onCancel}
     >
-      <div
+      <form
         className="w-full max-w-sm overflow-hidden rounded-2xl border bg-white shadow-2xl"
         onClick={(e) => e.stopPropagation()}
+        onSubmit={(e) => {
+          e.preventDefault();
+          handleConfirm();
+        }}
       >
         <div className="bg-[#ff7400] px-4 py-3 text-center text-sm font-bold text-white">
           Order Discount
@@ -152,21 +156,21 @@ function DiscountModal({ total, onCancel, onConfirm }) {
               No Discount
             </button>
             <button
-              type="button"
-              onClick={handleConfirm}
+              type="submit"
               className="flex-1 rounded-xl bg-green-600 px-4 py-2 font-semibold text-white hover:bg-green-700"
             >
               Continue
             </button>
           </div>
         </div>
-      </div>
+      </form>
     </div>
   );
 }
 
 function CreateOrderButton() {
   const dispatch = useDispatch();
+  const rootRef = useRef(null);
 
   const cartItems = useSelector((s) => s.cart.items || []);
   const total = useSelector((s) => s.cart.total || 0);
@@ -234,6 +238,30 @@ function CreateOrderButton() {
     }
 
     setShowPhoneModal(true);
+  };
+
+  useEffect(() => {
+    const handleShortcut = () => {
+      const root = rootRef.current;
+      if (!root || root.getClientRects().length === 0) return;
+
+      setShowPaymentOptions(false);
+      handleCreateOrder();
+    };
+
+    window.addEventListener('mkpos:create-order', handleShortcut);
+    return () => window.removeEventListener('mkpos:create-order', handleShortcut);
+  }, [handleCreateOrder]);
+
+  const handlePaymentOptionKeyDown = (e, option) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    setSelectedPayment(option);
+    setShowPaymentOptions(false);
+
+    setTimeout(() => {
+      handleCreateOrder();
+    }, 100);
   };
 
   const handlePhoneConfirm = (digits) => {
@@ -392,11 +420,12 @@ function CreateOrderButton() {
   };
 
   return (
-    <div className="relative grid">
+    <div ref={rootRef} className="relative grid">
      <button
   onClick={() =>
     setShowPaymentOptions((prev) => !prev)
   }
+  data-create-order
   className={[
     actionBtn,
     orangeBtn,
@@ -424,6 +453,7 @@ function CreateOrderButton() {
         <button
           key={option.key}
           type="button"
+          onKeyDown={(e) => handlePaymentOptionKeyDown(e, option)}
           onClick={() => {
             setSelectedPayment(option);
             setShowPaymentOptions(false);

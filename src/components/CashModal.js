@@ -14,6 +14,10 @@ const CashModal = ({ total = 0, onCancel, onConfirm }) => {
   const numericCash = useMemo(() => Number(cashGiven || 0), [cashGiven]);
   const change = useMemo(() => numericCash - Number(total || 0), [numericCash, total]);
   const disableConfirm = Number.isNaN(numericCash) || change < 0;
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!disableConfirm) onConfirm?.(numericCash);
+  };
 
   return createPortal(
     <div
@@ -25,7 +29,10 @@ const CashModal = ({ total = 0, onCancel, onConfirm }) => {
         if (e.target === e.currentTarget) onCancel?.(); // click backdrop to close
       }}
     >
-      <div className="w-full max-w-sm bg-white rounded-2xl shadow-xl p-4">
+      <form
+        className="w-full max-w-sm bg-white rounded-2xl shadow-xl p-4"
+        onSubmit={handleSubmit}
+      >
         <h2 id="cash-modal-title" className="text-lg font-bold mb-2 text-center">💰 Cash Payment</h2>
 
         <p className="text-center mb-3">
@@ -56,20 +63,21 @@ const CashModal = ({ total = 0, onCancel, onConfirm }) => {
 
         <div className="flex gap-2">
           <button
-            onClick={() => onConfirm?.(numericCash)}
+            type="submit"
             disabled={disableConfirm}
             className="flex-1 bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 disabled:opacity-50"
           >
             Confirm
           </button>
           <button
+            type="button"
             onClick={onCancel}
             className="flex-1 bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600"
           >
             Cancel
           </button>
         </div>
-      </div>
+      </form>
     </div>,
     document.body
   );

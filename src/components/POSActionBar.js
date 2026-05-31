@@ -477,10 +477,24 @@ export default function POSActionsBar() {
   }, [showToast]);
 
   const handleCreateOrderShortcut = useCallback(() => {
+    window.dispatchEvent(new Event("mkpos:create-order"));
+
     const createBtn =
       document.querySelector("[data-shortcut='create-order'] button") ||
       document.querySelector("[data-shortcut='create-order']") ||
       document.querySelector("[data-create-order]");
+
+    if (!createBtn) {
+      showToast("Create Order button not found.", "warning");
+    } else if (document.activeElement !== createBtn) {
+      createBtn.focus?.();
+    }
+  }, [showToast]);
+
+  const handleCreateOrderClickFallback = useCallback(() => {
+    const createBtn =
+      document.querySelector("[data-create-order]") ||
+      document.querySelector("[data-shortcut='create-order'] button");
 
     if (createBtn) {
       createBtn.click();
@@ -491,41 +505,67 @@ export default function POSActionsBar() {
 
   useEffect(() => {
     const onKeyDown = (e) => {
-      if (!e.altKey || e.repeat) return;
+      if (e.repeat) return;
 
       const key = e.key.toLowerCase();
+      const run = (action) => {
+        e.preventDefault();
+        e.stopPropagation();
+        action();
+      };
+
+      if (!e.altKey) {
+        if (key === "f2" || e.code === "F2" || (e.ctrlKey && key === "enter")) {
+          run(handleCreateOrderShortcut);
+        } else if (key === "insert") {
+          run(handleCreateOrderClickFallback);
+        } else if (key === "f3") {
+          run(handleHold);
+        } else if (key === "f4") {
+          run(handleClearCart);
+        } else if (key === "f5") {
+          run(openOrdersModal);
+        } else if (key === "f6") {
+          run(() => setShowUpiModal(true));
+        } else if (key === "f7") {
+          run(() => {
+            if (!isPublishing && queueCount && navigator.onLine) {
+              handlePublish();
+            }
+          });
+        } else if (key === "f8") {
+          run(handleMulti);
+        } else if (key === "f9") {
+          run(handleLogout);
+        }
+        return;
+      }
 
       if (key === "p") {
-        e.preventDefault();
-        if (!isPublishing && queueCount && navigator.onLine) {
+        run(() => {
+          if (!isPublishing && queueCount && navigator.onLine) {
           handlePublish();
-        }
+          }
+        });
       } else if (key === "h") {
-        e.preventDefault();
-        handleHold();
+        run(handleHold);
       } else if (key === "c") {
-        e.preventDefault();
-        handleClearCart();
+        run(handleClearCart);
       } else if (key === "o") {
-        e.preventDefault();
-        openOrdersModal();
+        run(openOrdersModal);
       } else if (key === "m") {
-        e.preventDefault();
-        handleMulti();
+        run(handleMulti);
       } else if (key === "u") {
-        e.preventDefault();
-        setShowUpiModal(true);
+        run(() => setShowUpiModal(true));
       } else if (key === "n") {
-        e.preventDefault();
-        handleCreateOrderShortcut();
+        run(handleCreateOrderShortcut);
       } else if (key === "l") {
-        e.preventDefault();
-        handleLogout();
+        run(handleLogout);
       }
     };
 
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => document.removeEventListener("keydown", onKeyDown, true);
   }, [
     isPublishing,
     queueCount,
@@ -535,6 +575,7 @@ export default function POSActionsBar() {
     openOrdersModal,
     handleMulti,
     handleCreateOrderShortcut,
+    handleCreateOrderClickFallback,
     handleLogout,
   ]);
 
@@ -1053,9 +1094,9 @@ export default function POSActionsBar() {
                   ? "border border-indigo-300 bg-indigo-600 hover:bg-indigo-700"
                   : "cursor-not-allowed border border-gray-300 bg-gray-400",
               ].join(" ")}
-              title="Shortcut: P"
+              title="Shortcut: F7 or Alt + P"
             >
-              {isPublishing ? "Publishing…" : "Publish (P)"}
+              {isPublishing ? "Publishing…" : "Publish"}
               {queueCount > 0 && (
                 <span className="ml-1 inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-white px-1 text-[8px] text-indigo-700">
                   {queueCount}
@@ -1066,7 +1107,7 @@ export default function POSActionsBar() {
             <button
               onClick={handleHold}
               className={[baseBtn, orangeBtn, mobileBtn].join(" ")}
-              title="Shortcut: H"
+              title="Shortcut: F3 or Alt + H"
             >
               Hold
             </button>
@@ -1078,7 +1119,7 @@ export default function POSActionsBar() {
                 mobileBtn,
                 "bg-red-600 text-white border border-red-300 hover:bg-red-700",
               ].join(" ")}
-              title="Shortcut: C"
+              title="Shortcut: F4 or Alt + C"
             >
               Clear
             </button>
@@ -1086,7 +1127,7 @@ export default function POSActionsBar() {
             <button
               onClick={openOrdersModal}
               className={[baseBtn, orangeBtn, mobileBtn].join(" ")}
-              title="Shortcut: O"
+              title="Shortcut: F5 or Alt + O"
             >
               Orders
             </button>
@@ -1094,7 +1135,7 @@ export default function POSActionsBar() {
             <button
               onClick={handleMulti}
               className={[baseBtn, orangeBtn, mobileBtn].join(" ")}
-              title="Shortcut: M"
+              title="Shortcut: F8 or Alt + M"
             >
               Multi
             </button>
@@ -1103,7 +1144,7 @@ export default function POSActionsBar() {
               type="button"
               className={[baseBtn, orangeBtn, mobileBtn].join(" ")}
               onClick={() => setShowUpiModal(true)}
-              title="Shortcut: U"
+              title="Shortcut: F6 or Alt + U"
             >
               UPI
             </button>
@@ -1111,7 +1152,7 @@ export default function POSActionsBar() {
             <div
               className="shrink-0 h-10 [&>*]:h-full [&>*]:rounded-xl [&>*]:px-3 [&>*]:text-xs [&>*]:font-bold"
               data-shortcut="create-order"
-              title="Shortcut: N"
+              title="Shortcut: F2 or Alt + N"
             >
               <CreateOrderButton />
             </div>
@@ -1160,7 +1201,7 @@ export default function POSActionsBar() {
                   ? "border-slate-300 bg-slate-500 hover:bg-slate-600"
                   : "cursor-not-allowed border-gray-300 bg-gray-400",
               ].join(" ")}
-              title="Shortcut: Alt + P"
+              title="Shortcut: F7 or Alt + P"
             >
               <div className="flex items-center justify-center gap-1">
                 <span>{isPublishing ? "Publishing…" : "Publish"}</span>
@@ -1177,7 +1218,7 @@ export default function POSActionsBar() {
               className={[baseBtn, orangeBtn, "h-9 text-xs", desktopBtn].join(
                 " "
               )}
-              title="Shortcut: Alt + H"
+              title="Shortcut: F3 or Alt + H"
             >
               Hold
             </button>
@@ -1189,7 +1230,7 @@ export default function POSActionsBar() {
                 desktopBtn,
                 "h-9 text-xs bg-red-600 text-white border border-red-300 hover:bg-red-700",
               ].join(" ")}
-              title="Shortcut: Alt + C"
+              title="Shortcut: F4 or Alt + C"
             >
               Clear Cart
             </button>
@@ -1199,7 +1240,7 @@ export default function POSActionsBar() {
               className={[baseBtn, orangeBtn, "h-9 text-xs", desktopBtn].join(
                 " "
               )}
-              title="Shortcut: Alt + O"
+              title="Shortcut: F5 or Alt + O"
             >
               Orders
             </button>
@@ -1209,7 +1250,7 @@ export default function POSActionsBar() {
               className={[baseBtn, orangeBtn, "h-9 text-xs", desktopBtn].join(
                 " "
               )}
-              title="Shortcut: Alt + M"
+              title="Shortcut: F8 or Alt + M"
             >
               Multi
             </button>
@@ -1220,7 +1261,7 @@ export default function POSActionsBar() {
               className={[baseBtn, orangeBtn, "h-9 text-xs", desktopBtn].join(
                 " "
               )}
-              title="Shortcut: Alt + U"
+              title="Shortcut: F6 or Alt + U"
             >
               UPI
             </button>
@@ -1228,7 +1269,7 @@ export default function POSActionsBar() {
             <div
               className="w-full [&>*]:h-9 [&>*]:w-full [&>*]:rounded-lg [&>*]:text-xs [&>*]:font-semibold"
               data-shortcut="create-order"
-              title="Shortcut: Alt + N"
+              title="Shortcut: F2 or Alt + N"
             >
               <CreateOrderButton />
             </div>

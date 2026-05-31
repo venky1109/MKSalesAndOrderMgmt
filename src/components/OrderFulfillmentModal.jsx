@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { fetchWarehouses } from '../features/inventory/stockManagerInventorySlice';
 import { fetchDeliveryPosUsers } from '../features/orders/orderSlice';
@@ -40,6 +40,13 @@ const warehouseOptionLabel = (warehouse) =>
   [warehouseLabel(warehouse), warehouseLocation(warehouse)]
     .filter(Boolean)
     .join(' - ');
+
+const getFocusableElements = (root) =>
+  Array.from(
+    root?.querySelectorAll(
+      'button:not([disabled]), select:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    ) || []
+  ).filter((element) => element.offsetParent !== null);
 
 const buildOptions = (form, warehouses, deliveryUsers) => {
   const packingWarehouse = warehouses.find(
@@ -102,6 +109,7 @@ const OrderFulfillmentModal = ({
   confirmLabel = 'Continue',
 }) => {
   const dispatch = useDispatch();
+  const formRef = useRef(null);
   const token = useSelector((state) => state.posUser?.userInfo?.token);
   const {
     warehouses = [],
@@ -126,6 +134,17 @@ const OrderFulfillmentModal = ({
     dispatch(fetchWarehouses());
     dispatch(fetchDeliveryPosUsers());
   }, [dispatch, open, token]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const timer = setTimeout(() => {
+      const firstControl = getFocusableElements(formRef.current)[0];
+      firstControl?.focus();
+    }, 0);
+
+    return () => clearTimeout(timer);
+  }, [open]);
 
   const visibleDeliveryUsers = useMemo(
     () => (Array.isArray(deliveryPosUsers) ? deliveryPosUsers : []),
@@ -157,9 +176,44 @@ const OrderFulfillmentModal = ({
     onConfirm(buildOptions(form, warehouses, visibleDeliveryUsers));
   };
 
+  const handleKeyDown = (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      onCancel?.();
+      return;
+    }
+
+    if (event.key !== 'Tab') return;
+
+    const focusableElements = getFocusableElements(formRef.current);
+    if (!focusableElements.length) return;
+
+    const firstElement = focusableElements[0];
+    const lastElement = focusableElements[focusableElements.length - 1];
+
+    if (event.shiftKey && document.activeElement === firstElement) {
+      event.preventDefault();
+      lastElement.focus();
+      return;
+    }
+
+    if (!event.shiftKey && document.activeElement === lastElement) {
+      event.preventDefault();
+      firstElement.focus();
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 px-3">
-      <div className="w-full max-w-lg overflow-hidden rounded-2xl border bg-white shadow-2xl">
+      <form
+        ref={formRef}
+        className="w-full max-w-lg overflow-hidden rounded-2xl border bg-white shadow-2xl"
+        onKeyDown={handleKeyDown}
+        onSubmit={(e) => {
+          e.preventDefault();
+          handleConfirm();
+        }}
+      >
         <div className="bg-[#ff8a00] px-5 py-4">
           <h2 className="text-lg font-bold text-white">Order Status</h2>
           <p className="mt-1 text-xs font-semibold text-orange-50">
@@ -244,14 +298,13 @@ const OrderFulfillmentModal = ({
           </button>
 
           <button
-            type="button"
-            onClick={handleConfirm}
+            type="submit"
             className="h-10 rounded-xl border border-[#FFD700] bg-[#ff8a00] px-5 text-sm font-bold text-white hover:bg-[#e57b00]"
           >
             {confirmLabel}
           </button>
         </div>
-      </div>
+      </form>
     </div>
   );
 };

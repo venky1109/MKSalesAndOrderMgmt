@@ -28,8 +28,21 @@ const compactCodes = (...values) =>
     .map((value) => String(value ?? "").trim())
     .filter(Boolean);
 
+const expandLookupCodes = (...values) => {
+  const codes = new Set();
+
+  compactCodes(...values).forEach((code) => {
+    codes.add(code);
+    const numericCode = code.replace(/^0+/, "");
+    if (numericCode) codes.add(numericCode);
+  });
+
+  return [...codes];
+};
+
 const getFinancialLookupCodes = (f) =>
-  compactCodes(
+  expandLookupCodes(
+    f?._id,
     f?.barcode,
     f?.mk_barcode,
     f?.mkBarcode,
@@ -55,6 +68,17 @@ const getProductBarcodeId = (f) =>
     f?.catalog_barcode_id,
     f?.mkid
   )[0] || "";
+
+const getShortcutLookupCodes = (f) =>
+  expandLookupCodes(
+    getProductBarcodeId(f),
+    f?._id,
+    f?.mkid,
+    f?.barcode,
+    f?.mk_barcode,
+    f?.mkBarcode,
+    f?.bar_code
+  );
 
 const calcDiscount = (price, dprice) => {
   const p = Number(price);
@@ -589,8 +613,10 @@ const ProductList = forwardRef((props, ref) => {
 
             const entryKey = getCatalogEntryKey(item.p, item.d, item.f);
             entryShortcuts.set(entryKey, shortcutCode);
-            if (shortcutCode && !shortcutMap.has(shortcutCode)) {
-              shortcutMap.set(shortcutCode, item);
+            for (const code of getShortcutLookupCodes(item.f)) {
+              if (code && !shortcutMap.has(code)) {
+                shortcutMap.set(code, item);
+              }
             }
           });
         });
@@ -887,6 +913,7 @@ const ProductList = forwardRef((props, ref) => {
               onChange={(e) => setBarcodeInput(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && barcodeInput.trim()) {
+                  e.preventDefault();
                   handleBarcode(barcodeInput.trim());
                 }
               }}

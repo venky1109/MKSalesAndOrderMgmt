@@ -9,6 +9,11 @@ const PhoneModal = ({ onCancel, onConfirm }) => {
   const digits = useMemo(() => (raw || '').replace(/\D+/g, ''), [raw]);
   const isValid = digits.length === 10;
 
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (isValid) onConfirm?.(digits);
+  };
+
   return createPortal(
     <div
       className="fixed inset-0 z-[10000] bg-black/50 backdrop-blur-[1px] flex items-start justify-center pt-6 px-3"
@@ -19,7 +24,10 @@ const PhoneModal = ({ onCancel, onConfirm }) => {
         if (e.target === e.currentTarget) onCancel?.();
       }}
     >
-      <div className="w-full max-w-sm bg-white rounded-2xl shadow-xl p-4">
+      <form
+        className="w-full max-w-sm bg-white rounded-2xl shadow-xl p-4"
+        onSubmit={handleSubmit}
+      >
         <h2 id="phone-modal-title" className="text-lg font-bold mb-2 text-center">
           📱 Customer Mobile Number
         </h2>
@@ -53,20 +61,21 @@ const PhoneModal = ({ onCancel, onConfirm }) => {
 
         <div className="flex gap-2">
           <button
-            onClick={() => onConfirm?.(digits)}
+            type="submit"
             disabled={!isValid}
             className="flex-1 bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700 disabled:opacity-50"
           >
             Continue
           </button>
           <button
+            type="button"
             onClick={onCancel}
             className="flex-1 bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600"
           >
             Cancel
           </button>
         </div>
-      </div>
+      </form>
     </div>,
     document.body
   );
