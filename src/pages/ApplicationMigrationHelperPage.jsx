@@ -693,6 +693,20 @@ const normalizeExcelDate = (value) => {
   return Number.isNaN(parsed.getTime()) ? text : parsed.toISOString().slice(0, 10);
 };
 
+const formatDateInput = (date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const getRelativeDateInput = (daysFromToday) => {
+  const date = new Date();
+  date.setHours(0, 0, 0, 0);
+  date.setDate(date.getDate() + daysFromToday);
+  return formatDateInput(date);
+};
+
 const normalizeBulkRow = (row, index) => {
   const productName = getBulkCell(row, bulkColumnAliases.productName);
   const packQuantity = getBulkCell(row, bulkColumnAliases.packQuantity);
@@ -959,6 +973,7 @@ const ApplicationMigrationHelperPage = () => {
   const dispatch = useDispatch();
   const migrationInFlightRef = useRef(false);
   const catalogCodeCountersRef = useRef({});
+  const liteCountInputRef = useRef(null);
   const token = useSelector((state) => state.posUser?.userInfo?.token);
   const { data: catalogData = {}, loading: catalogLoading } = useSelector(
     (state) => state.catalogCrud || {}
@@ -981,6 +996,7 @@ const ApplicationMigrationHelperPage = () => {
   const [lastOutletSearchBarcode, setLastOutletSearchBarcode] = useState("");
   const [barcodeAssignSearch, setBarcodeAssignSearch] = useState("");
   const [barcodeAssignLookupOpen, setBarcodeAssignLookupOpen] = useState(false);
+  const [liteCountHighlight, setLiteCountHighlight] = useState(false);
   const [migrationMode, setMigrationMode] = useState("outlet");
   const [productLookupOpen, setProductLookupOpen] = useState(false);
   const [legacyProductMatches, setLegacyProductMatches] = useState([]);
@@ -2882,6 +2898,19 @@ const ApplicationMigrationHelperPage = () => {
         .join(" ")
     );
 
+  const focusLiteCountInStock = () => {
+    setLiteCountHighlight(true);
+    window.setTimeout(() => setLiteCountHighlight(false), 1600);
+    window.setTimeout(() => {
+      liteCountInputRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+      liteCountInputRef.current?.focus();
+      liteCountInputRef.current?.select?.();
+    }, 50);
+  };
+
   useEffect(() => {
     if (migrationMode !== "lite") return;
 
@@ -2904,6 +2933,8 @@ const ApplicationMigrationHelperPage = () => {
         rate_plan_id: "",
         rate_plan_mode: "manual",
         ...DEFAULT_OUTLET_RATE_PLAN,
+        mfg_date: prev.mfg_date || getRelativeDateInput(-1),
+        exp_date: prev.exp_date || getRelativeDateInput(90),
         remarks: prev.remarks || "Lite outlet migration stock entry",
       })
     );
@@ -5337,6 +5368,12 @@ const ApplicationMigrationHelperPage = () => {
                   onChange={(event) =>
                     handleOutletPostingFormChange("vendor_barcode", event.target.value)
                   }
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      focusLiteCountInStock();
+                    }
+                  }}
                   className={`${fieldClass} mt-1`}
                   placeholder="Scan barcode"
                 />
@@ -5399,11 +5436,16 @@ const ApplicationMigrationHelperPage = () => {
               <label className="text-sm font-semibold text-gray-800">
                 Stock Count
                 <input
+                  ref={liteCountInputRef}
                   type="number"
                   min="0"
                   value={financialForm.countInStock}
                   onChange={(event) => handleOutletCountInStockChange(event.target.value)}
-                  className={`${fieldClass} mt-1`}
+                  className={`${fieldClass} mt-1 ${
+                    liteCountHighlight
+                      ? "border-blue-500 bg-blue-50 ring-2 ring-blue-300"
+                      : ""
+                  }`}
                 />
               </label>
               <label className="text-sm font-semibold text-gray-800">
