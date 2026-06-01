@@ -115,11 +115,17 @@ const getProductBarcodes = (product) => [
   product?.mk_barcode,
   product?.mkid,
   product?.barcodeValue,
+  getFirstFinancial(getFirstBrand(product))?.mk_barcode,
   ...asArray(getFirstFinancial(getFirstBrand(product))?.barcode),
 ].filter(Boolean);
 
 const makeFinancialProductOption = (product, brand, financial) => ({
   ...product,
+  mk_barcode: financial?.mk_barcode || product?.mk_barcode,
+  catalogProductBarcodeId:
+    financial?.product_barcode_id ||
+    financial?.catalogProductBarcodeId ||
+    product?.catalogProductBarcodeId,
   __selectedBrand: {
     ...brand,
     __selectedFinancial: financial,
@@ -374,6 +380,7 @@ const makeMkBarcode = ({
     pad(product_id, 4) +
     pad(brand_id, 3) +
     pad(category_id, 2) +
+    pad(unit_id, 2) +
     pad(parseInt(quantity || 0, 10), 3)
   );
 };
@@ -1062,8 +1069,8 @@ const ApplicationMigrationHelperPage = () => {
     rate_plan_id: "",
     rate_plan_mode: "manual",
     ...DEFAULT_OUTLET_RATE_PLAN,
-    mfg_date: "",
-    exp_date: "",
+    mfg_date: getRelativeDateInput(-1),
+    exp_date: getRelativeDateInput(90),
     sku_id: "",
     mk_barcode: "",
     vendor_barcode: "",
@@ -1280,6 +1287,7 @@ const ApplicationMigrationHelperPage = () => {
     if (!q || q.length < 2) return [];
 
     return productsList
+      .flatMap((item) => getProductFinancialOptions(item))
       .filter((item) => getProductSearchText(item).includes(q))
       .slice(0, 10);
   }, [barcode, productsList]);
@@ -1833,13 +1841,13 @@ const ApplicationMigrationHelperPage = () => {
       calculateDiscountPercent(price, sellingPrice)
     );
     setFinancialForm({
-      quantity: pickId(product?.quantity, product?.catalogQuantity, financial?.quantity, financial?.weight, ""),
+      quantity: pickId(product?.quantity, product?.catalogQuantity, financial?.quantity, financial?.weight, "") || "",
       unit_id: findCatalogUnit(units, pickId(product?.units, financial?.units))?.id || "",
-      price,
-      dprice: sellingPrice,
-      discount,
-      countInStock: pickId(product?.countInStock, financial?.countInStock, financial?.quantityInStock, ""),
-      barcode: preferredVendorBarcode || asArray(product?.barcode)[0] || asArray(financial?.barcode)[0] || barcode,
+      price: price || "",
+      dprice: sellingPrice || "",
+      discount: discount === undefined || discount === null ? "" : discount,
+      countInStock: pickId(product?.countInStock, financial?.countInStock, financial?.quantityInStock, "") || "",
+      barcode: preferredVendorBarcode || asArray(product?.barcode)[0] || asArray(financial?.barcode)[0] || barcode || "",
     });
     setOutletPostingForm((prev) => {
       const pricing = calculateDispatchPricing({
@@ -1856,17 +1864,21 @@ const ApplicationMigrationHelperPage = () => {
           financial?.quantityInStock,
           prev.no_of_units
         ),
-        unit_price: pricing.purchasePrice || prev.unit_price,
+        unit_price: pricing.purchasePrice || prev.unit_price || "",
         unit_mrp: sanitizeMoneyInput(price || unitMrp),
-        dispatch_price: sanitizeMoneyInput(sellingPrice),
+        dispatch_price: sanitizeMoneyInput(sellingPrice) || "",
         dispatch_discount:
           pricing.discount !== "" ? String(pricing.discount) : "",
         rate_plan_id: "",
         rate_plan_mode: "manual",
         ...DEFAULT_OUTLET_RATE_PLAN,
-        mfg_date: migrationMode === "lite" ? getRelativeDateInput(-1) : prev.mfg_date,
-        exp_date: migrationMode === "lite" ? getRelativeDateInput(90) : prev.exp_date,
-        mk_barcode: prev.mk_barcode || product?.mk_barcode || "",
+        mfg_date: ["lite", "outlet"].includes(migrationMode)
+          ? getRelativeDateInput(-1)
+          : prev.mfg_date,
+        exp_date: ["lite", "outlet"].includes(migrationMode)
+          ? getRelativeDateInput(90)
+          : prev.exp_date,
+        mk_barcode: financial?.mk_barcode || product?.mk_barcode || prev.mk_barcode || "",
         vendor_barcode:
           preferredVendorBarcode ||
           (prev.vendor_barcode &&
@@ -1932,6 +1944,8 @@ const ApplicationMigrationHelperPage = () => {
     const name = getProductName(product) || "";
     const packText = getFinancialPackText(product);
     const currentScannerBarcode = outletPostingForm.vendor_barcode;
+    const financial = getFirstFinancial(getFirstBrand(product));
+    const selectedMkBarcode = financial?.mk_barcode || product?.mk_barcode || "";
 
     setBarcodeAssignSearch([name, packText].filter(Boolean).join(" - "));
     setScannedProduct(product);
@@ -1939,7 +1953,7 @@ const ApplicationMigrationHelperPage = () => {
     setOutletPostingForm((prev) => ({
       ...prev,
       vendor_barcode: currentScannerBarcode || "",
-      mk_barcode: "",
+      mk_barcode: migrationMode === "barcodeAssign" ? "" : selectedMkBarcode,
     }));
     setBarcodeAssignLookupOpen(false);
     setStatus("Product financial selected. Scan or enter vendor barcode, then assign.");
@@ -2031,9 +2045,9 @@ const ApplicationMigrationHelperPage = () => {
       setScanMessage("Product found. Review details and start outlet migration.");
     } catch (error) {
       const q = normalizeText(scanned);
-      const productNameMatch = productsList.find((item) =>
-        getProductSearchText(item).includes(q)
-      );
+      const productNameMatch = productsList
+        .flatMap((item) => getProductFinancialOptions(item))
+        .find((item) => getProductSearchText(item).includes(q));
 
       if (productNameMatch) {
         selectLookupProduct(productNameMatch, scanned);
@@ -2143,9 +2157,20 @@ const ApplicationMigrationHelperPage = () => {
     const stockSelectedFinancial = getFirstFinancial(stockSelectedBrand);
     if (migrationInFlightRef.current) return;
     migrationInFlightRef.current = true;
-    const productID = pickId(stockScannedProduct?._id, stockScannedProduct?.id);
-    const brandID = pickId(stockScannedProduct?.brandId, stockSelectedBrand?._id, stockSelectedBrand?.id);
-    const financialID = pickId(stockScannedProduct?.financialId, stockSelectedFinancial?._id, stockSelectedFinancial?.id);
+    const selectedMongoProductName = getProductName(stockScannedProduct);
+    const shouldCreateMongoProduct =
+      stockScannedProduct &&
+      stockProductForm.product_name_eng &&
+      !sameNormalizedText(selectedMongoProductName, stockProductForm.product_name_eng);
+    const productID = shouldCreateMongoProduct
+      ? null
+      : pickId(stockScannedProduct?._id, stockScannedProduct?.id);
+    const brandID = shouldCreateMongoProduct
+      ? null
+      : pickId(stockScannedProduct?.brandId, stockSelectedBrand?._id, stockSelectedBrand?.id);
+    const financialID = shouldCreateMongoProduct
+      ? null
+      : pickId(stockScannedProduct?.financialId, stockSelectedFinancial?._id, stockSelectedFinancial?.id);
     const newQuantity = numberOrNull(stockFinancialForm.countInStock);
     const outletUnit = units.find((unit) => String(unit.id) === String(stockFinancialForm.unit_id));
     const pack = {
@@ -2188,10 +2213,19 @@ const ApplicationMigrationHelperPage = () => {
         stockProductForm.category_name
       );
       const migrationVendorBarcode =
-        lastOutletSearchBarcode ||
-        barcode.trim() ||
-        stockOutletPostingForm.vendor_barcode ||
-        stockFinancialForm.barcode;
+        String(stockOutletPostingForm.vendor_barcode || "").trim() || null;
+      const selectedCatalogProductBarcodeId = pickId(
+        stockSelectedFinancial?.product_barcode_id,
+        stockScannedProduct?.product_barcode_id,
+        stockSelectedFinancial?.catalogProductBarcodeId,
+        stockScannedProduct?.catalogProductBarcodeId,
+        stockSelectedFinancial?.mkid
+      );
+      const selectedCatalogBarcode = catalogBarcodes.find(
+        (item) =>
+          selectedCatalogProductBarcodeId &&
+          String(getEntityId(item) || item.id) === String(selectedCatalogProductBarcodeId)
+      );
       const base = await ensureSupplyChainBase({
         productName: stockProductForm.product_name_eng,
         productTeluguName: stockProductForm.product_name_tel,
@@ -2202,10 +2236,12 @@ const ApplicationMigrationHelperPage = () => {
         pack,
         mkBarcode: stockOutletPostingForm.mk_barcode,
         vendorBarcode: migrationVendorBarcode,
+        existingMkBarcode: selectedCatalogBarcode?.mk_barcode || "",
         existingProductId:
           bulkContext?.selectedCatalogProductId ||
           stockScannedProduct?.catalogProductId ||
           selectedCatalogProductId,
+        existingProductBarcodeId: selectedCatalogProductBarcodeId,
         existingBrandId: stockProductForm.brand_id,
         existingCategoryId: stockProductForm.category_id,
         existingUnitId: stockFinancialForm.unit_id,
@@ -2215,7 +2251,7 @@ const ApplicationMigrationHelperPage = () => {
         setOutletPostingForm((prev) => ({
           ...prev,
           mk_barcode: prev.mk_barcode || base.mkBarcode,
-          vendor_barcode: migrationVendorBarcode || base.vendorBarcode,
+          vendor_barcode: migrationVendorBarcode || "",
         }));
       }
 
@@ -2264,6 +2300,7 @@ const ApplicationMigrationHelperPage = () => {
         stockProductForm.brand_name,
         stockProductForm.product_name_eng
       );
+      const barcodePackQuantity = Number(base.quantity || pack.quantity || 1);
       currentStage = "purchase";
       markMigrationStage("outlet", "purchase", "running", "Creating verified migration purchase request.");
       const purchaseOrder = await dispatch(
@@ -2281,7 +2318,7 @@ const ApplicationMigrationHelperPage = () => {
               brand_id: base.brandId,
               unit_id: base.unitId,
               product_barcode_id: base.productBarcodeId,
-              qty: Number(pack.quantity),
+              qty: barcodePackQuantity,
               no_of_units: Number(stockOutletPostingForm.no_of_units || newQuantity || 1),
               expected_unit_price: migrationPurchaseUnitPrice,
               actual_unit_price: migrationPurchaseUnitPrice,
@@ -2291,7 +2328,7 @@ const ApplicationMigrationHelperPage = () => {
               brand_name: stockProductForm.brand_name,
               unit_name: pack.units,
               mk_barcode: base.mkBarcode,
-              barcode: migrationVendorBarcode || base.vendorBarcode,
+              barcode: migrationVendorBarcode,
             },
           ],
         })
@@ -2302,7 +2339,6 @@ const ApplicationMigrationHelperPage = () => {
       markMigrationStage("outlet", "purchase", "done", `Purchase request ready: ${order?.id || "created"}.`);
       currentStage = "inventory";
       markMigrationStage("outlet", "inventory", "running", "Adding received purchase units to inventory.");
-      console.log("inventoryUnitMrp before API:", inventoryUnitMrp);
       const inventoryResult = await dispatch(
         receiveVerifiedPurchaseToInventory({
           purchase_order_id: order?.id || null,
@@ -2320,7 +2356,7 @@ const ApplicationMigrationHelperPage = () => {
           warehouse_id: Number(stockOutletPostingForm.warehouse_id),
           supplier_id: Number(stockOutletPostingForm.supplier_id),
           stakeholders_id: Number(stockOutletPostingForm.supplier_id),
-          qty: Number(pack.quantity || 0),
+          qty: barcodePackQuantity,
           no_of_units: Number(stockOutletPostingForm.no_of_units || newQuantity || 1),
           add_to_existing_units: true,
           merge_existing_inventory: true,
@@ -2335,8 +2371,7 @@ const ApplicationMigrationHelperPage = () => {
 
       const inventoryProduct = inventoryResult?.inventoryProduct || inventoryResult?.data?.inventoryProduct || inventoryResult?.data || inventoryResult;
       const inventoryProductId = getEntityId(inventoryProduct);
-      const dispatchProductBarcodeId =
-        toRequiredNumber(inventoryProduct?.product_barcode_id) || base.productBarcodeId;
+      const dispatchProductBarcodeId = base.productBarcodeId;
       markMigrationStage(
         "outlet",
         "inventory",
@@ -2403,10 +2438,11 @@ const ApplicationMigrationHelperPage = () => {
               const confirmMessage = [
                 "Update outlet Mongo product with these details?",
                 `Product: ${purchaseProductName}`,
-                `Vendor barcode: ${migrationVendorBarcode || base.vendorBarcode || "-"}`,
+                `Vendor barcode: ${migrationVendorBarcode || "-"}`,
                 `MK barcode: ${base.mkBarcode || "-"}`,
                 `Outlet: ${outletName || "-"}`,
                 `Stock add: ${stockOutletPostingForm.no_of_units || newQuantity || 1}`,
+                `Mongo count in stock: ${newQuantity}`,
                 `MRP: Rs ${inventoryUnitMrp || 0}`,
                 `Selling price: Rs ${dispatchSalePrice || 0}`,
                 `Discount: ${dispatchDiscount || 0}%`,
@@ -2430,16 +2466,17 @@ const ApplicationMigrationHelperPage = () => {
                     mongo_product_id: productID || null,
                     mongo_detail_id: brandID || null,
                     mongo_financial_id: financialID || null,
+                    force_new_mongo_product: Boolean(shouldCreateMongoProduct),
                     mk_barcode: base.mkBarcode,
-                    vendor_barcode: migrationVendorBarcode || base.vendorBarcode,
-                    barcode: migrationVendorBarcode || base.vendorBarcode,
+                    vendor_barcode: migrationVendorBarcode,
+                    barcode: migrationVendorBarcode,
                     unit_mrp: inventoryUnitMrp,
                     dprice: dispatchSalePrice,
                     package_amount: dispatchSalePrice,
                     selling_price: dispatchSalePrice,
                     price: inventoryUnitMrp,
                     discount: dispatchDiscount,
-                    countInStock: Number(stockOutletPostingForm.no_of_units || newQuantity || 0),
+                    countInStock: Number(newQuantity),
                     mfg_date: stockOutletPostingForm.mfg_date || null,
                     exp_date: stockOutletPostingForm.exp_date || null,
                     image_url: resolvedImageUrl || existingImageUrl || imageUrl || null,
@@ -2639,8 +2676,7 @@ const ApplicationMigrationHelperPage = () => {
             updateFields: {
               catalogProductBarcodeId: base.productBarcodeId,
               mkid: base.productBarcodeId,
-              MK_BARCODE: base.mkBarcode,
-              mkBarcode: base.mkBarcode,
+              mk_barcode: base.mkBarcode,
               barcode: uniqueValues([vendorBarcode, base.mkBarcode]),
             },
           },
@@ -2727,12 +2763,12 @@ const ApplicationMigrationHelperPage = () => {
     const financial = getFirstFinancial(brand);
 
     return pickId(
-      product?.catalogProductBarcodeId,
+      financial?.product_barcode_id,
       product?.product_barcode_id,
       product?.barcode_id,
+      financial?.barcode_id,
       financial?.catalogProductBarcodeId,
-      financial?.product_barcode_id,
-      financial?.barcode_id
+      product?.catalogProductBarcodeId
     );
   };
 
@@ -2977,7 +3013,7 @@ const ApplicationMigrationHelperPage = () => {
   };
 
   useEffect(() => {
-    if (migrationMode !== "lite") return;
+    if (!["lite", "outlet"].includes(migrationMode)) return;
 
     const defaultWarehouse = warehouses.find((item) =>
       getEntitySearchText(item).includes("gouthami")
@@ -2998,8 +3034,8 @@ const ApplicationMigrationHelperPage = () => {
         rate_plan_id: "",
         rate_plan_mode: "manual",
         ...DEFAULT_OUTLET_RATE_PLAN,
-        mfg_date: prev.mfg_date || getRelativeDateInput(-1),
-        exp_date: prev.exp_date || getRelativeDateInput(90),
+        mfg_date: getRelativeDateInput(-1),
+        exp_date: getRelativeDateInput(90),
         remarks: prev.remarks || "Lite outlet migration stock entry",
       })
     );
@@ -3533,9 +3569,10 @@ const ApplicationMigrationHelperPage = () => {
     hsnCode,
     gstRate,
     pack,
-    mkBarcode,
     vendorBarcode,
+    existingMkBarcode,
     existingProductId,
+    existingProductBarcodeId,
     existingBrandId,
     existingCategoryId,
     existingUnitId,
@@ -3569,6 +3606,13 @@ const ApplicationMigrationHelperPage = () => {
     const existingProductMatch = catalogProducts.find(
       (product) => String(product.id) === String(existingProductId)
     );
+    const existingProductMatchesName =
+      existingProductMatch &&
+      [
+        existingProductMatch.product_name_eng,
+        existingProductMatch.product_name_tel,
+        existingProductMatch.product_code,
+      ].some((value) => sameNormalizedText(value, productName));
     const existingBrandMatch = catalogBrands.find(
       (brand) => String(brand.id) === String(existingBrandId)
     );
@@ -3594,7 +3638,7 @@ const ApplicationMigrationHelperPage = () => {
         existingCategoryMatch.category_name,
         existingCategoryMatch.name,
       ].some((value) => sameNormalizedText(value, categoryName));
-    let productId = existingProductMatch?.id || productMatch?.id;
+    let productId = existingProductMatchesName ? existingProductMatch?.id : productMatch?.id;
     let brandId = brandMatch?.id || (existingBrandMatchesName ? existingBrandMatch?.id : null);
     let categoryId =
       categoryMatch?.id || (existingCategoryMatchesName ? existingCategoryMatch?.id : null);
@@ -3735,9 +3779,7 @@ const ApplicationMigrationHelperPage = () => {
       markMigrationStage(stageMode, "barcode", "running", "Checking product_barcode row.");
     }
 
-    const finalMkBarcode =
-      mkBarcode ||
-      makeMkBarcode({
+    const generatedMkBarcode = makeMkBarcode({
         product_id: productIdNumber,
         brand_id: brandIdNumber,
         category_id: categoryIdNumber,
@@ -3745,22 +3787,42 @@ const ApplicationMigrationHelperPage = () => {
         quantity: pack.quantity,
       });
 
+    const targetQuantity = Number(pack.quantity);
+    const barcodeMatchesSelectedPack = (item) =>
+      String(item.product_id) === String(productIdNumber) &&
+      String(item.brand_id) === String(brandIdNumber) &&
+      String(item.category_id) === String(categoryIdNumber) &&
+      String(item.unit_id) === String(unitIdNumber) &&
+      Number(item.quantity) === targetQuantity;
+
     let barcodeRow = catalogBarcodes.find(
       (item) =>
-        vendorBarcode &&
-        (String(item.barcode || "") === String(vendorBarcode) ||
-          String(item.mk_barcode || "") === String(vendorBarcode))
+        existingProductBarcodeId &&
+        String(getEntityId(item) || item.id) === String(existingProductBarcodeId)
     );
 
     if (!barcodeRow) {
       barcodeRow = catalogBarcodes.find(
-      (item) =>
-        String(item.product_id) === String(productIdNumber) &&
-        String(item.brand_id) === String(brandIdNumber) &&
-        String(item.category_id) === String(categoryIdNumber) &&
-        String(item.unit_id) === String(unitIdNumber) &&
-        Number(item.quantity) === Number(pack.quantity) &&
-        (!vendorBarcode || !item.barcode || String(item.barcode) === String(vendorBarcode))
+        (item) =>
+          existingMkBarcode &&
+          String(item.mk_barcode || "") === String(existingMkBarcode)
+      );
+    }
+
+    if (!barcodeRow) {
+      barcodeRow = catalogBarcodes.find(
+        (item) =>
+          barcodeMatchesSelectedPack(item) &&
+          (!vendorBarcode || !item.barcode || String(item.barcode) === String(vendorBarcode))
+      );
+    }
+
+    if (!barcodeRow && vendorBarcode) {
+      barcodeRow = catalogBarcodes.find(
+        (item) =>
+          barcodeMatchesSelectedPack(item) &&
+          (String(item.barcode || "") === String(vendorBarcode) ||
+            String(item.mk_barcode || "") === String(vendorBarcode))
       );
     }
 
@@ -3777,7 +3839,7 @@ const ApplicationMigrationHelperPage = () => {
             unit_id: unitIdNumber,
             quantity: Number(pack.quantity),
             barcode: vendorBarcode || null,
-            mk_barcode: finalMkBarcode,
+            mk_barcode: generatedMkBarcode,
           },
         })
       ).unwrap();
@@ -3792,6 +3854,7 @@ const ApplicationMigrationHelperPage = () => {
     const barcodeBrandId = toRequiredNumber(barcodeRow?.brand_id) || brandIdNumber;
     const barcodeCategoryId = toRequiredNumber(barcodeRow?.category_id) || categoryIdNumber;
     const barcodeUnitId = toRequiredNumber(barcodeRow?.unit_id) || unitIdNumber;
+    const finalMkBarcode = barcodeRow?.mk_barcode || generatedMkBarcode;
 
     if (stageMode) {
       const reusedDifferentBarcode =
@@ -3816,6 +3879,7 @@ const ApplicationMigrationHelperPage = () => {
       brandId: barcodeBrandId,
       categoryId: barcodeCategoryId,
       unitId: barcodeUnitId,
+      quantity: Number(barcodeRow?.quantity || pack.quantity || 0),
       productBarcodeId,
       mkBarcode: barcodeRow?.mk_barcode || finalMkBarcode,
       vendorBarcode: barcodeRow?.barcode || vendorBarcode || "",
@@ -4088,7 +4152,6 @@ const ApplicationMigrationHelperPage = () => {
         "running",
         "If stock exists, add no. of units; otherwise insert new inventory entry."
       );
-      console.log("inventoryUnitMrp before API:", inventoryUnitMrp);
       const inventoryResult = await dispatch(
         receiveVerifiedPurchaseToInventory({
           purchase_order_id: order?.id || null,
@@ -5273,7 +5336,10 @@ const ApplicationMigrationHelperPage = () => {
         <section className="flex flex-wrap gap-2 rounded-lg border bg-white p-3 shadow-sm">
           <button
             type="button"
-            onClick={() => setMigrationMode("outlet")}
+            onClick={() => {
+              setMigrationMode("outlet");
+              resetLiteDefaultDates();
+            }}
             className={`${buttonClass} ${
               migrationMode === "outlet"
                 ? "bg-blue-600 text-white"
