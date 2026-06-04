@@ -159,3 +159,121 @@ export const getPackingConfigurationsFromNotes = (item) => {
     };
   });
 };
+
+const getQuantityBaseUnits = (quantity, unitCode) => {
+  const qty = Number(quantity || 0);
+  const normalizedUnit = String(unitCode || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\./g, '');
+
+  if (!Number.isFinite(qty) || qty <= 0) return 0;
+  if (normalizedUnit.startsWith('kg')) return qty * 1000;
+  if (
+    normalizedUnit.startsWith('gm') ||
+    normalizedUnit.startsWith('gms') ||
+    normalizedUnit === 'g'
+  ) {
+    return qty;
+  }
+
+  return qty;
+};
+
+const isWeightUnitCode = (unitCode) => {
+  const normalizedUnit = String(unitCode || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\./g, '');
+
+  return (
+    normalizedUnit.startsWith('kg') ||
+    normalizedUnit.startsWith('gm') ||
+    normalizedUnit.startsWith('gms') ||
+    normalizedUnit === 'g'
+  );
+};
+
+const positiveNumber = (...values) => {
+  for (const value of values) {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric) && numeric > 0) return numeric;
+  }
+
+  return null;
+};
+
+export const getCalculatedPackingAmounts = (item = {}, config = {}) => {
+  const explicitPackageAmount = positiveNumber(
+    config.package_amount,
+    config.packageAmount,
+    config.purchase_amount,
+    config.purchaseAmount
+  );
+  const explicitMrp = positiveNumber(config.mrp_amount, config.mrpAmount, config.MRP, config.mrp);
+
+  const sourcePrice = positiveNumber(item.unit_price, item.package_amount, item.packageAmount);
+  const sourceUnit =
+    item.unit_short_code || item.unit_code || item.unit_name || item.units || item.unit;
+  const configList = getDispatchItemPackingConfigurations(item);
+  const sourcePackConfig = config.source_pack_quantity
+    ? config
+    : configList.find((row) => row.source_pack_quantity);
+  const sourcePackBaseQty = getQuantityBaseUnits(
+    sourcePackConfig?.source_pack_quantity,
+    sourcePackConfig?.source_pack_unit_short_code || sourcePackConfig?.source_pack_unit
+  );
+  const rawSourceBaseQty = sourcePackBaseQty || getQuantityBaseUnits(
+    item.barcode_quantity || item.quantity,
+    sourceUnit
+  );
+  const totalPackedBaseQty = configList.reduce(
+    (sum, row) =>
+      sum +
+      getQuantityBaseUnits(
+        row.barcode_quantity || row.quantity,
+        row.unit_short_code || row.unit_code || row.unit_name || row.units || row.unit
+      ) *
+        Number(row.pack_count || row.qty || 0),
+    0
+  );
+  const sourceUnits = positiveNumber(item.no_of_units, item.qty) || 1;
+  const sourceBaseQty =
+    !isWeightUnitCode(sourceUnit) && totalPackedBaseQty
+      ? totalPackedBaseQty / sourceUnits
+      : rawSourceBaseQty;
+  const packedBaseQty = getQuantityBaseUnits(
+    config.barcode_quantity || config.quantity,
+    config.unit_short_code || config.unit_code || config.unit_name || config.units || config.unit
+  );
+
+  const baseAmount =
+    sourcePrice && sourceBaseQty && packedBaseQty
+      ? (sourcePrice / sourceBaseQty) * packedBaseQty
+      : null;
+  const percentTotal =
+    Number(config.margin_percentage || 0) +
+    Number(config.labour_percentage || 0) +
+    Number(config.transport_percentage || 0) +
+    Number(config.load_percentage || 0) +
+    Number(config.unload_percentage || 0);
+  const calculatedPackageAmount =
+    baseAmount ? Math.ceil(baseAmount + (baseAmount * percentTotal) / 100) : null;
+  const useCalculatedPackageAmount =
+    calculatedPackageAmount &&
+    (!explicitPackageAmount || explicitPackageAmount > calculatedPackageAmount * 10);
+  const packageAmount = useCalculatedPackageAmount
+    ? calculatedPackageAmount
+    : explicitPackageAmount ?? calculatedPackageAmount;
+  const calculatedMrp = packageAmount ? Math.round(packageAmount * 1.25) : null;
+  const useCalculatedMrp = calculatedMrp && (!explicitMrp || explicitMrp > calculatedMrp * 10);
+  const mrpAmount =
+    useCalculatedMrp
+      ? calculatedMrp
+      : explicitMrp ?? positiveNumber(config.unit_mrp, config.unitMRP) ?? calculatedMrp;
+
+  return {
+    packageAmount,
+    mrpAmount,
+  };
+};

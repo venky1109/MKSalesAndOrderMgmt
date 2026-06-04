@@ -22,6 +22,7 @@ import {
   formatDispatchDate,
   getDispatchItemBarcode,
   getDispatchItemBrand,
+  getCalculatedPackingAmounts,
   getDispatchItemCategory,
   getDispatchItemPackingConfigurations,
   getDispatchItemProductName,
@@ -408,25 +409,46 @@ const DispatchOrdersSection = ({ orders = [], loading = false, catalogBarcodes =
         ];
       }
 
-      return configs.map((config) => ({
-        dispatch_order_item_id: item.id,
-        product_barcode_id: config.product_barcode_id,
-        MK_BARCODE: config.mk_barcode || config.barcode || config.bar_code || '',
-        barcode: config.mk_barcode || config.barcode || config.bar_code || '',
-        image_url: config.image_url || config.imageUrl || item.image_url || item.imageUrl || '',
-        qty: Number(config.pack_count || config.qty || 0),
-        no_of_units: Number(config.pack_count || config.qty || 0),
-        price: Number(firstValue(config.mrp_amount, config.mrp, 0)),
-        dprice: Number(
-          firstValue(
-            config.package_amount,
-            config.dprice,
-            config.discount_price,
-            config.discounted_price,
-            0
-          )
-        ),
-      }));
+      return configs.map((config) => {
+        const catalogBarcode =
+          catalogBarcodes.find(
+            (barcode) =>
+              String(barcode.id || barcode.product_barcode_id) ===
+              String(config.product_barcode_id)
+          ) || {};
+        const mergedConfig = {
+          ...catalogBarcode,
+          ...config,
+          barcode_quantity:
+            config.barcode_quantity ||
+            catalogBarcode.quantity ||
+            catalogBarcode.barcode_quantity,
+          unit_short_code:
+            config.unit_short_code || catalogBarcode.unit_short_code || catalogBarcode.unit_name,
+        };
+        const calculatedAmounts = getCalculatedPackingAmounts(item, mergedConfig);
+
+        return {
+          dispatch_order_item_id: item.id,
+          product_barcode_id: config.product_barcode_id,
+          MK_BARCODE: config.mk_barcode || config.barcode || config.bar_code || '',
+          barcode: config.mk_barcode || config.barcode || config.bar_code || '',
+          image_url: config.image_url || config.imageUrl || item.image_url || item.imageUrl || '',
+          qty: Number(config.pack_count || config.qty || 0),
+          no_of_units: Number(config.pack_count || config.qty || 0),
+          price: Number(firstValue(config.mrp_amount, config.mrp, calculatedAmounts.mrpAmount, 0)),
+          dprice: Number(
+            firstValue(
+              config.package_amount,
+              config.dprice,
+              config.discount_price,
+              config.discounted_price,
+              calculatedAmounts.packageAmount,
+              0
+            )
+          ),
+        };
+      });
     });
 
   const openLabelDialog = (order, shouldMarkDone = false) => {
@@ -606,6 +628,7 @@ const DispatchOrdersSection = ({ orders = [], loading = false, catalogBarcodes =
               catalogBarcode.mk_barcode ||
               noteConfig.barcode,
           };
+          const calculatedAmounts = getCalculatedPackingAmounts(item, mergedConfig);
 
           return {
           ...item,
@@ -630,12 +653,14 @@ const DispatchOrdersSection = ({ orders = [], loading = false, catalogBarcodes =
               .filter(Boolean)
               .join(' | ') || item.notes,
           unit_price:
+            calculatedAmounts.packageAmount ||
             mergedConfig.package_amount ||
             mergedConfig.packageAmount ||
             mergedConfig.purchase_amount ||
             mergedConfig.purchaseAmount ||
             item.unit_price,
           unit_mrp:
+            calculatedAmounts.mrpAmount ||
             mergedConfig.mrp_amount ||
             mergedConfig.mrpAmount ||
             mergedConfig.MRP ||

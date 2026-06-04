@@ -6,6 +6,7 @@ import {
   AlertTriangle,
   Barcode,
   Clock3,
+  Download,
   ImagePlus,
   ListChecks,
   PackagePlus,
@@ -18,7 +19,6 @@ import {
 import StockManagerLayout from "../components/StockManagerLayout";
 import {
   fetchAllProductsFresh,
-  fetchProductByBarcode,
   updateProduct,
 } from "../features/products/productSlice";
 import {
@@ -110,12 +110,25 @@ const getProductImageUrl = (product) => {
   return "";
 };
 
+const getMigrationImageUrl = (...sources) => {
+  for (const source of sources) {
+    const url =
+      source?.image_url ||
+      source?.imageUrl ||
+      source?.product_image_url ||
+      source?.image ||
+      source?.url ||
+      getProductImageUrl(source);
+    if (url) return url;
+  }
+
+  return "";
+};
+
 const getProductBarcodes = (product) => [
   ...asArray(product?.barcode),
-  product?.mk_barcode,
   product?.mkid,
   product?.barcodeValue,
-  getFirstFinancial(getFirstBrand(product))?.mk_barcode,
   ...asArray(getFirstFinancial(getFirstBrand(product))?.barcode),
 ].filter(Boolean);
 
@@ -170,7 +183,59 @@ const getProductSearchText = (product) =>
     product?.category_name,
     getBrandName(getFirstBrand(product)),
     getFinancialPackText(product),
-    ...getProductBarcodes(product),
+  ]
+  .filter(Boolean)
+  .join(" ")
+  .toLowerCase();
+
+const findMongoFinancialForCatalogBarcode = (products, catalogBarcodeRow) => {
+  if (!catalogBarcodeRow) return null;
+
+  const selectedMkBarcode = normalizeText(catalogBarcodeRow.mk_barcode);
+  if (!selectedMkBarcode) return null;
+
+  return products
+    .flatMap((product) => getProductFinancialOptions(product))
+    .map((product) => ({
+      product,
+      brand: getFirstBrand(product),
+      financial: getFirstFinancial(getFirstBrand(product)),
+    }))
+    .find(({ financial }) => normalizeText(financial?.mk_barcode) === selectedMkBarcode);
+};
+
+const uniqueMongoProductSuggestions = (products, query) => {
+  const seen = new Set();
+
+  return products
+    .filter((item) => getProductSearchText(item).includes(query))
+    .filter((item) => {
+      const key = normalizeText(
+        pickId(item?._id, item?.id, item?.catalogProductId, item?.name, item?.productname)
+      );
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .map((item) => ({ ...item, __migrationSource: "mongo" }));
+};
+
+const getInventoryMigrationSearchText = (item) =>
+  [
+    item?.product_name,
+    item?.product_name_eng,
+    item?.productName,
+    item?.product_code,
+    item?.brand_name,
+    item?.brand_name_english,
+    item?.category_name,
+    item?.category_name_english,
+    item?.sku_id,
+    item?.mk_barcode,
+    item?.quantity,
+    item?.barcode_quantity,
+    item?.unit_name,
+    item?.unit_short_code,
   ]
     .filter(Boolean)
     .join(" ")
@@ -659,6 +724,19 @@ const getUnitMrpValue = (...sources) =>
     ])
   );
 
+const getUnitPurchasePriceValue = (...sources) =>
+  pickId(
+    ...sources.flatMap((source) => [
+      source?.unit_price,
+      source?.inventory_unit_price,
+      source?.purchase_price,
+      source?.purchasePrice,
+      source?.actual_unit_price,
+      source?.expected_unit_price,
+      source?.price_per_unit,
+    ])
+  );
+
 const bulkColumnAliases = {
   productName: ["product name", "product nam", "product nar", "productname", "product", "name"],
   noOfUnits: ["no:of units", "no of units", "no.of units", "units", "stock", "count in stock"],
@@ -1068,6 +1146,7 @@ const ApplicationMigrationHelperPage = () => {
     dispatch_discount: "",
     rate_plan_id: "",
     rate_plan_mode: "manual",
+    pricing_source: "mongo",
     ...DEFAULT_OUTLET_RATE_PLAN,
     mfg_date: getRelativeDateInput(-1),
     exp_date: getRelativeDateInput(90),
@@ -1119,6 +1198,13 @@ const ApplicationMigrationHelperPage = () => {
   const [bulkRows, setBulkRows] = useState([]);
   const [bulkRunning, setBulkRunning] = useState(false);
   const [bulkMessage, setBulkMessage] = useState("");
+  const [manualDraftRows, setManualDraftRows] = useState([]);
+  const [manualPendingFinancials, setManualPendingFinancials] = useState([]);
+  const [manualDraftRunning, setManualDraftRunning] = useState(false);
+  const [manualDraftMessage, setManualDraftMessage] = useState("");
+  const [manualSelectedFinancialId, setManualSelectedFinancialId] = useState("");
+  const [manualMigrationDestination, setManualMigrationDestination] = useState("outlet");
+  const [manualProductLookupOpen, setManualProductLookupOpen] = useState(false);
   const [trackingStatusFilter, setTrackingStatusFilter] = useState("failed");
   const [trackingRequests, setTrackingRequests] = useState([]);
   const [trackingSelectedRequest, setTrackingSelectedRequest] = useState(null);
@@ -1302,6 +1388,47 @@ const ApplicationMigrationHelperPage = () => {
       .slice(0, 12);
   }, [barcodeAssignSearch, productsList]);
 
+  const liteMigrationMatches = useMemo(() => {
+    const q = normalizeText(barcodeAssignSearch);
+    if (!q || q.length < 2) return [];
+
+    const mongoMatches = uniqueMongoProductSuggestions(productsList, q);
+
+    const inventoryMatches = inventoryProducts
+      .filter((item) => getInventoryMigrationSearchText(item).includes(q))
+      .map((item) => ({ ...item, __migrationSource: "inventory" }));
+
+    return [...mongoMatches, ...inventoryMatches].slice(0, 16);
+  }, [barcodeAssignSearch, inventoryProducts, productsList]);
+
+  const manualMigrationMatches = useMemo(() => {
+    const q = normalizeText(productForm.product_name_eng);
+    if (!q || q.length < 2) return [];
+
+    const mongoMatches = uniqueMongoProductSuggestions(productsList, q);
+    const seenInventoryProducts = new Set();
+
+    const inventoryMatches = inventoryProducts
+      .filter((item) => getInventoryMigrationSearchText(item).includes(q))
+      .filter((item) => {
+        const key = normalizeText(
+          pickId(
+            item.product_id,
+            item.catalog_product_id,
+            item.product_name_eng,
+            item.product_name,
+            item.productName
+          )
+        );
+        if (!key || seenInventoryProducts.has(key)) return false;
+        seenInventoryProducts.add(key);
+        return true;
+      })
+      .map((item) => ({ ...item, __migrationSource: "inventory" }));
+
+    return [...mongoMatches, ...inventoryMatches].slice(0, 16);
+  }, [inventoryProducts, productForm.product_name_eng, productsList]);
+
   useEffect(() => {
     const q = barcode.trim();
 
@@ -1334,7 +1461,6 @@ const ApplicationMigrationHelperPage = () => {
           item.brand_name_english,
           item.category_name_english,
           item.mk_barcode,
-          item.barcode,
           item.quantity,
           item.barcode_quantity,
           item.weight,
@@ -1808,7 +1934,7 @@ const ApplicationMigrationHelperPage = () => {
     const brand = getFirstBrand(product);
     const financial = getFirstFinancial(brand);
     const name = getProductName(product);
-    const image = getProductImageUrl(product);
+    const image = getMigrationImageUrl(product, brand, financial);
     const unitMrp = getUnitMrpValue(product, financial);
 
     setProductName(name);
@@ -1871,6 +1997,7 @@ const ApplicationMigrationHelperPage = () => {
           pricing.discount !== "" ? String(pricing.discount) : "",
         rate_plan_id: "",
         rate_plan_mode: "manual",
+        pricing_source: "mongo",
         ...DEFAULT_OUTLET_RATE_PLAN,
         mfg_date: ["lite", "outlet"].includes(migrationMode)
           ? getRelativeDateInput(-1)
@@ -1959,6 +2086,133 @@ const ApplicationMigrationHelperPage = () => {
     setStatus("Product financial selected. Scan or enter vendor barcode, then assign.");
   };
 
+  const selectLiteInventoryProduct = (item) => {
+    const catalogBarcode = catalogBarcodes.find(
+      (barcodeRow) =>
+        String(getEntityId(barcodeRow) || barcodeRow.id) ===
+        String(item.product_barcode_id || item.barcode_id || "")
+    );
+    const source = catalogBarcode || item;
+    const name =
+      source.product_name_eng ||
+      source.product_name ||
+      item.product_name ||
+      item.productName ||
+      "";
+    const brandName =
+      source.brand_name_english || source.brand_name || item.brand_name || "";
+    const categoryName =
+      source.category_name_english || source.category_name || item.category_name || "";
+    const packQuantity = getBarcodeQuantity(source) || item.quantity || "";
+    const packUnit = getBarcodeWeight(source) || item.unit_short_code || item.unit_name || "";
+    const unitMatch = findCatalogUnit(units, packUnit);
+    const purchasePrice = sanitizeMoneyInput(getUnitPurchasePriceValue(item));
+    const mrp = sanitizeMoneyInput(getUnitMrpValue(item, source));
+    const pricing = calculateDispatchPricing({
+      purchasePrice,
+      mrp,
+      ratePlan: DEFAULT_OUTLET_RATE_PLAN,
+    });
+    const salePrice = pricing.salePrice || "";
+
+    setBarcodeAssignSearch([name, makeWeightPack(packQuantity, packUnit), "Inventory"].filter(Boolean).join(" - "));
+    setSelectedCatalogProductId(source.product_id || item.product_id || "");
+    setScannedProduct(null);
+    const image = getMigrationImageUrl(source, item);
+    setExistingImageUrl(image);
+    setResolvedImageUrl(image);
+    setImageUrl(image);
+    setProductName(name);
+    setProductForm((prev) =>
+      applyHsnGstFallback(
+        {
+          ...prev,
+          product_name_eng: name,
+          product_name_tel: source.product_name_tel || "",
+          brand_id: source.brand_id || "",
+          brand_name: brandName,
+          category_id: source.category_id || "",
+          category_name: categoryName,
+          hsn_code: source.hsncode || source.hsn_code || "",
+          gst_rate: source.gst_rate || source.gst || "",
+        },
+        name,
+        categoryName
+      )
+    );
+    setFinancialForm((prev) => ({
+      ...prev,
+      quantity: packQuantity || "",
+      unit_id: unitMatch?.id || "",
+      price: mrp || "",
+      dprice: salePrice || "",
+      discount: pricing.discount === "" ? "" : pricing.discount,
+      countInStock: pickId(item.no_of_units, item.stock, item.countInStock, prev.countInStock, ""),
+      barcode: source.barcode || "",
+    }));
+    setOutletPostingForm((prev) => ({
+      ...prev,
+      unit_price: purchasePrice || "",
+      unit_mrp: mrp || "",
+      dispatch_price: salePrice || "",
+      dispatch_discount: pricing.discount === "" ? "" : String(pricing.discount),
+      rate_plan_id: "",
+      rate_plan_mode: "manual",
+      pricing_source: "inventory",
+      ...DEFAULT_OUTLET_RATE_PLAN,
+      mk_barcode: source.mk_barcode || "",
+      vendor_barcode: source.barcode || "",
+      mfg_date: getRelativeDateInput(-1),
+      exp_date: getRelativeDateInput(90),
+    }));
+    setBarcodeAssignLookupOpen(false);
+    setStatus(mrp ? "Inventory product selected. Selling price calculated from purchase price." : "Inventory product selected. Enter MRP, then review selling price.");
+  };
+
+  const selectLiteMigrationSuggestion = (item) => {
+    if (item?.__migrationSource === "inventory") {
+      selectLiteInventoryProduct(item);
+      return;
+    }
+
+    selectBarcodeAssignProduct(item);
+  };
+
+  const selectManualMigrationSuggestion = (item) => {
+    if (item?.__migrationSource === "inventory") {
+      const catalogBarcode = catalogBarcodes.find(
+        (barcodeRow) =>
+          String(getEntityId(barcodeRow) || barcodeRow.id) ===
+          String(item.product_barcode_id || item.barcode_id || "")
+      );
+      setSelectedCatalogProductId(catalogBarcode?.product_id || item.product_id || "");
+      setManualMigrationDestination("inventory");
+      selectLiteInventoryProduct(item);
+    } else {
+      const financial = getFirstFinancial(getFirstBrand(item));
+      const catalogBarcode = catalogBarcodes.find(
+        (barcodeRow) =>
+          String(getEntityId(barcodeRow) || barcodeRow.id) ===
+          String(
+            financial?.product_barcode_id ||
+              financial?.catalogProductBarcodeId ||
+              item?.product_barcode_id ||
+              item?.catalogProductBarcodeId ||
+              ""
+          )
+      );
+      setSelectedCatalogProductId(catalogBarcode?.product_id || item?.catalogProductId || "");
+      setManualMigrationDestination("outlet");
+      selectBarcodeAssignProduct(item);
+    }
+    setManualProductLookupOpen(false);
+    setManualDraftMessage(
+      item?.__migrationSource === "inventory"
+        ? "Inventory suggestion selected. Selling price is calculated from purchase price and rate parameters."
+        : "Mongo suggestion selected. Purchase price is calculated from selling price and rate parameters."
+    );
+  };
+
   const selectLegacyOutletProduct = (legacyProduct) => {
     const name = getProductName(legacyProduct);
     const barcodeValue = getLegacyBarcode(legacyProduct);
@@ -2016,6 +2270,7 @@ const ApplicationMigrationHelperPage = () => {
           pricing.discount !== "" ? String(pricing.discount) : "",
         rate_plan_id: "",
         rate_plan_mode: "manual",
+        pricing_source: "mongo",
         ...DEFAULT_OUTLET_RATE_PLAN,
         vendor_barcode: barcodeValue || prev.vendor_barcode,
         mk_barcode: legacyProduct?.mk_barcode || prev.mk_barcode,
@@ -2038,33 +2293,18 @@ const ApplicationMigrationHelperPage = () => {
     setStatus("");
 
     try {
-      const product = await dispatch(
-        fetchProductByBarcode({ barcode: scanned, token })
-      ).unwrap();
-      selectLookupProduct(product, scanned);
-      setScanMessage("Product found. Review details and start outlet migration.");
-    } catch (error) {
       const q = normalizeText(scanned);
-      const productNameMatch = productsList
-        .flatMap((item) => getProductFinancialOptions(item))
-        .find((item) => getProductSearchText(item).includes(q));
-
-      if (productNameMatch) {
-        selectLookupProduct(productNameMatch, scanned);
-        setScanMessage("Product found by name. Review details and start outlet migration.");
-        setBusy(false);
-        return;
-      }
-
       const catalogBarcodeMatch = catalogBarcodes.find(
-        (item) => normalizeText(item.mk_barcode) === q || normalizeText(item.barcode) === q
+        (item) => normalizeText(item.mk_barcode) === q
       );
 
       if (catalogBarcodeMatch) {
         setScannedProduct(null);
-        setExistingImageUrl(catalogBarcodeMatch.image_url || "");
-        setResolvedImageUrl(catalogBarcodeMatch.image_url || "");
-        setImageUrl(catalogBarcodeMatch.image_url || "");
+        setSelectedCatalogProductId(catalogBarcodeMatch.product_id || "");
+        const image = getMigrationImageUrl(catalogBarcodeMatch);
+        setExistingImageUrl(image);
+        setResolvedImageUrl(image);
+        setImageUrl(image);
         setProductName(catalogBarcodeMatch.product_name_eng || "");
         setProductForm((prev) =>
           applyHsnGstFallback(
@@ -2097,7 +2337,7 @@ const ApplicationMigrationHelperPage = () => {
             catalogBarcodeMatch.price,
             prev.dprice
           ),
-          barcode: catalogBarcodeMatch.barcode || scanned,
+          barcode: catalogBarcodeMatch.barcode || "",
         }));
         setOutletPostingForm((prev) => {
           const mrp = pickId(catalogBarcodeMatch.MRP, catalogBarcodeMatch.mrp, catalogBarcodeMatch.price, prev.unit_mrp);
@@ -2112,12 +2352,23 @@ const ApplicationMigrationHelperPage = () => {
             ...prev,
             unit_mrp: sanitizeMoneyInput(mrp),
             dispatch_price: sanitizeMoneyInput(sale),
-            vendor_barcode: catalogBarcodeMatch.barcode || scanned,
+            vendor_barcode: catalogBarcodeMatch.barcode || "",
             mk_barcode: catalogBarcodeMatch.mk_barcode || "",
           });
         });
         applyOutletRatePlanToForm(findRatePlanForBarcode(catalogBarcodeMatch.id), "existing");
         setScanMessage("Product found in PostgreSQL catalogue. Review outlet details and migrate.");
+        setBusy(false);
+        return;
+      }
+
+      const productNameMatch = productsList
+        .flatMap((item) => getProductFinancialOptions(item))
+        .find((item) => getProductSearchText(item).includes(q));
+
+      if (productNameMatch) {
+        selectLookupProduct(productNameMatch, "");
+        setScanMessage("Product found by name. Review details and start outlet migration.");
         setBusy(false);
         return;
       }
@@ -2172,6 +2423,12 @@ const ApplicationMigrationHelperPage = () => {
       ? null
       : pickId(stockScannedProduct?.financialId, stockSelectedFinancial?._id, stockSelectedFinancial?.id);
     const newQuantity = numberOrNull(stockFinancialForm.countInStock);
+    const migrationStockUnits = Number(
+      stockFinancialForm.countInStock ||
+        stockOutletPostingForm.no_of_units ||
+        newQuantity ||
+        1
+    );
     const outletUnit = units.find((unit) => String(unit.id) === String(stockFinancialForm.unit_id));
     const pack = {
       quantity: stockFinancialForm.quantity,
@@ -2212,8 +2469,7 @@ const ApplicationMigrationHelperPage = () => {
         stockProductName,
         stockProductForm.category_name
       );
-      const migrationVendorBarcode =
-        String(stockOutletPostingForm.vendor_barcode || "").trim() || null;
+      const migrationVendorBarcode = null;
       const selectedCatalogProductBarcodeId = pickId(
         stockSelectedFinancial?.product_barcode_id,
         stockScannedProduct?.product_barcode_id,
@@ -2255,24 +2511,9 @@ const ApplicationMigrationHelperPage = () => {
         }));
       }
 
-      let dispatchRatePlan = findRatePlanForBarcode(base.productBarcodeId);
-      if (dispatchRatePlan) {
-        applyOutletRatePlanToForm(dispatchRatePlan, "existing");
-      } else {
-        const manualPlan = {
-          ...getManualOutletRatePlan(stockOutletPostingForm),
-          product_barcode_id: base.productBarcodeId,
-        };
-        const createdRatePlan = await dispatch(
-          createCatalogEntity({
-            entity: "rate-plans",
-            payload: manualPlan,
-          })
-        ).unwrap();
-        dispatchRatePlan = createdRatePlan?.data || createdRatePlan;
-        dispatch(fetchCatalogEntity("rate-plans"));
-        applyOutletRatePlanToForm(dispatchRatePlan || manualPlan, "created");
-      }
+      const { plan: dispatchRatePlan, mode: dispatchRatePlanMode } =
+        await ensureOutletRatePlan(base.productBarcodeId, stockOutletPostingForm);
+      applyOutletRatePlanToForm(dispatchRatePlan, dispatchRatePlanMode);
 
       const inventoryUnitMrp = toMoneyNumber(stockOutletPostingForm.unit_mrp);
       const dispatchPricing = calculateDispatchPricing({
@@ -2319,7 +2560,7 @@ const ApplicationMigrationHelperPage = () => {
               unit_id: base.unitId,
               product_barcode_id: base.productBarcodeId,
               qty: barcodePackQuantity,
-              no_of_units: Number(stockOutletPostingForm.no_of_units || newQuantity || 1),
+              no_of_units: migrationStockUnits,
               expected_unit_price: migrationPurchaseUnitPrice,
               actual_unit_price: migrationPurchaseUnitPrice,
               unit_mrp: inventoryUnitMrp,
@@ -2328,7 +2569,7 @@ const ApplicationMigrationHelperPage = () => {
               brand_name: stockProductForm.brand_name,
               unit_name: pack.units,
               mk_barcode: base.mkBarcode,
-              barcode: migrationVendorBarcode,
+              barcode: null,
             },
           ],
         })
@@ -2357,7 +2598,7 @@ const ApplicationMigrationHelperPage = () => {
           supplier_id: Number(stockOutletPostingForm.supplier_id),
           stakeholders_id: Number(stockOutletPostingForm.supplier_id),
           qty: barcodePackQuantity,
-          no_of_units: Number(stockOutletPostingForm.no_of_units || newQuantity || 1),
+          no_of_units: migrationStockUnits,
           add_to_existing_units: true,
           merge_existing_inventory: true,
           unit_price: inventoryUnitPrice,
@@ -2395,8 +2636,8 @@ const ApplicationMigrationHelperPage = () => {
               {
                 inventory_product_id: Number(inventoryProductId),
                 product_barcode_id: dispatchProductBarcodeId,
-                qty: Number(stockOutletPostingForm.no_of_units || newQuantity || 1),
-                no_of_units: Number(stockOutletPostingForm.no_of_units || newQuantity || 1),
+                qty: migrationStockUnits,
+                no_of_units: migrationStockUnits,
                 unit_mrp: inventoryUnitMrp,
                 exp_date: stockOutletPostingForm.exp_date,
                 notes: `Migration dispatch | Sale Rs ${dispatchSalePrice} | Discount ${dispatchDiscount}%`,
@@ -2441,8 +2682,8 @@ const ApplicationMigrationHelperPage = () => {
                 `Vendor barcode: ${migrationVendorBarcode || "-"}`,
                 `MK barcode: ${base.mkBarcode || "-"}`,
                 `Outlet: ${outletName || "-"}`,
-                `Stock add: ${stockOutletPostingForm.no_of_units || newQuantity || 1}`,
-                `Mongo count in stock: ${newQuantity}`,
+                `Stock add: ${migrationStockUnits}`,
+                `Mongo count in stock: ${migrationStockUnits}`,
                 `MRP: Rs ${inventoryUnitMrp || 0}`,
                 `Selling price: Rs ${dispatchSalePrice || 0}`,
                 `Discount: ${dispatchDiscount || 0}%`,
@@ -2468,15 +2709,17 @@ const ApplicationMigrationHelperPage = () => {
                     mongo_financial_id: financialID || null,
                     force_new_mongo_product: Boolean(shouldCreateMongoProduct),
                     mk_barcode: base.mkBarcode,
-                    vendor_barcode: migrationVendorBarcode,
-                    barcode: migrationVendorBarcode,
+                    vendor_barcode: null,
+                    barcode: null,
                     unit_mrp: inventoryUnitMrp,
                     dprice: dispatchSalePrice,
                     package_amount: dispatchSalePrice,
                     selling_price: dispatchSalePrice,
                     price: inventoryUnitMrp,
                     discount: dispatchDiscount,
-                    countInStock: Number(newQuantity),
+                    countInStock: migrationStockUnits,
+                    stock_quantity: migrationStockUnits,
+                    target_stock: migrationStockUnits,
                     mfg_date: stockOutletPostingForm.mfg_date || null,
                     exp_date: stockOutletPostingForm.exp_date || null,
                     image_url: resolvedImageUrl || existingImageUrl || imageUrl || null,
@@ -2664,6 +2907,7 @@ const ApplicationMigrationHelperPage = () => {
         existingBrandId: productForm.brand_id,
         existingCategoryId: productForm.category_id,
         existingUnitId: financialForm.unit_id,
+        allowVendorBarcode: true,
         stageMode: null,
       });
 
@@ -2780,12 +3024,56 @@ const ApplicationMigrationHelperPage = () => {
     ) ||
     ratePlans.find((item) => String(item.product_barcode_id) === String(productBarcodeId));
 
+  const findRatePlanInList = (plans, productBarcodeId) =>
+    asArray(plans).find(
+      (item) =>
+        String(item.product_barcode_id) === String(productBarcodeId) &&
+        normalizeText(item.rate_for || "customer") === "customer"
+    ) ||
+    asArray(plans).find((item) => String(item.product_barcode_id) === String(productBarcodeId));
+
+  const ensureOutletRatePlan = async (productBarcodeId, form = outletPostingForm) => {
+    const existing = findRatePlanForBarcode(productBarcodeId);
+    if (existing) return { plan: existing, mode: "existing" };
+
+    const freshPayload = await dispatch(fetchCatalogEntity("rate-plans")).unwrap();
+    const freshPlan = findRatePlanInList(freshPayload?.data, productBarcodeId);
+    if (freshPlan) return { plan: freshPlan, mode: "existing" };
+
+    const manualPlan = {
+      ...getManualOutletRatePlan(form),
+      product_barcode_id: productBarcodeId,
+    };
+
+    try {
+      const createdRatePlan = await dispatch(
+        createCatalogEntity({
+          entity: "rate-plans",
+          payload: manualPlan,
+        })
+      ).unwrap();
+      return { plan: createdRatePlan?.data || createdRatePlan || manualPlan, mode: "created" };
+    } catch (error) {
+      if (!String(error?.message || error || "").toLowerCase().includes("duplicate key")) {
+        throw error;
+      }
+
+      const retryPayload = await dispatch(fetchCatalogEntity("rate-plans")).unwrap();
+      const retryPlan = findRatePlanInList(retryPayload?.data, productBarcodeId);
+      if (retryPlan) return { plan: retryPlan, mode: "existing" };
+
+      throw error;
+    }
+  };
+
   const applyOutletRatePlanToForm = (ratePlan, mode = "existing") => {
     if (!ratePlan) return;
 
     setOutletPostingForm((prev) => {
+      const usePurchaseSource = prev.pricing_source === "inventory";
       const pricing = calculateDispatchPricing({
-        sellingPrice: prev.dispatch_price || financialForm.dprice,
+        purchasePrice: usePurchaseSource ? prev.unit_price : undefined,
+        sellingPrice: usePurchaseSource ? undefined : prev.dispatch_price || financialForm.dprice,
         mrp: prev.unit_mrp,
         ratePlan,
       });
@@ -2800,7 +3088,7 @@ const ApplicationMigrationHelperPage = () => {
         transport_percentage: String(ratePlan.transport_percentage ?? ""),
         load_percentage: String(ratePlan.load_percentage ?? ""),
         unload_percentage: String(ratePlan.unload_percentage ?? ""),
-        unit_price: pricing.purchasePrice || prev.unit_price,
+        unit_price: usePurchaseSource ? prev.unit_price : pricing.purchasePrice || prev.unit_price,
         dispatch_price: pricing.salePrice || prev.dispatch_price || financialForm.dprice,
         dispatch_discount:
           pricing.discount !== "" ? String(pricing.discount) : prev.dispatch_discount,
@@ -2819,15 +3107,17 @@ const ApplicationMigrationHelperPage = () => {
   }, [scannedProduct, ratePlans, outletPostingForm.rate_plan_id]);
 
   const recalculateOutletDispatchPricing = (form) => {
+    const usePurchaseSource = form.pricing_source === "inventory";
     const pricing = calculateDispatchPricing({
-      sellingPrice: form.dispatch_price || financialForm.dprice,
+      purchasePrice: usePurchaseSource ? form.unit_price : undefined,
+      sellingPrice: usePurchaseSource ? undefined : form.dispatch_price || financialForm.dprice,
       mrp: form.unit_mrp,
       ratePlan: getManualOutletRatePlan(form),
     });
 
     return {
       ...form,
-      unit_price: pricing.purchasePrice || form.unit_price,
+      unit_price: usePurchaseSource ? form.unit_price : pricing.purchasePrice || "",
       dispatch_price: pricing.salePrice ? String(pricing.salePrice) : "",
       dispatch_discount: pricing.discount !== "" ? String(pricing.discount) : "",
     };
@@ -2861,10 +3151,19 @@ const ApplicationMigrationHelperPage = () => {
           "unload_percentage",
         ].includes(field)
       ) {
-        return recalculateOutletDispatchPricing({
+        const recalculated = recalculateOutletDispatchPricing({
           ...next,
           rate_plan_mode: next.rate_plan_id ? next.rate_plan_mode : "manual",
         });
+
+        setFinancialForm((financialPrev) => ({
+          ...financialPrev,
+          price: field === "unit_mrp" ? recalculated.unit_mrp : financialPrev.price,
+          dprice: recalculated.dispatch_price,
+          discount: recalculated.dispatch_discount,
+        }));
+
+        return recalculated;
       }
 
       return next;
@@ -2993,6 +3292,64 @@ const ApplicationMigrationHelperPage = () => {
     }));
   };
 
+  const resetManualMigrationForm = () => {
+    const defaultUnit = units.find((unit) =>
+      [unit.unit_short_code, unit.unit_name, unit.unit_code]
+        .filter(Boolean)
+        .some((value) => String(value).trim().toLowerCase() === "qty")
+    );
+
+    setBarcodeAssignSearch("");
+    setBarcodeAssignLookupOpen(false);
+    setScannedProduct(null);
+    setProductName("");
+    setSelectedCatalogProductId("");
+    setProductForm({
+      product_name_eng: "",
+      product_name_tel: "",
+      gst_rate: "",
+      hsn_code: "",
+      brand_id: "",
+      brand_name: "",
+      category_id: "",
+      category_name: "",
+    });
+    setFinancialForm({
+      ...emptyFinancial,
+      quantity: "1",
+      unit_id: defaultUnit?.id ? String(defaultUnit.id) : "",
+      countInStock: "",
+    });
+    setOutletPostingForm((prev) =>
+      recalculateOutletDispatchPricing({
+        ...prev,
+        batch_id: makeBatchId(),
+        no_of_units: "1",
+        unit_price: "",
+        unit_mrp: "",
+        dispatch_price: "",
+        dispatch_discount: "",
+        rate_plan_id: "",
+        rate_plan_mode: "manual",
+        pricing_source: "mongo",
+        ...DEFAULT_OUTLET_RATE_PLAN,
+        mfg_date: getRelativeDateInput(-1),
+        exp_date: getRelativeDateInput(90),
+        sku_id: "",
+        mk_barcode: "",
+        vendor_barcode: "",
+        remarks: "Manual outlet migration stock entry",
+      })
+    );
+    setImageName("");
+    setImageUrl("");
+    setExistingImageUrl("");
+    setResolvedImageUrl("");
+    setManualPendingFinancials([]);
+    setStatus("");
+    resetMigrationStages("outlet");
+  };
+
   const focusNextLiteField = (event) => {
     if (event.key !== "Enter") return;
     const current = event.target?.closest?.("[data-lite-field]");
@@ -3013,7 +3370,7 @@ const ApplicationMigrationHelperPage = () => {
   };
 
   useEffect(() => {
-    if (!["lite", "outlet"].includes(migrationMode)) return;
+    if (!["lite", "manual", "outlet"].includes(migrationMode)) return;
 
     const defaultWarehouse = warehouses.find((item) =>
       getEntitySearchText(item).includes("gouthami")
@@ -3187,7 +3544,7 @@ const ApplicationMigrationHelperPage = () => {
       inventoryForm.brand_name ||
       "";
     const categoryName = getCategoryName(item) || inventoryForm.category_name || "";
-    const image = getProductImageUrl(item);
+    const image = getMigrationImageUrl(item);
     const inventoryProduct = findInventoryProductForBarcode(item);
     const unitMrp = getUnitMrpValue(inventoryProduct, item);
 
@@ -3535,8 +3892,7 @@ const ApplicationMigrationHelperPage = () => {
     const exact =
       catalogBarcodes.find(
         (item) =>
-          normalizeText(item.mk_barcode) === q ||
-          normalizeText(item.barcode) === q
+          normalizeText(item.mk_barcode) === q
       ) || inventoryLookupMatches[0];
 
     if (exact) {
@@ -3576,6 +3932,7 @@ const ApplicationMigrationHelperPage = () => {
     existingBrandId,
     existingCategoryId,
     existingUnitId,
+    allowVendorBarcode = false,
     stageMode,
   }) => {
     if (stageMode) {
@@ -3798,31 +4155,23 @@ const ApplicationMigrationHelperPage = () => {
     let barcodeRow = catalogBarcodes.find(
       (item) =>
         existingProductBarcodeId &&
-        String(getEntityId(item) || item.id) === String(existingProductBarcodeId)
+        String(getEntityId(item) || item.id) === String(existingProductBarcodeId) &&
+        barcodeMatchesSelectedPack(item)
     );
 
     if (!barcodeRow) {
       barcodeRow = catalogBarcodes.find(
         (item) =>
           existingMkBarcode &&
-          String(item.mk_barcode || "") === String(existingMkBarcode)
+          String(item.mk_barcode || "") === String(existingMkBarcode) &&
+          barcodeMatchesSelectedPack(item)
       );
     }
 
     if (!barcodeRow) {
       barcodeRow = catalogBarcodes.find(
         (item) =>
-          barcodeMatchesSelectedPack(item) &&
-          (!vendorBarcode || !item.barcode || String(item.barcode) === String(vendorBarcode))
-      );
-    }
-
-    if (!barcodeRow && vendorBarcode) {
-      barcodeRow = catalogBarcodes.find(
-        (item) =>
-          barcodeMatchesSelectedPack(item) &&
-          (String(item.barcode || "") === String(vendorBarcode) ||
-            String(item.mk_barcode || "") === String(vendorBarcode))
+          barcodeMatchesSelectedPack(item)
       );
     }
 
@@ -3838,7 +4187,7 @@ const ApplicationMigrationHelperPage = () => {
             category_id: categoryIdNumber,
             unit_id: unitIdNumber,
             quantity: Number(pack.quantity),
-            barcode: vendorBarcode || null,
+            barcode: allowVendorBarcode ? vendorBarcode || null : null,
             mk_barcode: generatedMkBarcode,
           },
         })
@@ -3849,6 +4198,26 @@ const ApplicationMigrationHelperPage = () => {
 
     const productBarcodeId = toRequiredNumber(getEntityId(barcodeRow) || barcodeRow?.id);
     if (!productBarcodeId) throw new Error("Product barcode was not created correctly.");
+
+    const normalizedVendorBarcode = String(vendorBarcode || "").trim();
+    const existingVendorBarcode = String(barcodeRow?.barcode || "").trim();
+    if (allowVendorBarcode && normalizedVendorBarcode && normalizedVendorBarcode !== existingVendorBarcode) {
+      const updatedBarcode = await dispatch(
+        updateCatalogEntity({
+          entity: "product-barcodes",
+          id: productBarcodeId,
+          payload: {
+            barcode: normalizedVendorBarcode,
+          },
+        })
+      ).unwrap();
+      barcodeRow = {
+        ...barcodeRow,
+        ...(updatedBarcode?.data || updatedBarcode || {}),
+        barcode: normalizedVendorBarcode,
+      };
+      dispatch(fetchCatalogEntity("product-barcodes"));
+    }
 
     const barcodeProductId = toRequiredNumber(barcodeRow?.product_id) || productIdNumber;
     const barcodeBrandId = toRequiredNumber(barcodeRow?.brand_id) || brandIdNumber;
@@ -3882,7 +4251,7 @@ const ApplicationMigrationHelperPage = () => {
       quantity: Number(barcodeRow?.quantity || pack.quantity || 0),
       productBarcodeId,
       mkBarcode: barcodeRow?.mk_barcode || finalMkBarcode,
-      vendorBarcode: barcodeRow?.barcode || vendorBarcode || "",
+      vendorBarcode: allowVendorBarcode ? barcodeRow?.barcode || vendorBarcode || "" : "",
     };
   };
 
@@ -3967,7 +4336,6 @@ const ApplicationMigrationHelperPage = () => {
         selectedBarcode.product_name_eng ||
         selectedBarcode.product_name ||
         "";
-      const selectedVendorBarcode = selectedBarcode.barcode || "";
       const hasSelectedNameMismatch =
         Boolean(selectedBarcode.product_id && selectedBarcodeProductName && productName) &&
         !sameNormalizedText(selectedBarcodeProductName, productName);
@@ -4030,10 +4398,7 @@ const ApplicationMigrationHelperPage = () => {
         );
       }
       setStatus("Checking catalog records for inventory migration.");
-      const vendorBarcodeForBase =
-        hasSelectedNameMismatch && sameNormalizedText(form.vendor_barcode, selectedVendorBarcode)
-          ? ""
-          : form.vendor_barcode || selectedVendorBarcode;
+      const vendorBarcodeForBase = null;
       const base = await ensureSupplyChainBase({
         productName,
         productTeluguName:
@@ -4126,7 +4491,7 @@ const ApplicationMigrationHelperPage = () => {
               brand_name: brandName,
               unit_name: pack.units,
               mk_barcode: base.mkBarcode,
-              barcode: base.vendorBarcode,
+              barcode: null,
               image_url: inventoryImageUrl || null,
             },
           ],
@@ -4228,6 +4593,362 @@ const ApplicationMigrationHelperPage = () => {
     );
   };
 
+  const updateManualDraftRow = (rowId, patch) => {
+    setManualDraftRows((prev) =>
+      prev.map((row) => (row.id === rowId ? { ...row, ...patch } : row))
+    );
+  };
+
+  const clearManualEntryAfterAdd = () => {
+    setFinancialForm((prev) => ({
+      ...prev,
+      quantity: "",
+      unit_id: "",
+      price: "",
+      dprice: "",
+      discount: "",
+      countInStock: "",
+    }));
+    setOutletPostingForm((prev) =>
+      recalculateOutletDispatchPricing({
+        ...prev,
+        batch_id: makeBatchId(),
+        no_of_units: "1",
+        unit_price: "",
+        unit_mrp: "",
+        dispatch_price: "",
+        dispatch_discount: "",
+        mk_barcode: "",
+        vendor_barcode: "",
+        mfg_date: getRelativeDateInput(-1),
+        exp_date: getRelativeDateInput(90),
+        sku_id: "",
+        remarks: "Manual outlet migration stock entry",
+      })
+    );
+    setManualSelectedFinancialId("");
+  };
+
+  const buildManualFinancialRow = () => {
+    const productNameValue = String(productForm.product_name_eng || "").trim();
+    const brandValue = String(productForm.brand_name || "").trim();
+    const categoryValue = String(productForm.category_name || "").trim();
+    const packUnit = units.find((unit) => String(unit.id) === String(financialForm.unit_id));
+    const selectedFinancial = catalogBarcodes.find(
+      (item) => String(getEntityId(item) || item.id) === String(manualSelectedFinancialId)
+    );
+    const selectedFinancialMatchesPack =
+      selectedFinancial &&
+      Number(selectedFinancial.quantity) === Number(financialForm.quantity) &&
+      String(selectedFinancial.unit_id || "") === String(financialForm.unit_id || "");
+
+    if (!productNameValue || !brandValue || !categoryValue) {
+      setManualDraftMessage("Product, brand and category are required before adding to draft.");
+      return;
+    }
+    if (!financialForm.quantity || !financialForm.unit_id || !financialForm.price || !financialForm.dprice) {
+      setManualDraftMessage("Financial line needs pack quantity, unit, MRP and selling price.");
+      return;
+    }
+    if (!financialForm.countInStock) {
+      setManualDraftMessage("Count in stock is required before adding to draft.");
+      return;
+    }
+
+    const taxFallback = applyHsnGstFallback(
+      {
+        hsn_code: productForm.hsn_code,
+        gst_rate: productForm.gst_rate,
+      },
+      productNameValue,
+      productForm.product_name_tel,
+      brandValue,
+      categoryValue
+    );
+
+    const row = {
+      id: `manual-${Date.now()}-${manualDraftRows.length + 1}`,
+      rowNumber: manualDraftRows.length + manualPendingFinancials.length + 1,
+      status: "pending",
+      message: "",
+      productName: productNameValue,
+      destination: manualMigrationDestination,
+      productTeluguName: productForm.product_name_tel || "",
+      brand: brandValue,
+      category: categoryValue,
+      hsnCode: taxFallback.hsn_code || "",
+      gstRate: taxFallback.gst_rate || "",
+      packQuantity: financialForm.quantity,
+      packUnit: packUnit?.unit_short_code || packUnit?.unit_name || "",
+      productBarcodeId: selectedFinancialMatchesPack ? getEntityId(selectedFinancial) || selectedFinancial.id : "",
+      mkBarcode: selectedFinancialMatchesPack ? outletPostingForm.mk_barcode || selectedFinancial?.mk_barcode || "" : "",
+      barcode: outletPostingForm.vendor_barcode || "",
+      unitMrp: financialForm.price,
+      unitPrice: outletPostingForm.unit_price || "",
+      sellingPrice: financialForm.dprice,
+      discount: financialForm.discount || calculateDiscountPercent(financialForm.price, financialForm.dprice),
+      marginPercentage: outletPostingForm.margin_percentage,
+      gstPercentage: outletPostingForm.gst_rate,
+      labourPercentage: outletPostingForm.labour_percentage,
+      transportPercentage: outletPostingForm.transport_percentage,
+      loadPercentage: outletPostingForm.load_percentage,
+      unloadPercentage: outletPostingForm.unload_percentage,
+      noOfUnits: financialForm.countInStock,
+      countInStock: financialForm.countInStock,
+      warehouseId: outletPostingForm.warehouse_id,
+      outletId: outletPostingForm.outlet_id,
+      supplierId: outletPostingForm.supplier_id,
+      warehouse: warehouses.find((item) => String(item.id) === String(outletPostingForm.warehouse_id))?.warehouse_name || "",
+      outlet: outlets.find((item) => String(item.id) === String(outletPostingForm.outlet_id))?.outlet_name || "",
+      supplier: suppliers.find((item) => String(item.id) === String(outletPostingForm.supplier_id))?.stakeholder_name || "",
+      mfgDate: outletPostingForm.mfg_date,
+      expDate: outletPostingForm.exp_date,
+      imageUrl: imageUrl || resolvedImageUrl || existingImageUrl || "",
+      remarks:
+        outletPostingForm.remarks ||
+        (manualMigrationDestination === "inventory"
+          ? "Manual inventory migration stock entry"
+          : "Manual outlet migration stock entry"),
+    };
+
+    return row;
+  };
+
+  const addManualFinancialLine = () => {
+    const row = buildManualFinancialRow();
+    if (!row) return;
+
+    setManualPendingFinancials((prev) => [...prev, row]);
+    setManualDraftMessage(
+      `Added financial ${row.packQuantity} ${row.packUnit || ""} under ${row.productName} / ${row.brand} / ${row.category}.`
+    );
+    clearManualEntryAfterAdd();
+  };
+
+  const addManualProductDraft = () => {
+    if (!manualPendingFinancials.length) {
+      setManualDraftMessage("Add at least one financial before adding the product draft.");
+      return;
+    }
+
+    setManualDraftRows((prev) => [
+      ...prev,
+      ...manualPendingFinancials.map((row, index) => ({
+        ...row,
+        id: `manual-${Date.now()}-${prev.length + index + 1}`,
+        rowNumber: prev.length + index + 1,
+      })),
+    ]);
+    setManualDraftMessage(
+      `Added ${productForm.product_name_eng || "product"} with ${manualPendingFinancials.length} financials to draft.`
+    );
+    setManualPendingFinancials([]);
+  };
+
+  const migrateManualDraftRows = async () => {
+    const rowsToRun = manualDraftRows.filter((row) => row.status !== "done");
+    if (!rowsToRun.length) {
+      setManualDraftMessage("No pending draft products to migrate.");
+      return;
+    }
+
+    setManualDraftRunning(true);
+    setManualDraftMessage("Manual draft migration started.");
+    for (const row of rowsToRun) {
+      updateManualDraftRow(row.id, { status: "running", message: "Migrating product..." });
+      try {
+        const destination = row.destination === "inventory" ? "inventory" : "outlet";
+        const context = await buildBulkContext(row, destination);
+        context.financialForm = {
+          ...context.financialForm,
+          countInStock: row.countInStock || row.noOfUnits || context.financialForm.countInStock,
+        };
+        if (destination === "inventory") {
+          context.inventoryForm = {
+            ...context.inventoryForm,
+            no_of_units: row.countInStock || row.noOfUnits || context.inventoryForm.no_of_units,
+          };
+          await handleInventoryMigrationSave(context);
+        } else {
+          context.outletPostingForm = {
+            ...context.outletPostingForm,
+            no_of_units: row.countInStock || row.noOfUnits || context.outletPostingForm.no_of_units,
+          };
+          await handleStockUpdate(context);
+        }
+        updateManualDraftRow(row.id, { status: "done", message: "Migration completed." });
+      } catch (error) {
+        updateManualDraftRow(row.id, {
+          status: "failed",
+          message: getErrorMessage(error, "Migration failed."),
+        });
+      }
+      await sleepForReactState();
+    }
+    setManualDraftRunning(false);
+    setManualDraftMessage("Manual draft migration finished.");
+  };
+
+  const manualDraftGroups = manualDraftRows.reduce((groups, row) => {
+    const productKey = [
+      normalizeText(row.productName),
+      normalizeText(row.productTeluguName),
+      normalizeText(row.hsnCode),
+    ].join("|");
+    let productGroup = groups.find((item) => item.key === productKey);
+
+    if (!productGroup) {
+      productGroup = {
+        key: productKey,
+        productName: row.productName,
+        productTeluguName: row.productTeluguName,
+        hsnCode: row.hsnCode,
+        rows: [],
+        brandGroups: [],
+      };
+      groups.push(productGroup);
+    }
+
+    productGroup.rows.push(row);
+    const brandKey = [normalizeText(row.brand), normalizeText(row.category)].join("|");
+    let brandGroup = productGroup.brandGroups.find((item) => item.key === brandKey);
+
+    if (!brandGroup) {
+      brandGroup = {
+        key: brandKey,
+        brand: row.brand,
+        category: row.category,
+        financials: [],
+      };
+      productGroup.brandGroups.push(brandGroup);
+    }
+
+    brandGroup.financials.push(row);
+    return groups;
+  }, []);
+
+  const getManualMigrationExcelRows = (rows) =>
+    rows.map((row, index) => ({
+      "Row No": index + 1,
+      Status: row.status || "pending",
+      Message: row.message || "",
+      Destination: row.destination || "outlet",
+      "Product Name": row.productName || "",
+      "Telugu Name": row.productTeluguName || "",
+      Brand: row.brand || "",
+      Category: row.category || "",
+      HSN: row.hsnCode || "",
+      "Product GST": row.gstRate || "",
+      "Pack Quantity": row.packQuantity || "",
+      "Pack Unit": row.packUnit || "",
+      MRP: row.unitMrp || "",
+      "Selling Price": row.sellingPrice || "",
+      "Purchase Price": row.unitPrice || "",
+      "Discount %": row.discount || "",
+      "Count In Stock": row.countInStock || row.noOfUnits || "",
+      "MFG Date": row.mfgDate || "",
+      "Expiry Date": row.expDate || "",
+      "MK Barcode": row.mkBarcode || "",
+      "Vendor Barcode": row.barcode || "",
+      Warehouse: row.warehouse || "",
+      Outlet: row.outlet || "",
+      Supplier: row.supplier || "",
+      "Margin %": row.marginPercentage || "",
+      "GST %": row.gstPercentage || "",
+      "Packing %": row.labourPercentage || "",
+      "Transport %": row.transportPercentage || "",
+      "Load %": row.loadPercentage || "",
+      "Unload %": row.unloadPercentage || "",
+      "Image URL": row.imageUrl || "",
+      Remarks: row.remarks || "",
+    }));
+
+  const writeManualMigrationWorkbook = (fileName, rows, includeTemplateNotes = false) => {
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(
+      workbook,
+      XLSX.utils.json_to_sheet(rows),
+      "Manual Migration"
+    );
+
+    if (includeTemplateNotes) {
+      XLSX.utils.book_append_sheet(
+        workbook,
+        XLSX.utils.json_to_sheet([
+          { Field: "Destination", Notes: "Use outlet or inventory. Default is outlet." },
+          { Field: "Product Name / Brand / Category", Notes: "Use existing values or new values to create catalog records." },
+          { Field: "Pack Quantity / Pack Unit", Notes: "Financial pack, for example 1 KGS, 250 GMS, 1 QTY." },
+          { Field: "MRP / Selling Price", Notes: "For Mongo product suggestions, purchase is calculated from selling and margins." },
+          { Field: "Purchase Price", Notes: "For inventory suggestions, selling is calculated from purchase and margins." },
+          { Field: "Count In Stock", Notes: "Used as no. of units in supply chain and Mongo stock count for outlet migration." },
+          { Field: "MK Barcode", Notes: "Optional. Migration resolves or creates it from catalog.product_barcodes." },
+          { Field: "Vendor Barcode", Notes: "Keep blank for migration. Assign it separately in Barcode Assigner." },
+          { Field: "MFG Date / Expiry Date", Notes: "Use YYYY-MM-DD." },
+        ]),
+        "Notes"
+      );
+    }
+
+    XLSX.writeFile(workbook, fileName);
+  };
+
+  const downloadManualMigrationTemplate = () => {
+    writeManualMigrationWorkbook(
+      "manual-migration-template.xlsx",
+      [
+        {
+          "Row No": 1,
+          Status: "template",
+          Message: "",
+          Destination: "outlet",
+          "Product Name": "SUGAR",
+          "Telugu Name": "",
+          Brand: "MANAKIRANA",
+          Category: "DAILY NEEDS",
+          HSN: "1701",
+          "Product GST": "",
+          "Pack Quantity": "1",
+          "Pack Unit": "KGS",
+          MRP: "50",
+          "Selling Price": "46",
+          "Purchase Price": "",
+          "Discount %": "8",
+          "Count In Stock": "3",
+          "MFG Date": getRelativeDateInput(-1),
+          "Expiry Date": getRelativeDateInput(90),
+          "MK Barcode": "",
+          "Vendor Barcode": "",
+          Warehouse: "Gouthami",
+          Outlet: "Gollavelli Mini Mart",
+          Supplier: "MIGRATION",
+          "Margin %": DEFAULT_OUTLET_RATE_PLAN.margin_percentage,
+          "GST %": DEFAULT_OUTLET_RATE_PLAN.gst_rate,
+          "Packing %": DEFAULT_OUTLET_RATE_PLAN.labour_percentage,
+          "Transport %": DEFAULT_OUTLET_RATE_PLAN.transport_percentage,
+          "Load %": DEFAULT_OUTLET_RATE_PLAN.load_percentage,
+          "Unload %": DEFAULT_OUTLET_RATE_PLAN.unload_percentage,
+          "Image URL": "",
+          Remarks: "Manual migration template row",
+        },
+      ],
+      true
+    );
+  };
+
+  const exportManualMigrationData = () => {
+    const rows = [...manualPendingFinancials, ...manualDraftRows];
+    if (!rows.length) {
+      setManualDraftMessage("No manual migration rows to export yet.");
+      return;
+    }
+
+    writeManualMigrationWorkbook(
+      `manual-migration-export-${formatDateInput(new Date())}.xlsx`,
+      getManualMigrationExcelRows(rows)
+    );
+    setManualDraftMessage(`Exported ${rows.length} manual migration rows.`);
+  };
+
   const findBulkOption = (rows, value, fields) => {
     const q = normalizeText(value);
     if (!q) return null;
@@ -4240,6 +4961,20 @@ const ApplicationMigrationHelperPage = () => {
   };
 
   const findBulkCatalogBarcode = (row) => {
+    if (row.productBarcodeId) {
+      const idMatch = catalogBarcodes.find(
+        (item) => String(getEntityId(item) || item.id) === String(row.productBarcodeId)
+      );
+      if (idMatch) return idMatch;
+    }
+
+    if (row.mkBarcode) {
+      const mkMatch = catalogBarcodes.find(
+        (item) => normalizeText(item.mk_barcode) === normalizeText(row.mkBarcode)
+      );
+      if (mkMatch) return mkMatch;
+    }
+
     const barcodeText = normalizeText(row.barcode);
     const productText = normalizeText(row.productName);
     const brandText = normalizeText(row.brand);
@@ -4345,16 +5080,19 @@ const ApplicationMigrationHelperPage = () => {
     const matchedProduct = findBulkCatalogProduct(row, matchedBarcode);
     const legacyProduct = matchedBarcode ? null : await enrichBulkRowFromLegacy(row);
     const warehouse =
+      warehouses.find((item) => String(item.id) === String(row.warehouseId || "")) ||
       findBulkOption(warehouses, row.warehouse, ["warehouse_name", "warehouse_code", "id"]) ||
       (mode === "outlet"
         ? warehouses.find((item) => String(item.id) === String(outletPostingForm.warehouse_id))
         : warehouses.find((item) => String(item.id) === String(inventoryForm.warehouse_id)));
     const supplier =
+      suppliers.find((item) => String(item.id) === String(row.supplierId || "")) ||
       findBulkOption(suppliers, row.supplier, ["stakeholder_name", "stackholder_code", "id"]) ||
       (mode === "outlet"
         ? suppliers.find((item) => String(item.id) === String(outletPostingForm.supplier_id))
         : suppliers.find((item) => String(item.id) === String(inventoryForm.supplier_id)));
     const outlet =
+      outlets.find((item) => String(item.id) === String(row.outletId || "")) ||
       findBulkOption(outlets, row.outlet, ["outlet_name", "unit_code", "id"]) ||
       outlets.find((item) => String(item.id) === String(outletPostingForm.outlet_id));
     const unit = findCatalogUnit(units, row.packUnit || getBarcodeWeight(matchedBarcode));
@@ -4407,8 +5145,13 @@ const ApplicationMigrationHelperPage = () => {
       categoryName
     );
     const batchId = makeBatchId();
-    const vendorBarcode = row.barcode || matchedBarcode?.barcode || getLegacyBarcode(legacyProduct) || "";
+    const vendorBarcode = "";
     const image = row.imageUrl || getProductImageUrl(legacyProduct) || matchedBarcode?.image_url || "";
+    const mrpValue = row.unitMrp || row.mrp || row.price || row.unitPrice || "";
+    const sellingValue = row.sellingPrice || row.dprice || row.salePrice || row.unitPrice || "";
+    const purchaseValue = row.purchasePrice || row.unitPrice || "";
+    const discountValue =
+      row.discount || calculateDiscountPercent(mrpValue, sellingValue) || "";
 
     if (mode === "inventory") {
       return {
@@ -4424,7 +5167,7 @@ const ApplicationMigrationHelperPage = () => {
           warehouse_id: warehouse.id,
           supplier_id: supplier.id,
           product_name_eng: productName,
-          product_name_tel: legacyProduct?.teluguname || legacyProduct?.telugu_name || "",
+          product_name_tel: row.productTeluguName || legacyProduct?.teluguname || legacyProduct?.telugu_name || "",
           brand_name: brandName,
           category_name: categoryName,
           hsn_code: taxFallback.hsn_code || "",
@@ -4449,10 +5192,10 @@ const ApplicationMigrationHelperPage = () => {
       productName,
       scannedProduct: null,
       selectedCatalogProductId: matchedBarcode?.product_id || matchedProduct?.id || "",
-      productForm: {
+        productForm: {
         ...productForm,
         product_name_eng: productName,
-        product_name_tel: legacyProduct?.teluguname || legacyProduct?.telugu_name || "",
+        product_name_tel: row.productTeluguName || legacyProduct?.teluguname || legacyProduct?.telugu_name || "",
         gst_rate: taxFallback.gst_rate || "",
         hsn_code: taxFallback.hsn_code || "",
         brand_id: matchedBarcode?.brand_id || matchedProduct?.brand_id || "",
@@ -4464,8 +5207,9 @@ const ApplicationMigrationHelperPage = () => {
         ...emptyFinancial,
         quantity: packQuantity,
         unit_id: unit?.id || matchedBarcode?.unit_id || "",
-        price: row.unitPrice || "",
-        dprice: row.unitPrice || "",
+        price: mrpValue,
+        dprice: sellingValue,
+        discount: discountValue,
         countInStock: row.noOfUnits || "1",
         barcode: vendorBarcode,
       },
@@ -4476,8 +5220,17 @@ const ApplicationMigrationHelperPage = () => {
         outlet_id: outlet.id,
         batch_id: batchId,
         no_of_units: row.noOfUnits || "1",
-        unit_price: row.unitPrice || "",
-        unit_mrp: row.unitMrp || "",
+        unit_price: purchaseValue,
+        unit_mrp: mrpValue,
+        dispatch_price: sellingValue,
+        dispatch_discount: discountValue,
+        margin_percentage: row.marginPercentage || outletPostingForm.margin_percentage,
+        gst_rate: row.gstPercentage || outletPostingForm.gst_rate,
+        labour_percentage: row.labourPercentage || outletPostingForm.labour_percentage,
+        transport_percentage: row.transportPercentage || outletPostingForm.transport_percentage,
+        load_percentage: row.loadPercentage || outletPostingForm.load_percentage,
+        unload_percentage: row.unloadPercentage || outletPostingForm.unload_percentage,
+        mk_barcode: row.mkBarcode || matchedBarcode?.mk_barcode || "",
         mfg_date: row.mfgDate || "",
         exp_date: row.expDate,
         sku_id: makeSkuId({ productCode: productName, batchId, expDate: row.expDate }),
@@ -5106,6 +5859,196 @@ const ApplicationMigrationHelperPage = () => {
     );
   };
 
+  const manualFinancialOptions = catalogBarcodes
+    .filter((item) => {
+      if (selectedCatalogProductId) {
+        return String(item.product_id) === String(selectedCatalogProductId);
+      }
+
+      const productText = normalizeText(productForm.product_name_eng);
+      if (!productText) return false;
+
+      return [item.product_name_eng, item.product_name].some(
+        (value) => normalizeText(value) === productText
+      );
+    })
+    .slice(0, 50);
+
+  const handleManualFinancialSelect = (value) => {
+    const financialChanged = String(value || "") !== String(manualSelectedFinancialId || "");
+    setManualSelectedFinancialId(value);
+    if (!value) {
+      setFinancialForm((prev) => ({
+        ...prev,
+        quantity: "",
+        unit_id: "",
+        price: "",
+        dprice: "",
+        discount: "",
+        countInStock: "",
+        barcode: "",
+      }));
+      setOutletPostingForm((prev) => ({
+        ...prev,
+        unit_price: "",
+        unit_mrp: "",
+        dispatch_price: "",
+        dispatch_discount: "",
+        no_of_units: "",
+        mk_barcode: "",
+        vendor_barcode: "",
+        rate_plan_id: "",
+        rate_plan_mode: "manual",
+      }));
+      return;
+    }
+
+    const selected = catalogBarcodes.find(
+      (item) => String(getEntityId(item) || item.id) === String(value)
+    );
+    if (!selected) return;
+
+    const selectedId = getEntityId(selected) || selected.id;
+    const matchedMongoFinancial = findMongoFinancialForCatalogBarcode(
+      productsList,
+      selected,
+      selectedId
+    );
+    const selectedFinancial = matchedMongoFinancial?.financial || {};
+    const selectedMrp = sanitizeMoneyInput(
+      pickId(
+        selectedFinancial.price,
+        selectedFinancial.MRP,
+        selected.price,
+        selected.mrp,
+        selected.unit_mrp,
+        ""
+      )
+    );
+    const selectedSellingPrice = sanitizeMoneyInput(
+      pickId(
+        selectedFinancial.dprice,
+        selectedFinancial.selling_price,
+        selectedFinancial.sellingPrice,
+        selected.dprice,
+        selected.selling_price,
+        selected.sellingPrice,
+        selectedMrp,
+        ""
+      )
+    );
+    const selectedDiscount = pickId(
+      selectedFinancial.Discount,
+      selectedFinancial.discount,
+      selected.discount,
+      calculateDiscountPercent(selectedMrp, selectedSellingPrice)
+    );
+
+    setFinancialForm((prev) => ({
+      ...prev,
+      quantity: selected.quantity || prev.quantity,
+      unit_id: selected.unit_id || prev.unit_id,
+      price: selectedMrp,
+      dprice: selectedSellingPrice,
+      discount:
+        selectedDiscount === undefined || selectedDiscount === null
+          ? ""
+          : selectedDiscount,
+      countInStock: financialChanged ? "" : prev.countInStock,
+      barcode: "",
+    }));
+    const ratePlan = findRatePlanForBarcode(selectedId);
+    setOutletPostingForm((prev) => {
+      const next = {
+        ...prev,
+        unit_price: "",
+        unit_mrp: selectedMrp,
+        dispatch_price: selectedSellingPrice,
+        dispatch_discount:
+          selectedDiscount === undefined || selectedDiscount === null
+            ? ""
+            : String(selectedDiscount),
+        no_of_units: financialChanged ? "" : prev.no_of_units,
+        mk_barcode: selected.mk_barcode || "",
+        vendor_barcode: "",
+        rate_plan_id: ratePlan?.id || "",
+        rate_plan_mode: ratePlan ? "existing" : "manual",
+        ...(ratePlan
+          ? {
+              margin_percentage: String(ratePlan.margin_percentage ?? prev.margin_percentage ?? ""),
+              gst_rate: String(ratePlan.gst_rate ?? prev.gst_rate ?? ""),
+              labour_percentage: String(ratePlan.labour_percentage ?? prev.labour_percentage ?? ""),
+              transport_percentage: String(ratePlan.transport_percentage ?? prev.transport_percentage ?? ""),
+              load_percentage: String(ratePlan.load_percentage ?? prev.load_percentage ?? ""),
+              unload_percentage: String(ratePlan.unload_percentage ?? prev.unload_percentage ?? ""),
+            }
+          : {}),
+      };
+
+      return recalculateOutletDispatchPricing(next);
+    });
+    setProductForm((prev) => ({
+      ...prev,
+      product_name_eng: prev.product_name_eng || selected.product_name_eng || selected.product_name || "",
+      brand_name: prev.brand_name || selected.brand_name_english || selected.brand_name || "",
+      category_name: prev.category_name || selected.category_name_english || selected.category_name || "",
+      brand_id: prev.brand_id || selected.brand_id || "",
+      category_id: prev.category_id || selected.category_id || "",
+    }));
+  };
+
+  const findManualFinancialByPack = (quantity, unitId) => {
+    const numericQuantity = Number(quantity);
+    if (!Number.isFinite(numericQuantity) || !unitId) return null;
+
+    const selectedUnit = units.find((unit) => String(unit.id) === String(unitId));
+    const selectedUnitText = normalizeUnitText(
+      selectedUnit?.unit_short_code || selectedUnit?.unit_name || selectedUnit?.unit_code
+    );
+
+    return (
+      manualFinancialOptions.find((item) => {
+        const itemQuantity = Number(item.quantity);
+        const itemUnitText = normalizeUnitText(
+          item.unit_short_code || item.unit_name || item.unit || item.units
+        );
+
+        return (
+          Number.isFinite(itemQuantity) &&
+          itemQuantity === numericQuantity &&
+          (String(item.unit_id) === String(unitId) ||
+            (selectedUnitText && itemUnitText === selectedUnitText))
+        );
+      }) || null
+    );
+  };
+
+  const handleManualPackChange = (field, value) => {
+    const nextQuantity = field === "quantity" ? value : financialForm.quantity;
+    const nextUnitId = field === "unit_id" ? value : financialForm.unit_id;
+    const matchedFinancial = findManualFinancialByPack(nextQuantity, nextUnitId);
+
+    if (matchedFinancial) {
+      handleManualFinancialSelect(getEntityId(matchedFinancial) || matchedFinancial.id);
+      setManualDraftMessage("Matching financial selected from pack quantity/unit.");
+      return;
+    }
+
+    setManualSelectedFinancialId("");
+    setFinancialForm((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
+    setOutletPostingForm((prev) => ({
+      ...prev,
+      mk_barcode: "",
+      vendor_barcode: "",
+      rate_plan_id: "",
+      rate_plan_mode: "manual",
+    }));
+    setManualDraftMessage("No matching financial found for this pack. Add new financial will be used.");
+  };
+
   const renderTrackingMonitor = () => (
     <section className="rounded-lg border bg-white p-4 shadow-sm">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -5366,6 +6309,21 @@ const ApplicationMigrationHelperPage = () => {
           </button>
           <button
             type="button"
+            onClick={() => {
+              setMigrationMode("manual");
+              resetManualMigrationForm();
+            }}
+            className={`${buttonClass} ${
+              migrationMode === "manual"
+                ? "bg-blue-600 text-white"
+                : "border bg-white text-gray-700 hover:bg-gray-50"
+            }`}
+          >
+            <PackagePlus size={17} />
+            Manual Migration
+          </button>
+          <button
+            type="button"
             onClick={() => setMigrationMode("inventory")}
             className={`${buttonClass} ${
               migrationMode === "inventory"
@@ -5404,23 +6362,26 @@ const ApplicationMigrationHelperPage = () => {
 
         {renderBulkMigrationPanel()}
 
-        {migrationMode === "lite" ? (
+        {["lite", "manual"].includes(migrationMode) ? (
           <section
             className="rounded-lg border bg-white p-4 shadow-sm"
             onKeyDown={focusNextLiteField}
           >
             <div className="mb-4 flex items-center gap-2">
               <PackagePlus size={19} className="text-blue-700" />
-              <h2 className="font-bold text-gray-900">Lite Migration</h2>
+              <h2 className="font-bold text-gray-900">
+                {migrationMode === "manual" ? "Manual Migration" : "Lite Migration"}
+              </h2>
             </div>
 
-            <form
-              onSubmit={(event) => {
-                event.preventDefault();
-                if (barcodeAssignMatches[0]) selectBarcodeAssignProduct(barcodeAssignMatches[0]);
-              }}
-              className="mb-4 flex flex-col gap-3 sm:flex-row"
-            >
+            {migrationMode === "lite" ? (
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  if (liteMigrationMatches[0]) selectLiteMigrationSuggestion(liteMigrationMatches[0]);
+                }}
+                className="mb-4 flex flex-col gap-3 sm:flex-row"
+              >
               <div className="relative flex-1">
                 <input
                   value={barcodeAssignSearch}
@@ -5429,25 +6390,54 @@ const ApplicationMigrationHelperPage = () => {
                     setBarcodeAssignLookupOpen(true);
                   }}
                   onFocus={() => {
-                    if (barcodeAssignMatches.length > 0) setBarcodeAssignLookupOpen(true);
+                    if (liteMigrationMatches.length > 0) setBarcodeAssignLookupOpen(true);
                   }}
                   className={fieldClass}
-                  placeholder="Search Mongo product / financial"
+                  placeholder="Search Mongo or inventory product"
                 />
-                {barcodeAssignLookupOpen && barcodeAssignMatches.length > 0 ? (
+                {barcodeAssignLookupOpen && liteMigrationMatches.length > 0 ? (
                   <div className="absolute z-50 mt-1 max-h-72 w-full overflow-auto rounded-lg border bg-white shadow-lg">
-                    {barcodeAssignMatches.map((item) => {
-                      const image = getProductImageUrl(item);
+                    {liteMigrationMatches.map((item) => {
+                      const isInventorySource = item.__migrationSource === "inventory";
                       const firstBarcode = getProductBarcodes(item)[0] || "";
                       const financial = getFirstFinancial(getFirstBrand(item));
-                      const packText = getFinancialPackText(item);
+                      const catalogBarcode = isInventorySource
+                        ? catalogBarcodes.find(
+                            (barcodeRow) =>
+                              String(getEntityId(barcodeRow) || barcodeRow.id) ===
+                              String(item.product_barcode_id || item.barcode_id || "")
+                          )
+                        : null;
+                      const image = getMigrationImageUrl(item, catalogBarcode);
+                      const financialCount = asArray(getFirstBrand(item)?.financials).length;
+                      const packText = isInventorySource
+                        ? makeWeightPack(
+                            getBarcodeQuantity(catalogBarcode || item) || item.quantity,
+                            getBarcodeWeight(catalogBarcode || item) ||
+                              item.unit_short_code ||
+                              item.unit_name
+                          )
+                        : financialCount ? `${financialCount} financials` : "Product";
+                      const displayName = isInventorySource
+                        ? catalogBarcode?.product_name_eng ||
+                          item.product_name ||
+                          item.product_name_eng ||
+                          item.productName
+                        : getProductName(item);
+                      const displayBrand = isInventorySource
+                        ? catalogBarcode?.brand_name_english || item.brand_name
+                        : getBrandName(getFirstBrand(item));
+                      const displayCategory = isInventorySource
+                        ? catalogBarcode?.category_name_english || item.category_name
+                        : getCategoryName(item);
+                      const sourceLabel = isInventorySource ? "Inventory" : "Mongo";
 
                       return (
                         <button
-                          key={`${pickId(item.id, item._id, getProductName(item))}-${financial?._id || firstBarcode}`}
+                          key={`${sourceLabel}-${pickId(item.id, item._id, item.inventory_product_id, getProductName(item))}-${financial?._id || firstBarcode}`}
                           type="button"
                           onMouseDown={(clickEvent) => clickEvent.preventDefault()}
-                          onClick={() => selectBarcodeAssignProduct(item)}
+                          onClick={() => selectLiteMigrationSuggestion(item)}
                           className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-blue-50"
                         >
                           {image ? (
@@ -5461,13 +6451,15 @@ const ApplicationMigrationHelperPage = () => {
                           )}
                           <span className="min-w-0 flex-1">
                             <span className="block truncate text-sm font-semibold text-gray-900">
-                              {getProductName(item) || "Unnamed product"}
+                              {displayName || "Unnamed product"}
                             </span>
                             <span className="block truncate text-xs text-gray-500">
-                              {getBrandName(getFirstBrand(item)) || "-"} | {getCategoryName(item) || "-"} | {packText || "-"} | {firstBarcode || "-"}
+                              {sourceLabel} | {displayBrand || "-"} | {displayCategory || "-"} | {packText || "-"}
                             </span>
                             <span className="block truncate text-xs font-semibold text-blue-700">
-                              Financial: {financial?._id || "-"} | MRP: {financial?.price ?? "-"} | SP: {financial?.dprice ?? "-"}
+                              {isInventorySource
+                                ? `Purchase: ${getUnitPurchasePriceValue(item) || "-"} | MRP: ${getUnitMrpValue(item, catalogBarcode) || "-"}`
+                                : "Choose financial below after selecting"}
                             </span>
                           </span>
                         </button>
@@ -5484,21 +6476,930 @@ const ApplicationMigrationHelperPage = () => {
                 <Search size={17} />
                 Search
               </button>
-            </form>
+              </form>
+            ) : null}
 
+            {migrationMode === "manual" ? (
+              <div className="space-y-4">
+                <div className="rounded-lg border bg-slate-50 p-3">
+                  <div className="grid grid-cols-1 gap-3 lg:grid-cols-5">
+                    <label className="relative text-sm font-semibold text-gray-800">
+                      Product
+                      <input
+                        data-lite-field
+                        value={productForm.product_name_eng}
+                        onChange={(event) => {
+                          const nextProductName = event.target.value;
+                          setProductName(event.target.value);
+                          setManualProductLookupOpen(true);
+                          setSelectedCatalogProductId("");
+                          setManualSelectedFinancialId("");
+                          setProductForm((prev) => ({
+                            ...applyHsnGstFallback(
+                              {
+                                ...prev,
+                                product_name_eng: nextProductName,
+                              },
+                              nextProductName,
+                              prev.product_name_tel,
+                              prev.brand_name,
+                              prev.category_name
+                            ),
+                          }));
+                        }}
+                        onFocus={() => {
+                          if (manualMigrationMatches.length > 0) setManualProductLookupOpen(true);
+                        }}
+                        className={`${fieldClass} mt-1 bg-white`}
+                        placeholder="Type to search or add new product"
+                      />
+                      {manualProductLookupOpen && normalizeText(productForm.product_name_eng).length >= 2 ? (
+                        <div className="absolute z-50 mt-1 max-h-72 w-full overflow-auto rounded-lg border bg-white shadow-lg">
+                          {manualMigrationMatches.map((item) => {
+                            const isInventorySource = item.__migrationSource === "inventory";
+                            const financial = getFirstFinancial(getFirstBrand(item));
+                            const catalogBarcode = isInventorySource
+                              ? catalogBarcodes.find(
+                                  (barcodeRow) =>
+                                    String(getEntityId(barcodeRow) || barcodeRow.id) ===
+                                    String(item.product_barcode_id || item.barcode_id || "")
+                                )
+                              : null;
+                            const image = getMigrationImageUrl(item, catalogBarcode);
+                            const displayName = isInventorySource
+                              ? catalogBarcode?.product_name_eng ||
+                                item.product_name ||
+                                item.product_name_eng ||
+                                item.productName
+                              : getProductName(item);
+                            const displayBrand = isInventorySource
+                              ? catalogBarcode?.brand_name_english || item.brand_name
+                              : getBrandName(getFirstBrand(item));
+                            const displayCategory = isInventorySource
+                              ? catalogBarcode?.category_name_english || item.category_name
+                              : getCategoryName(item);
+                            const financialCount = asArray(getFirstBrand(item)?.financials).length;
+                            const inventoryFinancialCount = isInventorySource
+                              ? catalogBarcodes.filter(
+                                  (barcodeRow) =>
+                                    String(barcodeRow.product_id || "") ===
+                                    String(catalogBarcode?.product_id || item.product_id || "")
+                                ).length
+                              : 0;
+                            const packText = isInventorySource
+                              ? inventoryFinancialCount
+                                ? `${inventoryFinancialCount} financials`
+                                : "Inventory product"
+                              : financialCount ? `${financialCount} financials` : "Product";
+                            const sourceLabel = isInventorySource ? "Inventory" : "Mongo";
+
+                            return (
+                              <button
+                                key={`manual-${sourceLabel}-${pickId(item.id, item._id, item.inventory_product_id, displayName)}-${financial?._id || item.product_barcode_id || ""}`}
+                                type="button"
+                                onMouseDown={(clickEvent) => clickEvent.preventDefault()}
+                                onClick={() => selectManualMigrationSuggestion(item)}
+                                className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-blue-50"
+                              >
+                                {image ? (
+                                  <img
+                                    src={image}
+                                    alt={displayName || "Product"}
+                                    className="h-10 w-10 rounded border object-cover"
+                                  />
+                                ) : (
+                                  <span className="h-10 w-10 rounded border bg-gray-50" />
+                                )}
+                                <span className="min-w-0 flex-1">
+                                  <span className="block truncate text-sm font-semibold text-gray-900">
+                                    {displayName || "Unnamed product"}
+                                  </span>
+                                  <span className="block truncate text-xs text-gray-500">
+                                    {sourceLabel} | {displayBrand || "-"} | {displayCategory || "-"} | {packText || "-"}
+                                  </span>
+                                  <span className="block truncate text-xs font-semibold text-blue-700">
+                                    {isInventorySource
+                                      ? "Choose financial below after selecting"
+                                      : "Choose financial below after selecting"}
+                                  </span>
+                                </span>
+                              </button>
+                            );
+                          })}
+                          <button
+                            type="button"
+                            onMouseDown={(clickEvent) => clickEvent.preventDefault()}
+                            onClick={() => {
+                              setScannedProduct(null);
+                              setSelectedCatalogProductId("");
+                              setManualSelectedFinancialId("");
+                              setManualProductLookupOpen(false);
+                              setManualDraftMessage("New product entry selected. Brand, category and financial will be created if missing.");
+                            }}
+                            className="block w-full border-t px-3 py-2 text-left text-sm font-bold text-green-700 hover:bg-green-50"
+                          >
+                            Add as new product
+                          </button>
+                        </div>
+                      ) : null}
+                    </label>
+                    <label className="text-sm font-semibold text-gray-800">
+                      Telugu
+                      <input
+                        data-lite-field
+                        value={productForm.product_name_tel}
+                        onChange={(event) =>
+                          setProductForm((prev) => ({
+                            ...prev,
+                            product_name_tel: event.target.value,
+                          }))
+                        }
+                        className={`${fieldClass} mt-1 bg-white`}
+                      />
+                    </label>
+                    <label className="text-sm font-semibold text-gray-800">
+                      Brand
+                      <input
+                        data-lite-field
+                        value={productForm.brand_name}
+                        onChange={(event) =>
+                          setProductForm((prev) => ({
+                            ...prev,
+                            brand_id: "",
+                            brand_name: event.target.value,
+                          }))
+                        }
+                        list="manual-brand-options"
+                        className={`${fieldClass} mt-1 bg-white`}
+                        placeholder="Choose or add brand"
+                      />
+                      <datalist id="manual-brand-options">
+                        {catalogBrands.map((item) => (
+                          <option
+                            key={item.id || item.brand_code || item.brand_name_english}
+                            value={item.brand_name_english || ""}
+                          />
+                        ))}
+                      </datalist>
+                    </label>
+                    <label className="text-sm font-semibold text-gray-800">
+                      Category
+                      <input
+                        data-lite-field
+                        value={productForm.category_name}
+                        onChange={(event) =>
+                          setProductForm((prev) =>
+                            applyHsnGstFallback(
+                              {
+                                ...prev,
+                                category_id: "",
+                                category_name: event.target.value,
+                              },
+                              prev.product_name_eng,
+                              prev.product_name_tel,
+                              prev.brand_name,
+                              event.target.value
+                            )
+                          )
+                        }
+                        list="manual-category-options"
+                        className={`${fieldClass} mt-1 bg-white`}
+                        placeholder="Choose or add category"
+                      />
+                      <datalist id="manual-category-options">
+                        {catalogCategories.map((item) => (
+                          <option
+                            key={item.id || item.category_code || item.category_name_english}
+                            value={item.category_name_english || ""}
+                          />
+                        ))}
+                      </datalist>
+                    </label>
+                    <label className="text-sm font-semibold text-gray-800">
+                      HSN
+                      <input
+                        data-lite-field
+                        value={productForm.hsn_code}
+                        onChange={(event) =>
+                          setProductForm((prev) => ({ ...prev, hsn_code: event.target.value }))
+                        }
+                        className={`${fieldClass} mt-1 bg-white`}
+                      />
+                    </label>
+                  </div>
+
+                  <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-12">
+                    <label className="text-sm font-semibold text-gray-800 lg:col-span-2">
+                      Financial
+                      <select
+                        data-lite-field
+                        value={manualSelectedFinancialId}
+                        onChange={(event) => handleManualFinancialSelect(event.target.value)}
+                        className={`${fieldClass} mt-1 bg-white`}
+                      >
+                        <option value="">Add new financial</option>
+                        {manualFinancialOptions.map((item) => (
+                          <option key={getEntityId(item) || item.id} value={getEntityId(item) || item.id}>
+                            {makeWeightPack(item.quantity, item.unit_short_code || item.unit_name)} | {item.mk_barcode || "-"}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="text-sm font-semibold text-gray-800">
+                      Pack Qty
+                      <input
+                        data-lite-field
+                        type="number"
+                        value={financialForm.quantity}
+                        onChange={(event) => handleManualPackChange("quantity", event.target.value)}
+                        className={`${fieldClass} mt-1 bg-white`}
+                      />
+                    </label>
+                    <label className="text-sm font-semibold text-gray-800">
+                      Unit
+                      <select
+                        data-lite-field
+                        value={financialForm.unit_id}
+                        onChange={(event) => handleManualPackChange("unit_id", event.target.value)}
+                        className={`${fieldClass} mt-1 bg-white`}
+                      >
+                        <option value="">Add unit</option>
+                        {units.map((unit) => (
+                          <option key={unit.id} value={unit.id}>
+                            {getUnitLabel(unit)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="text-sm font-semibold text-gray-800">
+                      MRP
+                      <input
+                        data-lite-field
+                        type="number"
+                        step="0.01"
+                        value={financialForm.price}
+                        onChange={(event) => handleLiteMrpChange(event.target.value)}
+                        className={`${fieldClass} mt-1 bg-white`}
+                      />
+                    </label>
+                    <label className="text-sm font-semibold text-gray-800">
+                      GST %
+                      <input
+                        data-lite-field
+                        type="number"
+                        step="0.01"
+                        value={outletPostingForm.gst_rate}
+                        onChange={(event) =>
+                          handleOutletPostingFormChange("gst_rate", event.target.value)
+                        }
+                        className={`${fieldClass} mt-1 bg-white`}
+                      />
+                    </label>
+                    <label className="text-sm font-semibold text-gray-800">
+                      Margin %
+                      <input
+                        data-lite-field
+                        type="number"
+                        step="0.01"
+                        value={outletPostingForm.margin_percentage}
+                        onChange={(event) =>
+                          handleOutletPostingFormChange("margin_percentage", event.target.value)
+                        }
+                        className={`${fieldClass} mt-1 bg-white`}
+                      />
+                    </label>
+                    <label className="text-sm font-semibold text-gray-800">
+                      Packing %
+                      <input
+                        data-lite-field
+                        type="number"
+                        step="0.01"
+                        value={outletPostingForm.labour_percentage}
+                        onChange={(event) =>
+                          handleOutletPostingFormChange("labour_percentage", event.target.value)
+                        }
+                        className={`${fieldClass} mt-1 bg-white`}
+                      />
+                    </label>
+                    <label className="text-sm font-semibold text-gray-800">
+                      Transport %
+                      <input
+                        data-lite-field
+                        type="number"
+                        step="0.01"
+                        value={outletPostingForm.transport_percentage}
+                        onChange={(event) =>
+                          handleOutletPostingFormChange("transport_percentage", event.target.value)
+                        }
+                        className={`${fieldClass} mt-1 bg-white`}
+                      />
+                    </label>
+                    <label className="text-sm font-semibold text-gray-800">
+                      Load %
+                      <input
+                        data-lite-field
+                        type="number"
+                        step="0.01"
+                        value={outletPostingForm.load_percentage}
+                        onChange={(event) =>
+                          handleOutletPostingFormChange("load_percentage", event.target.value)
+                        }
+                        className={`${fieldClass} mt-1 bg-white`}
+                      />
+                    </label>
+                    <label className="text-sm font-semibold text-gray-800">
+                      Unload %
+                      <input
+                        data-lite-field
+                        type="number"
+                        step="0.01"
+                        value={outletPostingForm.unload_percentage}
+                        onChange={(event) =>
+                          handleOutletPostingFormChange("unload_percentage", event.target.value)
+                        }
+                        className={`${fieldClass} mt-1 bg-white`}
+                      />
+                    </label>
+                    <label className="text-sm font-semibold text-gray-800">
+                      Selling
+                      <input
+                        data-lite-field
+                        type="number"
+                        step="0.01"
+                        value={financialForm.dprice}
+                        onChange={(event) => handleFinancialPriceChange("dprice", event.target.value)}
+                        className={`${fieldClass} mt-1 bg-white`}
+                      />
+                    </label>
+                    <label className="text-sm font-semibold text-gray-800">
+                      Purchase
+                      <input
+                        data-lite-field
+                        type="number"
+                        step="0.01"
+                        value={outletPostingForm.unit_price}
+                        onChange={(event) =>
+                          handleOutletPostingFormChange("unit_price", event.target.value)
+                        }
+                        className={`${fieldClass} mt-1 bg-white`}
+                      />
+                    </label>
+                    <label className="text-sm font-semibold text-gray-800">
+                      Discount
+                      <input
+                        data-lite-field
+                        type="number"
+                        step="0.01"
+                        value={financialForm.discount}
+                        onChange={(event) => handleLiteDiscountChange(event.target.value)}
+                        className={`${fieldClass} mt-1 bg-white`}
+                      />
+                    </label>
+                    <label className="text-sm font-semibold text-gray-800">
+                      Vendor Barcode
+                      <input
+                        data-lite-field
+                        value={outletPostingForm.vendor_barcode}
+                        onChange={(event) =>
+                          handleOutletPostingFormChange("vendor_barcode", event.target.value)
+                        }
+                        className={`${fieldClass} mt-1 bg-white`}
+                      />
+                    </label>
+                  </div>
+
+                  <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-[1fr_1fr_1fr_1fr_1fr_auto]">
+                    <label className="text-sm font-semibold text-gray-800">
+                      Count In Stock
+                      <input
+                        ref={liteCountInputRef}
+                        data-lite-field
+                        type="number"
+                        min="0"
+                        value={financialForm.countInStock}
+                        onChange={(event) => handleOutletCountInStockChange(event.target.value)}
+                        className={`${fieldClass} mt-1 bg-white`}
+                      />
+                    </label>
+                    <label className="text-sm font-semibold text-gray-800">
+                      Destination
+                      <select
+                        data-lite-field
+                        value={manualMigrationDestination}
+                        onChange={(event) => {
+                          const destination = event.target.value;
+                          setManualMigrationDestination(destination);
+                          setOutletPostingForm((prev) =>
+                            recalculateOutletDispatchPricing({
+                              ...prev,
+                              pricing_source: destination === "inventory" ? "inventory" : "mongo",
+                            })
+                          );
+                        }}
+                        className={`${fieldClass} mt-1 bg-white`}
+                      >
+                        <option value="outlet">Outlet</option>
+                        <option value="inventory">Inventory</option>
+                      </select>
+                    </label>
+                    <label className="text-sm font-semibold text-gray-800">
+                      MFG
+                      <input
+                        data-lite-field
+                        type="date"
+                        value={outletPostingForm.mfg_date}
+                        onChange={(event) => handleOutletPostingFormChange("mfg_date", event.target.value)}
+                        className={`${fieldClass} mt-1 bg-white`}
+                      />
+                    </label>
+                    <label className="text-sm font-semibold text-gray-800">
+                      Expiry
+                      <input
+                        data-lite-field
+                        type="date"
+                        value={outletPostingForm.exp_date}
+                        onChange={(event) => handleOutletPostingFormChange("exp_date", event.target.value)}
+                        className={`${fieldClass} mt-1 bg-white`}
+                      />
+                    </label>
+                    <label className="text-sm font-semibold text-gray-800">
+                      MK Barcode
+                      <input
+                        data-lite-field
+                        value={outletPostingForm.mk_barcode}
+                        onChange={(event) => handleOutletPostingFormChange("mk_barcode", event.target.value)}
+                        className={`${fieldClass} mt-1 bg-white`}
+                        placeholder="Auto"
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      onClick={addManualFinancialLine}
+                      disabled={manualDraftRunning}
+                      className={`${buttonClass} mt-6 bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-300`}
+                    >
+                      <PackagePlus size={17} />
+                      New Financial
+                    </button>
+                  </div>
+
+                  <div className="mt-3 rounded-lg border border-blue-100 bg-white p-3">
+                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                      <div className="text-sm font-bold text-gray-900">
+                        Financials for this product
+                      </div>
+                      <button
+                        type="button"
+                        onClick={addManualProductDraft}
+                        disabled={manualDraftRunning || manualPendingFinancials.length === 0}
+                        className={`${buttonClass} bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-300`}
+                      >
+                        <PackagePlus size={17} />
+                        Add Draft
+                      </button>
+                    </div>
+                    {manualPendingFinancials.length ? (
+                      <div className="overflow-auto">
+                        <table className="min-w-[950px] w-full text-sm">
+                          <thead className="bg-gray-50 text-xs uppercase text-gray-500">
+                            <tr>
+                              <th className="p-2 text-left">Brand</th>
+                              <th className="p-2 text-left">Category</th>
+                              <th className="p-2 text-left">Financial</th>
+                              <th className="p-2 text-left">MRP</th>
+                              <th className="p-2 text-left">SP</th>
+                              <th className="p-2 text-left">Stock</th>
+                              <th className="p-2 text-left">Destination</th>
+                              <th className="p-2 text-left">Barcode</th>
+                              <th className="p-2 text-left">Action</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {manualPendingFinancials.map((row) => (
+                              <tr key={row.id} className="border-t">
+                                <td className="p-2">{row.brand}</td>
+                                <td className="p-2">{row.category}</td>
+                                <td className="p-2">{row.packQuantity} {row.packUnit}</td>
+                                <td className="p-2">{row.unitMrp}</td>
+                                <td className="p-2">{row.sellingPrice}</td>
+                                <td className="p-2">{row.countInStock}</td>
+                                <td className="p-2 font-semibold capitalize">{row.destination || "outlet"}</td>
+                                <td className="p-2">{row.barcode || row.mkBarcode || "-"}</td>
+                                <td className="p-2">
+                                  <button
+                                    type="button"
+                                    disabled={manualDraftRunning}
+                                    onClick={() =>
+                                      setManualPendingFinancials((prev) =>
+                                        prev.filter((item) => item.id !== row.id)
+                                      )
+                                    }
+                                    className="rounded border px-2 py-1 text-xs font-bold text-red-700 hover:bg-red-50 disabled:text-gray-300"
+                                  >
+                                    Remove
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <div className="rounded bg-slate-50 px-3 py-2 text-sm text-gray-500">
+                        No financials added for this product yet.
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-[1fr_auto_1fr_auto_auto]">
+                    <div className="relative">
+                      <input
+                        data-lite-field
+                        value={imageName}
+                        onChange={(event) => {
+                          setImageName(event.target.value);
+                          setImageSuggestionsOpen(true);
+                        }}
+                        onFocus={() => {
+                          if (imageSuggestions.length > 0) setImageSuggestionsOpen(true);
+                        }}
+                        className={`${fieldClass} bg-white`}
+                        placeholder="Search image name"
+                      />
+                      {imageSuggestionsOpen && imageSuggestions.length > 0 ? (
+                        <div className="absolute z-50 mt-1 max-h-64 w-full overflow-auto rounded-lg border bg-white shadow-lg">
+                          {imageSuggestions.map((item) => (
+                            <button
+                              key={`manual-image-${item.name || ""}-${item.imageUrl || item.url || ""}`}
+                              type="button"
+                              onMouseDown={(event) => event.preventDefault()}
+                              onClick={() => handleImageSuggestionSelect(item)}
+                              className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-blue-50"
+                            >
+                              {item.imageUrl || item.url ? (
+                                <img
+                                  src={item.imageUrl || item.url}
+                                  alt={item.name || "Product"}
+                                  className="h-10 w-10 rounded border object-cover"
+                                />
+                              ) : (
+                                <span className="h-10 w-10 rounded border bg-gray-50" />
+                              )}
+                              <span className="min-w-0 flex-1">
+                                <span className="block truncate text-sm font-semibold text-gray-900">
+                                  {item.name || "Unnamed image"}
+                                </span>
+                                <span className="block truncate text-xs text-gray-500">
+                                  {item.imageUrl || item.url || "-"}
+                                </span>
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleImageNameSearch}
+                      disabled={busy}
+                      className={`${buttonClass} bg-gray-800 text-white hover:bg-gray-900 disabled:bg-gray-300`}
+                    >
+                      <Search size={17} />
+                      Find
+                    </button>
+                    <input
+                      data-lite-field
+                      value={imageUrl}
+                      onChange={(event) => setImageUrl(event.target.value)}
+                      className={`${fieldClass} bg-white`}
+                      placeholder="Image URL"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleDownloadAndUploadImage}
+                      disabled={busy || !imageUrl}
+                      className={`${buttonClass} bg-green-600 text-white hover:bg-green-700 disabled:bg-gray-300`}
+                    >
+                      <UploadCloud size={17} />
+                      Upload
+                    </button>
+                    <button
+                      type="button"
+                      onClick={resetManualMigrationForm}
+                      disabled={manualDraftRunning}
+                      className={`${buttonClass} border bg-white text-gray-700 hover:bg-gray-50`}
+                    >
+                      <RotateCcw size={17} />
+                      Clear Form
+                    </button>
+                  </div>
+                  {resolvedImageUrl || imageUrl ? (
+                    <div className="mt-3 flex items-center gap-3 rounded-lg border bg-white p-2">
+                      <img
+                        src={resolvedImageUrl || imageUrl}
+                        alt={productForm.product_name_eng || "Product"}
+                        className="h-14 w-14 rounded border object-cover"
+                      />
+                      <input
+                        value={resolvedImageUrl || imageUrl}
+                        readOnly
+                        className={`${fieldClass} bg-gray-50`}
+                      />
+                    </div>
+                  ) : null}
+                </div>
+
+                {manualDraftMessage ? (
+                  <p className="rounded-lg bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-800">
+                    {manualDraftMessage}
+                  </p>
+                ) : null}
+
+                <div className="space-y-3 rounded-lg border bg-white p-3">
+                  {manualDraftGroups.map((productGroup) => (
+                    <div key={productGroup.key} className="rounded-lg border border-gray-200">
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-gray-50 px-3 py-2">
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-bold text-gray-900">
+                            {productGroup.productName || "-"}
+                          </div>
+                          <div className="truncate text-xs font-semibold text-gray-500">
+                            Telugu: {productGroup.productTeluguName || "-"} | HSN: {productGroup.hsnCode || "-"}
+                          </div>
+                        </div>
+                        <span className="rounded-full bg-blue-100 px-2 py-1 text-xs font-bold text-blue-700">
+                          {productGroup.rows.length} financial{productGroup.rows.length === 1 ? "" : "s"}
+                        </span>
+                      </div>
+
+                      <div className="space-y-3 p-3">
+                        {productGroup.brandGroups.map((brandGroup) => (
+                          <div key={brandGroup.key} className="rounded-lg border border-gray-100">
+                            <div className="border-b bg-slate-50 px-3 py-2 text-xs font-bold uppercase text-slate-600">
+                              {brandGroup.brand || "-"} | {brandGroup.category || "-"}
+                            </div>
+                            <div className="overflow-auto">
+                              <table className="min-w-[1100px] w-full text-sm">
+                                <thead className="bg-white text-xs uppercase text-gray-500">
+                                  <tr>
+                                    <th className="p-2 text-left">Status</th>
+                                    <th className="p-2 text-left">Destination</th>
+                                    <th className="p-2 text-left">Financial</th>
+                                    <th className="p-2 text-left">MRP</th>
+                                    <th className="p-2 text-left">SP</th>
+                                    <th className="p-2 text-left">Stock</th>
+                                    <th className="p-2 text-left">MFG</th>
+                                    <th className="p-2 text-left">Expiry</th>
+                                    <th className="p-2 text-left">Barcode</th>
+                                    <th className="p-2 text-left">Message</th>
+                                    <th className="p-2 text-left">Action</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {brandGroup.financials.map((row) => (
+                                    <tr key={row.id} className="border-t">
+                                      <td className="p-2">
+                                        <span className={`rounded-full px-2 py-1 text-[11px] font-bold uppercase ${getStageBadgeClass(row.status)}`}>
+                                          {row.status}
+                                        </span>
+                                      </td>
+                                      <td className="p-2 font-semibold capitalize">{row.destination || "outlet"}</td>
+                                      <td className="p-2">{row.packQuantity} {row.packUnit}</td>
+                                      <td className="p-2">{row.unitMrp}</td>
+                                      <td className="p-2">{row.sellingPrice}</td>
+                                      <td className="p-2">{row.countInStock}</td>
+                                      <td className="p-2">{row.mfgDate || "-"}</td>
+                                      <td className="p-2">{row.expDate || "-"}</td>
+                                      <td className="p-2">{row.barcode || row.mkBarcode || "-"}</td>
+                                      <td className="p-2">{row.message || "-"}</td>
+                                      <td className="p-2">
+                                        <button
+                                          type="button"
+                                          disabled={manualDraftRunning}
+                                          onClick={() =>
+                                            setManualDraftRows((prev) => prev.filter((item) => item.id !== row.id))
+                                          }
+                                          className="rounded border px-2 py-1 text-xs font-bold text-red-700 hover:bg-red-50 disabled:text-gray-300"
+                                        >
+                                          Remove
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                  {!manualDraftRows.length ? (
+                    <div className="p-3 text-sm text-gray-500">
+                      No draft products added yet.
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={downloadManualMigrationTemplate}
+                    disabled={manualDraftRunning}
+                    className={`${buttonClass} border bg-white text-gray-700 hover:bg-gray-50 disabled:text-gray-300`}
+                  >
+                    <Download size={17} />
+                    Excel Template
+                  </button>
+                  <button
+                    type="button"
+                    onClick={exportManualMigrationData}
+                    disabled={manualDraftRunning}
+                    className={`${buttonClass} border bg-white text-gray-700 hover:bg-gray-50 disabled:text-gray-300`}
+                  >
+                    <Download size={17} />
+                    Export Data
+                  </button>
+                  <button
+                    type="button"
+                    onClick={migrateManualDraftRows}
+                    disabled={manualDraftRunning || manualDraftRows.length === 0}
+                    className={`${buttonClass} bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-300`}
+                  >
+                    <PackagePlus size={17} />
+                    {manualDraftRunning ? "Migrating..." : "Migrate Draft Products"}
+                  </button>
+                </div>
+
+                <MigrationStagePanel mode="outlet" stages={migrationStages.outlet} />
+
+                {status ? (
+                  <p className="rounded-lg bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-800">
+                    {status}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+
+            {migrationMode !== "manual" && (resolvedImageUrl || existingImageUrl || imageUrl) ? (
+              <div className="mb-4 flex items-center gap-3 rounded-lg border bg-gray-50 p-3">
+                <img
+                  src={resolvedImageUrl || existingImageUrl || imageUrl}
+                  alt={productForm.product_name_eng || "Product"}
+                  className="h-16 w-16 rounded-lg border bg-white object-cover"
+                />
+                <div className="min-w-0">
+                  <div className="text-xs font-bold uppercase text-gray-400">Image Preview</div>
+                  <div className="truncate text-sm font-semibold text-gray-900">
+                    {productForm.product_name_eng || productName || "Selected product"}
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            {migrationMode !== "manual" ? (
+            <>
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
               <label className="text-sm font-semibold text-gray-800">
                 Product Name
-                <input value={productForm.product_name_eng} readOnly className={`${fieldClass} mt-1 bg-gray-50`} />
+                <input
+                  data-lite-field
+                  value={productForm.product_name_eng}
+                  readOnly={migrationMode !== "manual"}
+                  onChange={(event) => {
+                    setProductName(event.target.value);
+                    setProductForm((prev) => ({
+                      ...prev,
+                      product_name_eng: event.target.value,
+                    }));
+                    handleOutletPostingFormChange(
+                      "sku_id",
+                      makeSkuId({
+                        productCode: event.target.value,
+                        batchId: outletPostingForm.batch_id,
+                        expDate: outletPostingForm.exp_date,
+                      })
+                    );
+                  }}
+                  className={`${fieldClass} mt-1 ${
+                    migrationMode === "manual" ? "" : "bg-gray-50"
+                  }`}
+                />
               </label>
+              {migrationMode === "manual" ? (
+                <label className="text-sm font-semibold text-gray-800">
+                  Telugu Name
+                  <input
+                    data-lite-field
+                    value={productForm.product_name_tel}
+                    onChange={(event) =>
+                      setProductForm((prev) => ({
+                        ...prev,
+                        product_name_tel: event.target.value,
+                      }))
+                    }
+                    className={`${fieldClass} mt-1`}
+                  />
+                </label>
+              ) : null}
               <label className="text-sm font-semibold text-gray-800">
                 Brand
-                <input value={productForm.brand_name} readOnly className={`${fieldClass} mt-1 bg-gray-50`} />
+                <input
+                  data-lite-field
+                  value={productForm.brand_name}
+                  readOnly={migrationMode !== "manual"}
+                  onChange={(event) =>
+                    setProductForm((prev) => ({
+                      ...prev,
+                      brand_id: "",
+                      brand_name: event.target.value,
+                    }))
+                  }
+                  list="manual-lite-brand-options"
+                  className={`${fieldClass} mt-1 ${
+                    migrationMode === "manual" ? "" : "bg-gray-50"
+                  }`}
+                />
+                {migrationMode === "manual" ? (
+                  <datalist id="manual-lite-brand-options">
+                    {catalogBrands.map((item) => (
+                      <option
+                        key={item.id || item.brand_code || item.brand_name_english}
+                        value={item.brand_name_english || ""}
+                      />
+                    ))}
+                  </datalist>
+                ) : null}
               </label>
               <label className="text-sm font-semibold text-gray-800">
                 Category
-                <input value={productForm.category_name} readOnly className={`${fieldClass} mt-1 bg-gray-50`} />
+                <input
+                  data-lite-field
+                  value={productForm.category_name}
+                  readOnly={migrationMode !== "manual"}
+                  onChange={(event) =>
+                    setProductForm((prev) => ({
+                      ...prev,
+                      category_id: "",
+                      category_name: event.target.value,
+                    }))
+                  }
+                  list="manual-lite-category-options"
+                  className={`${fieldClass} mt-1 ${
+                    migrationMode === "manual" ? "" : "bg-gray-50"
+                  }`}
+                />
+                {migrationMode === "manual" ? (
+                  <datalist id="manual-lite-category-options">
+                    {catalogCategories.map((item) => (
+                      <option
+                        key={item.id || item.category_code || item.category_name_english}
+                        value={item.category_name_english || ""}
+                      />
+                    ))}
+                  </datalist>
+                ) : null}
               </label>
+              {migrationMode === "manual" ? (
+                <>
+                  <label className="text-sm font-semibold text-gray-800">
+                    HSN Code
+                    <input
+                      data-lite-field
+                      value={productForm.hsn_code}
+                      onChange={(event) =>
+                        setProductForm((prev) => ({ ...prev, hsn_code: event.target.value }))
+                      }
+                      className={`${fieldClass} mt-1`}
+                    />
+                  </label>
+                  <label className="text-sm font-semibold text-gray-800">
+                    Product GST %
+                    <input
+                      data-lite-field
+                      type="number"
+                      step="0.01"
+                      value={productForm.gst_rate}
+                      onChange={(event) =>
+                        setProductForm((prev) => ({ ...prev, gst_rate: event.target.value }))
+                      }
+                      className={`${fieldClass} mt-1`}
+                    />
+                  </label>
+                  <label className="text-sm font-semibold text-gray-800">
+                    MK Barcode
+                    <input
+                      data-lite-field
+                      value={outletPostingForm.mk_barcode}
+                      onChange={(event) =>
+                        handleOutletPostingFormChange("mk_barcode", event.target.value)
+                      }
+                      className={`${fieldClass} mt-1`}
+                      placeholder="Leave empty to generate"
+                    />
+                  </label>
+                </>
+              ) : null}
               <label className="text-sm font-semibold text-gray-800">
                 Vendor Barcode
                 <input
@@ -5592,6 +7493,19 @@ const ApplicationMigrationHelperPage = () => {
                       ? "border-blue-500 bg-blue-50 ring-2 ring-blue-300"
                       : ""
                   }`}
+                />
+              </label>
+              <label className="text-sm font-semibold text-gray-800">
+                No Of Units
+                <input
+                  data-lite-field
+                  type="number"
+                  min="0"
+                  value={outletPostingForm.no_of_units}
+                  onChange={(event) =>
+                    handleOutletPostingFormChange("no_of_units", event.target.value)
+                  }
+                  className={`${fieldClass} mt-1`}
                 />
               </label>
               <label className="text-sm font-semibold text-gray-800">
@@ -5759,6 +7673,17 @@ const ApplicationMigrationHelperPage = () => {
                 Purchase Price / Unit
                 <input value={outletPostingForm.unit_price} readOnly className={`${fieldClass} mt-1 bg-gray-50`} />
               </label>
+              {migrationMode === "manual" ? (
+                <label className="text-sm font-semibold text-gray-800">
+                  Image URL
+                  <input
+                    data-lite-field
+                    value={imageUrl}
+                    onChange={(event) => setImageUrl(event.target.value)}
+                    className={`${fieldClass} mt-1`}
+                  />
+                </label>
+              ) : null}
               <label className="text-sm font-semibold text-gray-800">
                 Batch ID
                 <input
@@ -5780,7 +7705,7 @@ const ApplicationMigrationHelperPage = () => {
                 className={`${buttonClass} bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-300`}
               >
                 <PackagePlus size={17} />
-                Run Lite Migration
+                {migrationMode === "manual" ? "Migrate Product" : "Run Lite Migration"}
               </button>
             </div>
 
@@ -5790,6 +7715,8 @@ const ApplicationMigrationHelperPage = () => {
               <p className="mt-4 rounded-lg bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-800">
                 {status}
               </p>
+            ) : null}
+            </>
             ) : null}
           </section>
         ) : migrationMode === "barcodeAssign" ? (
@@ -6322,14 +8249,14 @@ const ApplicationMigrationHelperPage = () => {
           </div>
 
           <section className="rounded-lg border bg-white p-4 shadow-sm">
-            {scannedProduct ? (
+            {scannedProduct || resolvedImageUrl || existingImageUrl || imageUrl ? (
               <div className="mb-4 grid grid-cols-1 gap-3 rounded-lg bg-gray-50 p-3 text-sm sm:grid-cols-[88px_repeat(3,1fr)]">
                 <div>
                   <div className="text-xs font-bold uppercase text-gray-400">Image</div>
-                  {existingImageUrl ? (
+                  {resolvedImageUrl || existingImageUrl || imageUrl ? (
                     <img
-                      src={existingImageUrl}
-                      alt={getProductName(scannedProduct) || "Existing product"}
+                      src={resolvedImageUrl || existingImageUrl || imageUrl}
+                      alt={getProductName(scannedProduct) || productForm.product_name_eng || "Existing product"}
                       className="mt-1 h-16 w-16 rounded-lg border bg-white object-cover"
                     />
                   ) : (
@@ -6340,12 +8267,12 @@ const ApplicationMigrationHelperPage = () => {
                 </div>
                 <div>
                   <div className="text-xs font-bold uppercase text-gray-400">Product</div>
-                  <div className="font-semibold text-gray-900">{getProductName(scannedProduct) || "-"}</div>
+                  <div className="font-semibold text-gray-900">{getProductName(scannedProduct) || productForm.product_name_eng || "-"}</div>
                 </div>
                 <div>
                   <div className="text-xs font-bold uppercase text-gray-400">Brand</div>
                   <div className="font-semibold text-gray-900">
-                    {scannedProduct?.brand || getBrandName(selectedBrand) || "-"}
+                    {scannedProduct?.brand || getBrandName(selectedBrand) || productForm.brand_name || "-"}
                   </div>
                 </div>
                 <div>

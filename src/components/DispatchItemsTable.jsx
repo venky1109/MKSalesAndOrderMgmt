@@ -7,6 +7,7 @@ import {
   getDispatchItemProductName,
   getDispatchItemUnit,
   getDispatchItemPackingConfigurations,
+  getCalculatedPackingAmounts,
   getPackingConfigUnit,
   getPackingConfigurationsFromNotes,
 } from '../utils/dispatchDisplay';
@@ -75,8 +76,9 @@ const getPackageRows = (items, catalogBarcodes = []) =>
           config.barcode ||
           catalogBarcode.barcode ||
           catalogBarcode.mk_barcode ||
-          noteConfig.barcode,
+            noteConfig.barcode,
       };
+      const calculatedAmounts = getCalculatedPackingAmounts(item, mergedConfig);
 
       return {
       id: `${item.id || getDispatchItemBarcode(item)}-${config.product_barcode_id || index}`,
@@ -96,6 +98,7 @@ const getPackageRows = (items, catalogBarcodes = []) =>
       unit: getPackingConfigUnit(mergedConfig),
       expDate: item.exp_date,
       unitPrice: firstValue(
+        calculatedAmounts.packageAmount,
         mergedConfig.package_amount,
         mergedConfig.packageAmount,
         mergedConfig.purchase_amount,
@@ -106,6 +109,7 @@ const getPackageRows = (items, catalogBarcodes = []) =>
         item.unit_price
       ),
       mrp: firstValue(
+        calculatedAmounts.mrpAmount,
         mergedConfig.mrp_amount,
         mergedConfig.mrpAmount,
         mergedConfig.MRP,

@@ -24,6 +24,32 @@ export const HSN_GST_PRODUCT_MAPPING = [
       "CBIC GST Goods and Services Rates: HSN 1902 Seviyan (vermicelli) listed at 5% IGST / 2.5% CGST + 2.5% SGST.",
     source_url: "https://cbic-gst.gov.in/gst-goods-services-rates.html",
   },
+  {
+    key: "sugar",
+    keywords: ["sugar", "crystal sugar", "big crystal sugar", "white sugar", "refined sugar"],
+    hsn_code: "1701",
+    gst_rate: "",
+    source:
+      "CBIC GST Goods and Services Rates: HSN 1701 covers cane or beet sugar and chemically pure sucrose in solid form. GST rate can vary by classification/packaging, so only HSN is auto-filled here.",
+    source_url: "https://cbic-gst.gov.in/gst-goods-services-rates.html",
+  },
+  {
+    key: "star-anise",
+    keywords: [
+      "anasa puvvu",
+      "anasapuvvu",
+      "అనాస పువ్వు",
+      "star anise",
+      "anise",
+      "aniseed",
+      "badian",
+    ],
+    hsn_code: "0909",
+    gst_rate: "",
+    source:
+      "CBIC GST HSN heading 0909 covers seeds of anise, badian, fennel, coriander, cumin or caraway; juniper berries. GST rate can vary by exact form/classification, so only HSN is auto-filled here.",
+    source_url: "https://cbic-gst.gov.in/gst-goods-services-rates.html",
+  },
 ];
 
 export const findHsnGstMapping = (...values) => {
