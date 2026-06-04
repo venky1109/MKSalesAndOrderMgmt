@@ -29,6 +29,7 @@ const CreateDispatchOrderSection = ({
   outlets = [],
   loading = false,
   ratePlans = [],
+  units = [],
 }) => {
   const dispatch = useDispatch();
 
@@ -40,6 +41,7 @@ const CreateDispatchOrderSection = ({
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [search, setSearch] = useState('');
   const [items, setItems] = useState([]);
+  const [dynamicPackForms, setDynamicPackForms] = useState({});
   const inventorySearchRef = useRef(null);
 
   useEffect(() => {
@@ -119,6 +121,36 @@ const CreateDispatchOrderSection = ({
     return numeric.toFixed(digits).replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
   };
 
+  const padBarcodePart = (value, size) => String(value || '').padStart(size, '0');
+
+  const makeMkBarcode = ({ product_id, brand_id, category_id, unit_id, quantity }) => {
+    const productId = Number(product_id || 0);
+    const brandId = Number(brand_id || 0);
+    const categoryId = Number(category_id || 0);
+    const unitId = Number(unit_id || 0);
+    const packQuantity = Number(quantity || 0);
+
+    if (!productId || !brandId || !categoryId || !unitId || !packQuantity) return '';
+    if (
+      productId > 9999 ||
+      brandId > 999 ||
+      categoryId > 99 ||
+      unitId > 99 ||
+      packQuantity > 999
+    ) {
+      return '';
+    }
+
+    return (
+      '890' +
+      padBarcodePart(productId, 4) +
+      padBarcodePart(brandId, 3) +
+      padBarcodePart(categoryId, 2) +
+      padBarcodePart(unitId, 2) +
+      padBarcodePart(packQuantity, 3)
+    );
+  };
+
   const getItemUnitQtyInGrams = (item) => {
     const qty = Number(item.barcode_quantity || item.quantity || 1);
     const unit = normalizeUnit(item.unit_short_code || item.unit_name || item.units);
@@ -128,6 +160,33 @@ const CreateDispatchOrderSection = ({
 
     return qty;
   };
+
+  const getQuantityBaseUnits = (quantity, unitCode) => {
+    const qty = Number(quantity || 0);
+    const unit = normalizeUnit(unitCode);
+
+    if (!qty) return 0;
+    if (unit.startsWith('kg')) return qty * 1000;
+    if (unit.startsWith('gm') || unit.startsWith('gms') || unit === 'g') return qty;
+
+    return qty;
+  };
+
+  const isWeightUnit = (item) => {
+    const unit = normalizeUnit(item.unit_short_code || item.unit_name || item.units || item.unit);
+    return (
+      unit.startsWith('kg') ||
+      unit.startsWith('gm') ||
+      unit.startsWith('gms') ||
+      unit === 'g'
+    );
+  };
+
+  const getSourcePackBaseUnits = (item) =>
+    getQuantityBaseUnits(
+      item.source_pack_quantity,
+      item.source_pack_unit_short_code || getUnitById(item.source_pack_unit_id).unit_short_code
+    );
 
   const firstNumber = (...values) => {
     for (const value of values) {
@@ -209,9 +268,15 @@ const CreateDispatchOrderSection = ({
 
   const getPackingBarcodeMatches = (item) => {
     const productId = String(item.product_id || item.catalog_product_id || '');
+    const sourceBarcodeId = String(item.product_barcode_id || item.catalog_product_barcode_id || '');
     const productName = normalizeText(item.product_name);
     const productNameWithoutBrand = normalizeText(
       String(item.product_name || '').replace(item.brand_name_english || item.brand_name || '', '')
+    );
+    const productNameWithoutCode = normalizeText(
+      String(item.product_name || '')
+        .replace(/^[A-Z]+\d+\s*-\s*/i, '')
+        .replace(item.brand_name_english || item.brand_name || '', '')
     );
     const brandName = normalizeText(item.brand_name_english || item.brand_name);
     const categoryName = normalizeText(item.category_name_english || item.category_name);
@@ -222,6 +287,7 @@ const CreateDispatchOrderSection = ({
           barcode.product_id || barcode.catalog_product_id || ''
         );
         const sameProductId = productId && barcodeProductId === productId;
+        const barcodeId = String(barcode.id || barcode.product_barcode_id || '');
         const barcodeName = normalizeText(
             barcode.product_name_eng ||
               barcode.product_name ||
@@ -232,27 +298,106 @@ const CreateDispatchOrderSection = ({
           productName &&
           (barcodeName === productName ||
             (productNameWithoutBrand && barcodeName === productNameWithoutBrand) ||
+            (productNameWithoutCode && barcodeName === productNameWithoutCode) ||
+            (productName && barcodeName && productName.endsWith(barcodeName)) ||
             (!barcodeName && sameProductId));
         const sameBrand =
           !brandName ||
+          !(
+            barcode.brand_name_english ||
+            barcode.brand_name ||
+            barcode.brand
+          ) ||
           normalizeText(
             barcode.brand_name_english || barcode.brand_name || barcode.brand
           ) === brandName;
         const sameCategory =
           !categoryName ||
+          !(
+            barcode.category_name_english ||
+            barcode.category_name ||
+            barcode.category
+          ) ||
           normalizeText(
             barcode.category_name_english ||
               barcode.category_name ||
               barcode.category
           ) === categoryName;
 
-        return sameName && sameBrand && sameCategory;
+        if (sameProductId) return barcodeId !== sourceBarcodeId;
+
+        return sameName && sameBrand && sameCategory && barcodeId !== sourceBarcodeId;
       })
       .sort((a, b) => getItemUnitQtyInGrams(a) - getItemUnitQtyInGrams(b));
   };
 
+  const getDefaultPackUnitId = () => {
+    const preferred = (units || []).find((unit) => {
+      const text = normalizeUnit(
+        [unit.unit_short_code, unit.unit_code, unit.unit_name].filter(Boolean).join(' ')
+      );
+      return text.includes('gms') || text === 'gm' || text === 'g';
+    });
+
+    return preferred?.id || '';
+  };
+
+  const getUnitById = (unitId) =>
+    (units || []).find((unit) => String(unit.id) === String(unitId)) || {};
+
+  const findUnitByCode = (code) => {
+    const normalizedCode = normalizeUnit(code);
+    return (
+      (units || []).find((unit) => {
+        const unitText = normalizeUnit(
+          [unit.unit_short_code, unit.unit_code, unit.unit_name].filter(Boolean).join(' ')
+        );
+        if (normalizedCode.startsWith('kg')) return unitText.startsWith('kg');
+        if (normalizedCode.startsWith('gm') || normalizedCode === 'g') {
+          return unitText.startsWith('gm') || unitText.startsWith('gms') || unitText === 'g';
+        }
+        return unitText === normalizedCode;
+      }) || {}
+    );
+  };
+
+  const getPackSizeFromText = (text) => {
+    const match = String(text || '').match(/([0-9]+(?:\.[0-9]+)?)\s*(kg|kgs|gms|gm|g)\b/i);
+    if (!match) return null;
+
+    const unit = findUnitByCode(match[2]);
+    return {
+      quantity: Number(match[1]),
+      unit_id: unit.id || '',
+      unit_short_code: unit.unit_short_code || match[2].toUpperCase(),
+      unit_name: unit.unit_name || unit.unit_short_code || match[2].toUpperCase(),
+    };
+  };
+
+  const updateDynamicPackForm = (itemIndex, field, value) => {
+    setDynamicPackForms((prev) => ({
+      ...prev,
+      [itemIndex]: {
+        quantity: '',
+        unit_id: getDefaultPackUnitId(),
+        gst_rate: 0,
+        margin_percentage: 0,
+        labour_percentage: 0,
+        transport_percentage: 0,
+        load_percentage: 0,
+        unload_percentage: 0,
+        ...(prev[itemIndex] || {}),
+        [field]: value,
+      },
+    }));
+  };
+
   const getConfiguredSourceUnits = (item) => {
-    const sourceGrams = getItemUnitQtyInGrams(item);
+    const sourceGrams = isWeightUnit(item)
+      ? getItemUnitQtyInGrams(item)
+      : getSourcePackBaseUnits(item);
+
+    if (!sourceGrams && !isWeightUnit(item)) return Number(item.no_of_units || item.qty || 0);
 
     if (!sourceGrams) return Number(item.no_of_units || 0);
 
@@ -471,11 +616,41 @@ const CreateDispatchOrderSection = ({
 
       product_code: inventoryRow.product_code,
       product_name: getDispatchItemProductName(inventoryRow),
+      brand_id: inventoryRow.brand_id || inventoryRow.catalog_brand_id || '',
+      category_id: inventoryRow.category_id || inventoryRow.catalog_category_id || '',
+      unit_id: inventoryRow.unit_id || inventoryRow.catalog_unit_id || '',
 
       brand_name_english: getDispatchItemBrand(inventoryRow),
       category_name_english: inventoryRow.category_name_english,
       unit_short_code: inventoryRow.unit_short_code,
       unit_name: inventoryRow.unit_name,
+      source_pack_quantity:
+        getPackSizeFromText(
+          [
+            inventoryRow.product_name,
+            inventoryRow.product_name_eng,
+            inventoryRow.display_product_name,
+            inventoryRow.product_code,
+          ].join(' ')
+        )?.quantity || '',
+      source_pack_unit_id:
+        getPackSizeFromText(
+          [
+            inventoryRow.product_name,
+            inventoryRow.product_name_eng,
+            inventoryRow.display_product_name,
+            inventoryRow.product_code,
+          ].join(' ')
+        )?.unit_id || '',
+      source_pack_unit_short_code:
+        getPackSizeFromText(
+          [
+            inventoryRow.product_name,
+            inventoryRow.product_name_eng,
+            inventoryRow.display_product_name,
+            inventoryRow.product_code,
+          ].join(' ')
+        )?.unit_short_code || '',
 
       exp_date: inventoryRow.exp_date_only,
       available_units: availableUnits,
@@ -626,6 +801,85 @@ const CreateDispatchOrderSection = ({
     );
   };
 
+  const addDynamicPackingConfig = (itemIndex) => {
+    const form = {
+      quantity: '',
+      unit_id: getDefaultPackUnitId(),
+      gst_rate: 0,
+      margin_percentage: 0,
+      labour_percentage: 0,
+      transport_percentage: 0,
+      load_percentage: 0,
+      unload_percentage: 0,
+      ...(dynamicPackForms[itemIndex] || {}),
+    };
+    const quantity = Number(form.quantity || 0);
+    const unit = getUnitById(form.unit_id);
+
+    if (!quantity || !form.unit_id) {
+      alert('Enter pack quantity and unit.');
+      return;
+    }
+
+    setItems((prev) =>
+      prev.map((item, index) => {
+        if (index !== itemIndex) return item;
+
+        const alreadyAdded = (item.packing_configs || []).some(
+          (config) =>
+            Number(config.barcode_quantity || 0) === quantity &&
+            String(config.unit_id || '') === String(form.unit_id || '')
+        );
+
+        if (alreadyAdded) return item;
+
+        const newConfig = {
+          dynamic_pack: true,
+          product_barcode_id: null,
+          product_id: Number(item.product_id || 0),
+          brand_id: Number(item.brand_id || 0),
+          category_id: Number(item.category_id || 0),
+          unit_id: Number(form.unit_id),
+          product_name: item.product_name,
+          barcode_quantity: quantity,
+          quantity,
+          unit_short_code: unit.unit_short_code || unit.unit_name || '',
+          unit_name: unit.unit_name || unit.unit_short_code || '',
+          pack_count: 1,
+          mk_barcode: makeMkBarcode({
+            product_id: item.product_id,
+            brand_id: item.brand_id,
+            category_id: item.category_id,
+            unit_id: form.unit_id,
+            quantity,
+          }),
+          rate_plan_id: null,
+          rate_for: 'internal_packing',
+          gst_rate: Number(form.gst_rate || 0),
+          margin_percentage: Number(form.margin_percentage || 0),
+          labour_percentage: Number(form.labour_percentage || 0),
+          transport_percentage: Number(form.transport_percentage || 0),
+          load_percentage: Number(form.load_percentage || 0),
+          unload_percentage: Number(form.unload_percentage || 0),
+          notes: 'Auto-create barcode and rate plan from packing',
+        };
+
+        return {
+          ...item,
+          packing_configs: [...(item.packing_configs || []), newConfig],
+        };
+      })
+    );
+
+    setDynamicPackForms((prev) => ({
+      ...prev,
+      [itemIndex]: {
+        ...form,
+        quantity: '',
+      },
+    }));
+  };
+
   const updatePackingConfig = (itemIndex, configIndex, field, value) => {
     setItems((prev) =>
       prev.map((item, index) => {
@@ -702,14 +956,28 @@ const CreateDispatchOrderSection = ({
     }
 
     if (isInternalPacking) {
+      const invalidSourcePackItem = items.find(
+        (item) =>
+          !isWeightUnit(item) &&
+          (!Number(item.source_pack_quantity || 0) || !item.source_pack_unit_id)
+      );
+
+      if (invalidSourcePackItem) {
+        alert('Please enter Source Pack quantity and unit for QTY source items, for example 10 KG.');
+        return;
+      }
+
       const invalidPackingConfig = items.find(
         (item) =>
           !(item.packing_configs || []).length ||
           (item.packing_configs || []).some(
             (config) =>
-              !config.product_barcode_id ||
+              (!config.product_barcode_id &&
+                (!config.dynamic_pack ||
+                  !config.unit_id ||
+                  Number(config.barcode_quantity || 0) <= 0)) ||
               Number(config.pack_count || 0) <= 0 ||
-              !config.rate_plan_id
+              (!config.dynamic_pack && !config.rate_plan_id)
           )
       );
 
@@ -747,9 +1015,30 @@ const CreateDispatchOrderSection = ({
         source_unit_price: isInternalPacking
           ? Number(getSourceUnitPrice(item) || 0)
           : undefined,
+        source_pack_quantity: isInternalPacking
+          ? Number(
+              isWeightUnit(item)
+                ? item.barcode_quantity || item.quantity || 0
+                : item.source_pack_quantity || 0
+            )
+          : undefined,
+        source_pack_unit_short_code: isInternalPacking
+          ? isWeightUnit(item)
+            ? item.unit_short_code || item.unit_name || null
+            : item.source_pack_unit_short_code ||
+              getUnitById(item.source_pack_unit_id).unit_short_code ||
+              null
+          : undefined,
         packing_configurations: isInternalPacking
           ? (item.packing_configs || []).map((config) => ({
-              product_barcode_id: Number(config.product_barcode_id),
+              product_barcode_id: config.product_barcode_id
+                ? Number(config.product_barcode_id)
+                : null,
+              dynamic_pack: Boolean(config.dynamic_pack),
+              product_id: Number(config.product_id || item.product_id || 0),
+              brand_id: Number(config.brand_id || item.brand_id || 0),
+              category_id: Number(config.category_id || item.category_id || 0),
+              unit_id: Number(config.unit_id || 0),
               mk_barcode: config.mk_barcode || null,
               bar_code: config.bar_code || null,
               barcode: config.barcode || config.bar_code || null,
@@ -760,6 +1049,23 @@ const CreateDispatchOrderSection = ({
               rate_plan_id: config.rate_plan_id
                 ? Number(config.rate_plan_id)
                 : null,
+              rate_for: config.rate_for || 'internal_packing',
+              source_pack_quantity: Number(
+                isWeightUnit(item)
+                  ? item.barcode_quantity || item.quantity || 0
+                  : item.source_pack_quantity || 0
+              ),
+              source_pack_unit_short_code: isWeightUnit(item)
+                ? item.unit_short_code || item.unit_name || null
+                : item.source_pack_unit_short_code ||
+                  getUnitById(item.source_pack_unit_id).unit_short_code ||
+                  null,
+              gst_rate: Number(config.gst_rate || 0),
+              margin_percentage: Number(config.margin_percentage || 0),
+              labour_percentage: Number(config.labour_percentage || 0),
+              transport_percentage: Number(config.transport_percentage || 0),
+              load_percentage: Number(config.load_percentage || 0),
+              unload_percentage: Number(config.unload_percentage || 0),
             }))
           : undefined,
       })),
@@ -1121,7 +1427,7 @@ const CreateDispatchOrderSection = ({
 
                 return (
                   <div key={`packing-${item.inventory_product_id}-${itemIndex}`}>
-                    <div className="mb-2 grid gap-3 md:grid-cols-[minmax(0,1fr)_180px_320px] md:items-end">
+                    <div className="mb-2 grid gap-3 md:grid-cols-[minmax(0,1fr)_180px_130px_140px_320px] md:items-end">
                       <div>
                         <div className="font-bold text-gray-900">
                           {[item.product_code, item.product_name]
@@ -1146,6 +1452,55 @@ const CreateDispatchOrderSection = ({
                           className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
                           placeholder="Cost per source pack"
                         />
+                      </label>
+
+                      <label className="block text-xs font-semibold text-gray-600">
+                        Source Pack
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.001"
+                          value={
+                            isWeightUnit(item)
+                              ? item.barcode_quantity || item.quantity || ''
+                              : item.source_pack_quantity || ''
+                          }
+                          onChange={(e) =>
+                            updateItem(itemIndex, 'source_pack_quantity', e.target.value)
+                          }
+                          readOnly={isWeightUnit(item)}
+                          className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
+                          placeholder="50"
+                        />
+                      </label>
+
+                      <label className="block text-xs font-semibold text-gray-600">
+                        Source Unit
+                        <select
+                          value={
+                            isWeightUnit(item)
+                              ? item.unit_id || ''
+                              : item.source_pack_unit_id || ''
+                          }
+                          onChange={(e) => {
+                            const unit = getUnitById(e.target.value);
+                            updateItem(itemIndex, 'source_pack_unit_id', e.target.value);
+                            updateItem(
+                              itemIndex,
+                              'source_pack_unit_short_code',
+                              unit.unit_short_code || unit.unit_name || ''
+                            );
+                          }}
+                          disabled={isWeightUnit(item)}
+                          className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
+                        >
+                          <option value="">Unit</option>
+                          {(units || []).map((unit) => (
+                            <option key={unit.id} value={unit.id}>
+                              {unit.unit_short_code || unit.unit_name}
+                            </option>
+                          ))}
+                        </select>
                       </label>
 
                       <select
@@ -1192,6 +1547,74 @@ const CreateDispatchOrderSection = ({
                       </select>
                     </div>
 
+                    <div className="mb-3 grid gap-2 rounded-lg border bg-gray-50 p-3 md:grid-cols-[110px_140px_repeat(6,90px)_120px] md:items-end">
+                      <label className="block text-xs font-semibold text-gray-600">
+                        Pack Qty
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={dynamicPackForms[itemIndex]?.quantity || ''}
+                          onChange={(e) =>
+                            updateDynamicPackForm(itemIndex, 'quantity', e.target.value)
+                          }
+                          className="mt-1 w-full rounded border px-2 py-1 text-sm"
+                          placeholder="500"
+                        />
+                      </label>
+
+                      <label className="block text-xs font-semibold text-gray-600">
+                        Unit
+                        <select
+                          value={
+                            dynamicPackForms[itemIndex]?.unit_id || getDefaultPackUnitId()
+                          }
+                          onChange={(e) =>
+                            updateDynamicPackForm(itemIndex, 'unit_id', e.target.value)
+                          }
+                          className="mt-1 w-full rounded border px-2 py-1 text-sm"
+                        >
+                          <option value="">Unit</option>
+                          {(units || []).map((unit) => (
+                            <option key={unit.id} value={unit.id}>
+                              {unit.unit_short_code || unit.unit_name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+
+                      {[
+                        ['gst_rate', 'GST %'],
+                        ['margin_percentage', 'Margin %'],
+                        ['labour_percentage', 'Labour %'],
+                        ['transport_percentage', 'Transport %'],
+                        ['load_percentage', 'Load %'],
+                        ['unload_percentage', 'Unload %'],
+                      ].map(([field, label]) => (
+                        <label key={field} className="block text-xs font-semibold text-gray-600">
+                          {label}
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={dynamicPackForms[itemIndex]?.[field] ?? 0}
+                            onChange={(e) =>
+                              updateDynamicPackForm(itemIndex, field, e.target.value)
+                            }
+                            className="mt-1 w-full rounded border px-2 py-1 text-sm"
+                          />
+                        </label>
+                      ))}
+
+                      <button
+                        type="button"
+                        onClick={() => addDynamicPackingConfig(itemIndex)}
+                        className="rounded-lg bg-indigo-700 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-800"
+                      >
+                        Create pack
+                      </button>
+                    </div>
+
                     <div className="overflow-x-auto rounded-lg border">
                       <table className="min-w-[1180px] w-full text-xs">
                         <thead className="bg-gray-100 text-gray-700">
@@ -1226,7 +1649,7 @@ const CreateDispatchOrderSection = ({
 
                               return (
                               <tr
-                                key={`${config.product_barcode_id}-${configIndex}`}
+                                key={`${config.product_barcode_id || 'dynamic'}-${configIndex}`}
                                 className="border-t"
                               >
                                 <td className="p-2 font-semibold">
@@ -1235,6 +1658,16 @@ const CreateDispatchOrderSection = ({
                                     config.MKBarcode ||
                                     config.bar_code ||
                                     config.barcode ||
+                                    (config.dynamic_pack
+                                      ? makeMkBarcode({
+                                          product_id: config.product_id || item.product_id,
+                                          brand_id: config.brand_id || item.brand_id,
+                                          category_id: config.category_id || item.category_id,
+                                          unit_id: config.unit_id,
+                                          quantity: config.barcode_quantity || config.quantity,
+                                        })
+                                      : '') ||
+                                    (config.dynamic_pack ? 'Auto create barcode' : '') ||
                                     '-'}
                                 </td>
                                   <td className="p-2">
@@ -1259,30 +1692,36 @@ const CreateDispatchOrderSection = ({
                                   />
                                 </td>
                                 <td className="p-2">
-                                  <select
-                                    value={config.rate_plan_id || ''}
-                                    onChange={(e) =>
-                                      updatePackingConfig(
-                                        itemIndex,
-                                        configIndex,
-                                        'rate_plan_id',
-                                        e.target.value
-                                      )
-                                    }
-                                    className="w-40 rounded border px-2 py-1"
-                                  >
-                                    <option value="">Select rate</option>
-                                    {configRatePlans.map((plan) => (
-                                      <option key={plan.id} value={plan.id}>
-                                        {[
-                                          plan.rate_for,
-                                          plan.gst_rate ? `GST ${plan.gst_rate}%` : null,
-                                        ]
-                                          .filter(Boolean)
-                                          .join(' | ')}
-                                      </option>
-                                    ))}
-                                  </select>
+                                  {config.dynamic_pack ? (
+                                    <span className="inline-flex rounded bg-indigo-50 px-2 py-1 font-semibold text-indigo-700">
+                                      Auto create
+                                    </span>
+                                  ) : (
+                                    <select
+                                      value={config.rate_plan_id || ''}
+                                      onChange={(e) =>
+                                        updatePackingConfig(
+                                          itemIndex,
+                                          configIndex,
+                                          'rate_plan_id',
+                                          e.target.value
+                                        )
+                                      }
+                                      className="w-40 rounded border px-2 py-1"
+                                    >
+                                      <option value="">Select rate</option>
+                                      {configRatePlans.map((plan) => (
+                                        <option key={plan.id} value={plan.id}>
+                                          {[
+                                            plan.rate_for,
+                                            plan.gst_rate ? `GST ${plan.gst_rate}%` : null,
+                                          ]
+                                            .filter(Boolean)
+                                            .join(' | ')}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  )}
                                 </td>
                                 {[
                                   'gst_rate',
@@ -1293,7 +1732,25 @@ const CreateDispatchOrderSection = ({
                                   'unload_percentage',
                                 ].map((field) => (
                                   <td key={field} className="p-2 text-center">
-                                    {config[field] || 0}
+                                    {config.dynamic_pack ? (
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        step="0.01"
+                                        value={config[field] || 0}
+                                        onChange={(e) =>
+                                          updatePackingConfig(
+                                            itemIndex,
+                                            configIndex,
+                                            field,
+                                            e.target.value
+                                          )
+                                        }
+                                        className="w-20 rounded border px-2 py-1 text-center"
+                                      />
+                                    ) : (
+                                      config[field] || 0
+                                    )}
                                   </td>
                                 ))}
                                 <td className="p-2 text-center">

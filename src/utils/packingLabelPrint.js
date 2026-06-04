@@ -1,4 +1,5 @@
 import {
+  getCalculatedPackingAmounts,
   getDispatchItemPackingConfigurations,
   getDispatchItemProductName,
   getDispatchItemUnit,
@@ -245,10 +246,15 @@ export const getPackingLabelRows = (order) =>
 
     return configs.flatMap((config, configIndex) => {
       const noteConfig = noteConfigs[configIndex] || {};
+      const calculatedAmounts = getCalculatedPackingAmounts(item, {
+        ...noteConfig,
+        ...config,
+      });
       const labelConfig = {
         ...noteConfig,
         ...config,
         package_amount: firstValue(
+          calculatedAmounts.packageAmount,
           config.package_amount,
           config.packageAmount,
           config.purchase_amount,
@@ -257,6 +263,7 @@ export const getPackingLabelRows = (order) =>
           noteConfig.packageAmount
         ),
         mrp_amount: firstValue(
+          calculatedAmounts.mrpAmount,
           config.mrp_amount,
           config.mrpAmount,
           config.MRP,
