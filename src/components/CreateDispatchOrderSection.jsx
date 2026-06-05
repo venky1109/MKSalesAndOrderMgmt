@@ -374,6 +374,14 @@ const CreateDispatchOrderSection = ({
     };
   };
 
+  const getPackingProductName = (name) =>
+    String(name || '')
+      .replace(/\b\d+(?:\.\d+)?\s*(kg|kgs|gms|gm|g)\s*(bag|pack|pkt|packet|sack)?\b/gi, '')
+      .replace(/\b(bag|pack|pkt|packet|sack)\b/gi, '')
+      .replace(/\s*-\s*$/g, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+
   const updateDynamicPackForm = (itemIndex, field, value) => {
     setDynamicPackForms((prev) => ({
       ...prev,
@@ -782,7 +790,7 @@ const CreateDispatchOrderSection = ({
           product_name:
             barcodeConfig.product_name_eng ||
             barcodeConfig.product_name ||
-            item.product_name,
+            getPackingProductName(item.product_name),
           barcode_quantity:
             barcodeConfig.barcode_quantity || barcodeConfig.quantity || '',
           unit_short_code:
@@ -840,7 +848,7 @@ const CreateDispatchOrderSection = ({
           brand_id: Number(item.brand_id || 0),
           category_id: Number(item.category_id || 0),
           unit_id: Number(form.unit_id),
-          product_name: item.product_name,
+          product_name: getPackingProductName(item.product_name),
           barcode_quantity: quantity,
           quantity,
           unit_short_code: unit.unit_short_code || unit.unit_name || '',
@@ -1671,7 +1679,7 @@ const CreateDispatchOrderSection = ({
                                     '-'}
                                 </td>
                                   <td className="p-2">
-                                    {config.product_name || item.product_name} -{' '}
+                                    {getPackingProductName(config.product_name || item.product_name)} -{' '}
                                     {formatPackUnit(config)}
                                   </td>
                                 <td className="p-2 text-center">

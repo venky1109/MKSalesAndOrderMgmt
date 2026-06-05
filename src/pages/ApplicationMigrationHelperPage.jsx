@@ -125,11 +125,21 @@ const getMigrationImageUrl = (...sources) => {
   return "";
 };
 
+const getExcelImageUrl = (row) => {
+  const url = String(row?.imageUrl || "").trim();
+  if (url) return url;
+
+  const imageName = String(row?.imageName || "").trim();
+  return /^https?:\/\//i.test(imageName) ? imageName : "";
+};
+
 const getProductBarcodes = (product) => [
   ...asArray(product?.barcode),
   product?.mkid,
+  product?.mk_barcode,
   product?.barcodeValue,
   ...asArray(getFirstFinancial(getFirstBrand(product))?.barcode),
+  getFirstFinancial(getFirstBrand(product))?.mk_barcode,
 ].filter(Boolean);
 
 const makeFinancialProductOption = (product, brand, financial) => ({
@@ -169,6 +179,12 @@ const getFinancialPackText = (product) => {
 
 const uniqueValues = (values) =>
   Array.from(new Set(values.filter(Boolean).map((value) => String(value).trim()).filter(Boolean)));
+
+const barcodeTokens = (value) =>
+  asArray(value)
+    .flatMap((item) => String(item || "").split("|"))
+    .map((item) => item.trim())
+    .filter(Boolean);
 
 const getProductSearchText = (product) =>
   [
@@ -336,6 +352,43 @@ const makeWeightPack = (quantity, units) => {
 
   if (qty && unit) return `${qty}${PACK_DELIMITER}${unit}`;
   return qty || unit;
+};
+
+const getManualFinancialPackText = (row) =>
+  makeWeightPack(row?.packQuantity, row?.packUnit) || row?.packText || "-";
+
+const stripPackFromProductName = (name, quantity = "", units = "") => {
+  let text = String(name || "").trim();
+  if (!text) return "";
+
+  const qty = String(quantity || "").trim();
+  const unit = String(units || "").trim();
+  const unitVariants = unit
+    ? [
+        unit,
+        normalizeUnitText(unit),
+        unit.replace(/s$/i, ""),
+        unit.toUpperCase(),
+        unit.toLowerCase(),
+      ].filter(Boolean)
+    : ["kg", "kgs", "g", "gm", "gms", "ml", "ltr", "qty", "pcs", "pc"];
+  const escapedVariants = Array.from(new Set(unitVariants))
+    .map((value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("|");
+
+  if (qty && escapedVariants) {
+    const escapedQty = qty.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    text = text
+      .replace(new RegExp(`\\s*[-–—_/|]*\\s*${escapedQty}\\s*(?:${escapedVariants})\\.?\\s*$`, "i"), "")
+      .replace(new RegExp(`\\s*[-–—_/|]*\\s*${escapedQty.replace(/\\.0+$/, "")}\\s*(?:${escapedVariants})\\.?\\s*$`, "i"), "");
+  }
+
+  text = text.replace(
+    /\s*[-–—_/|]*\s*\d+(?:\.\d+)?\s*(?:kg|kgs|g|gm|gms|gram|grams|ml|ltr|ltrs|qty|pc|pcs)\.?\s*$/i,
+    ""
+  );
+
+  return text.replace(/\s*[-–—_/|]+\s*$/g, "").replace(/\s+/g, " ").trim();
 };
 
 const getBarcodeQuantity = (item) =>
@@ -522,6 +575,58 @@ const findCatalogCategoryByName = (rows, categoryName) =>
       category?.name,
     ].some((value) => sameNormalizedText(value, categoryName))
   );
+
+const catalogBarcodeMatchesCategoryName = (item, categoryName) => {
+  if (!categoryName) return true;
+  return [
+    item?.category_name_english,
+    item?.category_name_telugu,
+    item?.category_name,
+    item?.category,
+  ].some((value) => sameNormalizedText(value, categoryName));
+};
+
+const catalogProductMatchesCategoryName = (item, categoryName) => {
+  if (!categoryName) return true;
+  return [
+    item?.category_name_english,
+    item?.category_name_telugu,
+    item?.category_name,
+    item?.category,
+    ].some((value) => sameNormalizedText(value, categoryName));
+};
+
+const catalogBarcodeMatchesProductBrandCategory = (item, row) => {
+  const productMatched =
+    !row.productName ||
+    [item?.product_name_eng, item?.product_name, item?.product_code].some((value) =>
+      textMatchesLoosely(value, row.productName)
+    );
+  const brandMatched =
+    !row.brand ||
+    [item?.brand_name_english, item?.brand_name, item?.brand].some((value) =>
+      sameNormalizedText(value, row.brand)
+    );
+  const categoryMatched = catalogBarcodeMatchesCategoryName(item, row.category);
+
+  return productMatched && brandMatched && categoryMatched;
+};
+
+const catalogBarcodeMatchesPack = (item, quantity, unit) => {
+  const itemQuantity = Number(item?.quantity);
+  const rowQuantity = Number(quantity);
+  const itemUnit = normalizeUnitText(item?.unit_short_code || item?.unit_name || item?.weight || item?.units || item?.unit);
+  const rowUnit = normalizeUnitText(unit);
+
+  return (
+    Number.isFinite(itemQuantity) &&
+    Number.isFinite(rowQuantity) &&
+    itemQuantity === rowQuantity &&
+    itemUnit &&
+    rowUnit &&
+    itemUnit === rowUnit
+  );
+};
 
 const getRequestId = (request) =>
   pickId(request?.id, request?._id, request?.request_id, request?.requestId);
@@ -739,8 +844,12 @@ const getUnitPurchasePriceValue = (...sources) =>
 
 const bulkColumnAliases = {
   productName: ["product name", "product nam", "product nar", "productname", "product", "name"],
+  productTeluguName: ["telugu name", "telugu", "product telugu name", "teluguname"],
+  destination: ["destination", "migration destination", "target"],
   noOfUnits: ["no:of units", "no of units", "no.of units", "units", "stock", "count in stock"],
-  unitPrice: ["amount/unit", "amount per unit", "unit price", "price"],
+  unitPrice: ["amount/unit", "amount per unit", "unit price", "price", "purchase price"],
+  sellingPrice: ["selling price", "sp", "sale price", "dprice", "dispatch price"],
+  discount: ["discount", "discount %", "discount percentage"],
   unitMrp: ["unit mrp", "unit_mrp", "inventory unit mrp", "inventory_unit_mrp", "mrp", "unit MRP"],
   total: ["total", "amount"],
   mfgDate: ["mfgdate", "mfg date", "manufacturing date"],
@@ -752,7 +861,18 @@ const bulkColumnAliases = {
   packQuantity: ["pack quantity", "quantity", "pack qty", "qty"],
   packUnit: ["pack unit", "unit", "uom"],
   imageName: ["image name", "image"],
-  imageUrl: ["image url", "url"],
+  imageUrl: [
+    "image url",
+    "image_url",
+    "imageurl",
+    "image url 1",
+    "image_url_1",
+    "image link",
+    "image hyperlink",
+    "photo url",
+    "firebase url",
+    "url",
+  ],
   barcode: ["barcode", "vendor barcode", "ean", "upc"],
   mkBarcode: ["mk barcode", "mkbarcode", "mk_barcode"],
   outlet: ["outlet", "outlet name"],
@@ -765,6 +885,13 @@ const bulkColumnAliases = {
   productBarcodeId: ["product barcode id", "product_barcode_id", "barcode id"],
   warehouseId: ["warehouse id", "warehouse_id"],
   outletId: ["outlet id", "outlet_id"],
+  supplierId: ["supplier id", "supplier_id", "stakeholder id", "stakeholder_id"],
+  marginPercentage: ["margin %", "margin", "margin percentage"],
+  gstPercentage: ["gst %", "gst percentage", "rate gst", "rate gst %"],
+  labourPercentage: ["packing %", "packing", "labour %", "labour percentage"],
+  transportPercentage: ["transport %", "transport", "transport percentage"],
+  loadPercentage: ["load %", "load", "load percentage"],
+  unloadPercentage: ["unload %", "unload", "unload percentage"],
   rollbackQuantity: ["rollback quantity", "rollback qty", "quantity to rollback"],
   rollbackScope: ["rollback scope", "scope"],
   reason: ["reason", "rollback reason", "reason for rollback"],
@@ -827,9 +954,10 @@ const getRelativeDateInput = (daysFromToday) => {
 };
 
 const normalizeBulkRow = (row, index) => {
-  const productName = getBulkCell(row, bulkColumnAliases.productName);
+  const rawProductName = getBulkCell(row, bulkColumnAliases.productName);
   const packQuantity = getBulkCell(row, bulkColumnAliases.packQuantity);
   const packUnit = getBulkCell(row, bulkColumnAliases.packUnit);
+  const productName = stripPackFromProductName(rawProductName, packQuantity, packUnit);
   const noOfUnits = getBulkCell(row, bulkColumnAliases.noOfUnits);
   const rollbackQuantity = getBulkCell(row, bulkColumnAliases.rollbackQuantity);
   const rollbackScope = getBulkCell(row, bulkColumnAliases.rollbackScope);
@@ -840,8 +968,12 @@ const normalizeBulkRow = (row, index) => {
     status: "pending",
     message: "",
     productName,
+    productTeluguName: getBulkCell(row, bulkColumnAliases.productTeluguName),
+    destination: normalizeText(getBulkCell(row, bulkColumnAliases.destination)) === "inventory" ? "inventory" : "outlet",
     noOfUnits,
     unitPrice: sanitizeMoneyInput(getBulkCell(row, bulkColumnAliases.unitPrice)),
+    sellingPrice: sanitizeMoneyInput(getBulkCell(row, bulkColumnAliases.sellingPrice)),
+    discount: sanitizeMoneyInput(getBulkCell(row, bulkColumnAliases.discount)),
     unitMrp: sanitizeMoneyInput(getBulkCell(row, bulkColumnAliases.unitMrp)),
     total: getBulkCell(row, bulkColumnAliases.total),
     mfgDate: normalizeExcelDate(getBulkCell(row, bulkColumnAliases.mfgDate)),
@@ -867,6 +999,13 @@ const normalizeBulkRow = (row, index) => {
     productBarcodeId: getBulkCell(row, bulkColumnAliases.productBarcodeId),
     warehouseId: getBulkCell(row, bulkColumnAliases.warehouseId),
     outletId: getBulkCell(row, bulkColumnAliases.outletId),
+    supplierId: getBulkCell(row, bulkColumnAliases.supplierId),
+    marginPercentage: sanitizeMoneyInput(getBulkCell(row, bulkColumnAliases.marginPercentage)),
+    gstPercentage: sanitizeMoneyInput(getBulkCell(row, bulkColumnAliases.gstPercentage)),
+    labourPercentage: sanitizeMoneyInput(getBulkCell(row, bulkColumnAliases.labourPercentage)),
+    transportPercentage: sanitizeMoneyInput(getBulkCell(row, bulkColumnAliases.transportPercentage)),
+    loadPercentage: sanitizeMoneyInput(getBulkCell(row, bulkColumnAliases.loadPercentage)),
+    unloadPercentage: sanitizeMoneyInput(getBulkCell(row, bulkColumnAliases.unloadPercentage)),
     rollbackQuantity: rollbackQuantity || noOfUnits,
     rollbackScope: rollbackScope || "single_transaction",
     reason: getBulkCell(row, bulkColumnAliases.reason),
@@ -1114,6 +1253,8 @@ const ApplicationMigrationHelperPage = () => {
   const [barcode, setBarcode] = useState("");
   const [lastOutletSearchBarcode, setLastOutletSearchBarcode] = useState("");
   const [barcodeAssignSearch, setBarcodeAssignSearch] = useState("");
+  const [barcodeAssignScan, setBarcodeAssignScan] = useState("");
+  const [barcodeAssignFound, setBarcodeAssignFound] = useState(null);
   const [barcodeAssignLookupOpen, setBarcodeAssignLookupOpen] = useState(false);
   const [liteCountHighlight, setLiteCountHighlight] = useState(false);
   const [migrationMode, setMigrationMode] = useState("outlet");
@@ -2086,6 +2227,183 @@ const ApplicationMigrationHelperPage = () => {
     setStatus("Product financial selected. Scan or enter vendor barcode, then assign.");
   };
 
+  const findBarcodeAssignExisting = (value) => {
+    const scanned = normalizeText(value);
+    if (!scanned) return null;
+
+    const catalogBarcode = catalogBarcodes.find((item) =>
+      [
+        item.barcode,
+        item.mk_barcode,
+        item.product_barcode,
+        item.vendor_barcode,
+      ]
+        .flatMap((itemValue) => barcodeTokens(itemValue))
+        .some((itemValue) => normalizeText(itemValue) === scanned)
+    );
+    const mongoProduct = productsList
+      .flatMap((item) => getProductFinancialOptions(item))
+      .find((item) =>
+        getProductBarcodes(item)
+          .flatMap((itemValue) => barcodeTokens(itemValue))
+          .some((itemValue) => normalizeText(itemValue) === scanned) ||
+        (catalogBarcode &&
+          String(
+            pickId(
+              getFirstFinancial(getFirstBrand(item))?.catalogProductBarcodeId,
+              getFirstFinancial(getFirstBrand(item))?.product_barcode_id,
+              item.catalogProductBarcodeId
+            )
+          ) === String(getEntityId(catalogBarcode) || catalogBarcode.id))
+      );
+    const inventoryProduct = inventoryProducts.find((item) =>
+      [
+        item.barcode,
+        item.bar_code,
+        item.mk_barcode,
+        item.product_barcode,
+        item.vendor_barcode,
+      ]
+        .flatMap((itemValue) => barcodeTokens(itemValue))
+        .some((itemValue) => normalizeText(itemValue) === scanned)
+    );
+
+    if (!catalogBarcode && !mongoProduct && !inventoryProduct) return null;
+    return { catalogBarcode, mongoProduct, inventoryProduct };
+  };
+
+  const hydrateBarcodeAssignExisting = (match, scanned) => {
+    const catalogBarcode = match?.catalogBarcode;
+    const mongoProduct = match?.mongoProduct;
+    const inventoryProduct = match?.inventoryProduct;
+    const source = catalogBarcode || inventoryProduct || {};
+    const mongoFinancial = mongoProduct ? getFirstFinancial(getFirstBrand(mongoProduct)) : {};
+    const name =
+      getProductName(mongoProduct) ||
+      source.product_name_eng ||
+      source.product_name ||
+      inventoryProduct?.product_name ||
+      "";
+    const brandName =
+      getBrandName(getFirstBrand(mongoProduct)) ||
+      source.brand_name_english ||
+      source.brand_name ||
+      inventoryProduct?.brand_name ||
+      "";
+    const categoryName =
+      getCategoryName(mongoProduct) ||
+      source.category_name_english ||
+      source.category_name ||
+      inventoryProduct?.category_name ||
+      "";
+    const packQuantity = pickId(
+      mongoFinancial?.quantity,
+      source.quantity,
+      source.barcode_quantity,
+      inventoryProduct?.quantity,
+      inventoryProduct?.barcode_quantity,
+      ""
+    );
+    const packUnit = pickId(
+      mongoFinancial?.units,
+      source.unit_short_code,
+      source.unit_name,
+      inventoryProduct?.unit_short_code,
+      inventoryProduct?.unit_name,
+      ""
+    );
+    const unit = findCatalogUnit(units, packUnit);
+    const image = getMigrationImageUrl(mongoProduct, source, inventoryProduct);
+    const mrp = sanitizeMoneyInput(
+      pickId(mongoFinancial?.price, source.mrp, source.unit_mrp, inventoryProduct?.unit_mrp, "")
+    );
+    const selling = sanitizeMoneyInput(
+      pickId(mongoFinancial?.dprice, source.dprice, inventoryProduct?.dprice, mrp, "")
+    );
+    const discount = pickId(
+      mongoFinancial?.Discount,
+      mongoFinancial?.discount,
+      calculateDiscountPercent(mrp, selling),
+      ""
+    );
+
+    setBarcodeAssignFound(match);
+    setSelectedCatalogProductId(source.product_id || mongoProduct?.catalogProductId || "");
+    setScannedProduct(mongoProduct || null);
+    setBarcodeAssignSearch([name, makeWeightPack(packQuantity, packUnit)].filter(Boolean).join(" - "));
+    setProductName(name);
+    setProductForm((prev) =>
+      applyHsnGstFallback(
+        {
+          ...prev,
+          product_name_eng: name,
+          product_name_tel: mongoProduct?.teluguname || source.product_name_tel || "",
+          brand_id: source.brand_id || mongoProduct?.catalogBrandId || "",
+          brand_name: brandName,
+          category_id: source.category_id || mongoProduct?.catalogCategoryId || "",
+          category_name: categoryName,
+          hsn_code: mongoProduct?.hsncode || source.hsncode || source.hsn_code || "",
+          gst_rate: mongoProduct?.gst || source.gst_rate || source.gst || "",
+        },
+        name,
+        categoryName
+      )
+    );
+    setFinancialForm((prev) => ({
+      ...prev,
+      quantity: packQuantity || "",
+      unit_id: unit?.id || source.unit_id || "",
+      price: mrp,
+      dprice: selling,
+      discount: discount === undefined || discount === null ? "" : discount,
+      countInStock: pickId(
+        mongoFinancial?.countInStock,
+        inventoryProduct?.stock,
+        inventoryProduct?.no_of_units,
+        prev.countInStock,
+        ""
+      ),
+      barcode: scanned || source.barcode || "",
+    }));
+    setOutletPostingForm((prev) => ({
+      ...prev,
+      mk_barcode: mongoFinancial?.mk_barcode || source.mk_barcode || "",
+      vendor_barcode: scanned || source.barcode || "",
+      unit_mrp: mrp,
+      dispatch_price: selling,
+      dispatch_discount: discount === undefined || discount === null ? "" : String(discount),
+    }));
+    setExistingImageUrl(image);
+    setResolvedImageUrl(image);
+    setImageUrl(image);
+    setStatus("Barcode found. Review details, change fields if needed, then save.");
+  };
+
+  const handleBarcodeAssignScan = () => {
+    const scanned = barcodeAssignScan.trim();
+    if (!scanned) {
+      setStatus("Scan or enter barcode first.");
+      return;
+    }
+
+    const match = findBarcodeAssignExisting(scanned);
+    if (match) {
+      hydrateBarcodeAssignExisting(match, scanned);
+      return;
+    }
+
+    setBarcodeAssignFound(null);
+    setOutletPostingForm((prev) => ({
+      ...prev,
+      vendor_barcode: scanned,
+      mk_barcode: "",
+    }));
+    setFinancialForm((prev) => ({ ...prev, barcode: scanned }));
+    setBarcodeAssignSearch("");
+    setBarcodeAssignLookupOpen(true);
+    setStatus("Barcode not found. Search product suggestions or fill details to assign/create.");
+  };
+
   const selectLiteInventoryProduct = (item) => {
     const catalogBarcode = catalogBarcodes.find(
       (barcodeRow) =>
@@ -2404,6 +2722,10 @@ const ApplicationMigrationHelperPage = () => {
     const stockOutletPostingForm = bulkContext?.outletPostingForm || outletPostingForm;
     const stockScannedProduct = bulkContext?.scannedProduct || scannedProduct;
     const stockProductName = bulkContext?.productName || productName;
+    const stockResolvedImageUrl = bulkContext?.resolvedImageUrl ?? resolvedImageUrl;
+    const stockExistingImageUrl = bulkContext?.existingImageUrl ?? existingImageUrl;
+    const stockInputImageUrl = bulkContext?.imageUrl ?? imageUrl;
+    const stockImageUrl = stockResolvedImageUrl || stockExistingImageUrl || stockInputImageUrl || "";
     const stockSelectedBrand = getFirstBrand(stockScannedProduct);
     const stockSelectedFinancial = getFirstFinancial(stockSelectedBrand);
     if (migrationInFlightRef.current) return;
@@ -2438,12 +2760,11 @@ const ApplicationMigrationHelperPage = () => {
     if (
       !stockOutletPostingForm.warehouse_id ||
       !stockOutletPostingForm.supplier_id ||
-      !stockOutletPostingForm.outlet_id ||
-      !stockOutletPostingForm.exp_date
+      !stockOutletPostingForm.outlet_id
     ) {
       migrationInFlightRef.current = false;
-      setStatus("Warehouse, supplier, outlet and expiry date are required for outlet migration.");
-      if (bulkContext) throw new Error("Warehouse, supplier, outlet and expiry date are required for outlet migration.");
+      setStatus("Warehouse, supplier and outlet are required for outlet migration.");
+      if (bulkContext) throw new Error("Warehouse, supplier and outlet are required for outlet migration.");
       return;
     }
 
@@ -2470,6 +2791,7 @@ const ApplicationMigrationHelperPage = () => {
         stockProductForm.category_name
       );
       const migrationVendorBarcode = null;
+      const migrationExpDate = stockOutletPostingForm.exp_date || getRelativeDateInput(90);
       const selectedCatalogProductBarcodeId = pickId(
         stockSelectedFinancial?.product_barcode_id,
         stockScannedProduct?.product_barcode_id,
@@ -2511,6 +2833,24 @@ const ApplicationMigrationHelperPage = () => {
         }));
       }
 
+      if (stockImageUrl) {
+        await dispatch(
+          updateCatalogEntity({
+            entity: "product-barcodes",
+            id: base.productBarcodeId,
+            payload: {
+              image_url: stockImageUrl,
+            },
+          })
+        ).unwrap();
+        markMigrationStage(
+          "outlet",
+          "barcode",
+          "updated",
+          `Catalog barcode image updated: ${base.productBarcodeId}.`
+        );
+      }
+
       const { plan: dispatchRatePlan, mode: dispatchRatePlanMode } =
         await ensureOutletRatePlan(base.productBarcodeId, stockOutletPostingForm);
       applyOutletRatePlanToForm(dispatchRatePlan, dispatchRatePlanMode);
@@ -2548,10 +2888,14 @@ const ApplicationMigrationHelperPage = () => {
         createPurchaseOrderWithItems({
           supplier_id: Number(stockOutletPostingForm.supplier_id),
           warehouse_id: Number(stockOutletPostingForm.warehouse_id),
-          expected_date: stockOutletPostingForm.exp_date,
+          expected_date: migrationExpDate,
           remarks: stockOutletPostingForm.remarks || "Outlet migration",
           status: "verified",
-          bill_details: { created_from: "outlet_migration", source: "migration" },
+          bill_details: {
+            created_from: "outlet_migration",
+            source: "migration",
+            image_url: stockImageUrl || null,
+          },
           items: [
             {
               product_id: base.productId,
@@ -2570,6 +2914,7 @@ const ApplicationMigrationHelperPage = () => {
               unit_name: pack.units,
               mk_barcode: base.mkBarcode,
               barcode: null,
+              image_url: stockImageUrl || null,
             },
           ],
         })
@@ -2592,7 +2937,7 @@ const ApplicationMigrationHelperPage = () => {
             makeSkuId({
               productCode: stockProductForm.product_name_eng,
               batchId: stockOutletPostingForm.batch_id,
-              expDate: stockOutletPostingForm.exp_date,
+              expDate: migrationExpDate,
             }),
           warehouse_id: Number(stockOutletPostingForm.warehouse_id),
           supplier_id: Number(stockOutletPostingForm.supplier_id),
@@ -2604,8 +2949,9 @@ const ApplicationMigrationHelperPage = () => {
           unit_price: inventoryUnitPrice,
           unit_mrp: inventoryUnitMrp,
           mfg_date: stockOutletPostingForm.mfg_date || null,
-          exp_date: stockOutletPostingForm.exp_date,
+          exp_date: migrationExpDate,
           source: "migration",
+          image_url: stockImageUrl || null,
           remarks: stockOutletPostingForm.remarks || "Outlet migration",
         })
       ).unwrap();
@@ -2639,7 +2985,7 @@ const ApplicationMigrationHelperPage = () => {
                 qty: migrationStockUnits,
                 no_of_units: migrationStockUnits,
                 unit_mrp: inventoryUnitMrp,
-                exp_date: stockOutletPostingForm.exp_date,
+                exp_date: migrationExpDate,
                 notes: `Migration dispatch | Sale Rs ${dispatchSalePrice} | Discount ${dispatchDiscount}%`,
               },
             ],
@@ -2721,8 +3067,8 @@ const ApplicationMigrationHelperPage = () => {
                     stock_quantity: migrationStockUnits,
                     target_stock: migrationStockUnits,
                     mfg_date: stockOutletPostingForm.mfg_date || null,
-                    exp_date: stockOutletPostingForm.exp_date || null,
-                    image_url: resolvedImageUrl || existingImageUrl || imageUrl || null,
+                    exp_date: migrationExpDate || null,
+                    image_url: stockImageUrl || null,
                   },
                 ],
               })
@@ -2866,8 +3212,8 @@ const ApplicationMigrationHelperPage = () => {
     const vendorBarcode =
       outletPostingForm.vendor_barcode;
 
-    if (!productID || !brandID || !financialID) {
-      setStatus("Select a Mongo product financial before assigning barcode.");
+    if (!productForm.product_name_eng || !productForm.brand_name || !productForm.category_name) {
+      setStatus("Product name, brand and category are required before saving barcode assignment.");
       return;
     }
 
@@ -2911,22 +3257,62 @@ const ApplicationMigrationHelperPage = () => {
         stageMode: null,
       });
 
-      await dispatch(
-        updateProduct({
-          data: {
-            productId: productID,
-            detailId: brandID,
-            financialId: financialID,
-            updateFields: {
-              catalogProductBarcodeId: base.productBarcodeId,
-              mkid: base.productBarcodeId,
-              mk_barcode: base.mkBarcode,
-              barcode: uniqueValues([vendorBarcode, base.mkBarcode]),
-            },
+      const barcodeImage = resolvedImageUrl || existingImageUrl || imageUrl || "";
+      if (barcodeImage) {
+        await dispatch(
+          updateCatalogEntity({
+            entity: "product-barcodes",
+            id: base.productBarcodeId,
+            payload: { image_url: barcodeImage },
+          })
+        ).unwrap();
+      }
+
+      const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/pos-products/barcode-assigner/upsert`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          productId: productID || null,
+          detailId: brandID || null,
+          financialId: financialID || null,
+          productData: {
+            catalogProductId: base.productId,
+            catalogCategoryId: base.categoryId,
+            name: productForm.product_name_eng || productName,
+            productname: productForm.product_name_eng || productName,
+            englishname: productForm.product_name_eng || productName,
+            teluguname: productForm.product_name_tel || "",
+            hsncode: taxFallback.hsn_code || "",
+            gst: Number(taxFallback.gst_rate || 0),
+            category: productForm.category_name,
           },
-          token,
-        })
-      ).unwrap();
+          detailData: {
+            catalogBrandId: base.brandId,
+            brand: productForm.brand_name,
+            description: "Updated from barcode assigner",
+            image: barcodeImage || null,
+          },
+          financialData: {
+            catalogProductBarcodeId: base.productBarcodeId,
+            product_barcode_id: base.productBarcodeId,
+            mk_barcode: base.mkBarcode,
+            price: numberOrNull(financialForm.price) ?? 0,
+            dprice: numberOrNull(financialForm.dprice) ?? 0,
+            Discount: numberOrNull(financialForm.discount) ?? 0,
+            quantity: numberOrNull(financialForm.quantity) ?? 0,
+            countInStock: numberOrNull(financialForm.countInStock) ?? 0,
+            units: pack.units,
+            barcode: uniqueValues([vendorBarcode, base.mkBarcode]),
+          },
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result?.error || result?.details || "Unable to save barcode assignment.");
+      }
 
       setOutletPostingForm((prev) => ({
         ...prev,
@@ -2937,7 +3323,8 @@ const ApplicationMigrationHelperPage = () => {
         ...prev,
         barcode: vendorBarcode,
       }));
-      setStatus(`Barcode assigned. Product barcode ${base.productBarcodeId}, MK barcode ${base.mkBarcode}.`);
+      setBarcodeAssignFound({ ...(barcodeAssignFound || {}), mongoProduct: result.product });
+      setStatus(`Barcode assignment saved. Product barcode ${base.productBarcodeId}, MK barcode ${base.mkBarcode}.`);
       dispatch(fetchCatalogEntity("product-barcodes"));
       if (token) dispatch(fetchAllProductsFresh({ token }));
     } catch (error) {
@@ -3956,9 +4343,12 @@ const ApplicationMigrationHelperPage = () => {
     let categoryMatch = findCatalogCategoryByName(catalogCategories, categoryName);
     let productMatch = catalogProducts.find(
       (product) =>
-        sameNormalizedText(product.product_name_eng, productName) ||
-        sameNormalizedText(product.product_name_tel, productName) ||
-        sameNormalizedText(product.product_code, productName)
+        (
+          sameNormalizedText(product.product_name_eng, productName) ||
+          sameNormalizedText(product.product_name_tel, productName) ||
+          sameNormalizedText(product.product_code, productName)
+        ) &&
+        catalogProductMatchesCategoryName(product, categoryName)
     );
     const existingProductMatch = catalogProducts.find(
       (product) => String(product.id) === String(existingProductId)
@@ -3969,7 +4359,8 @@ const ApplicationMigrationHelperPage = () => {
         existingProductMatch.product_name_eng,
         existingProductMatch.product_name_tel,
         existingProductMatch.product_code,
-      ].some((value) => sameNormalizedText(value, productName));
+      ].some((value) => sameNormalizedText(value, productName)) &&
+      catalogProductMatchesCategoryName(existingProductMatch, categoryName);
     const existingBrandMatch = catalogBrands.find(
       (brand) => String(brand.id) === String(existingBrandId)
     );
@@ -4171,6 +4562,14 @@ const ApplicationMigrationHelperPage = () => {
     if (!barcodeRow) {
       barcodeRow = catalogBarcodes.find(
         (item) =>
+          String(item.mk_barcode || "") === String(generatedMkBarcode) &&
+          barcodeMatchesSelectedPack(item)
+      );
+    }
+
+    if (!barcodeRow) {
+      barcodeRow = catalogBarcodes.find(
+        (item) =>
           barcodeMatchesSelectedPack(item)
       );
     }
@@ -4198,6 +4597,24 @@ const ApplicationMigrationHelperPage = () => {
 
     const productBarcodeId = toRequiredNumber(getEntityId(barcodeRow) || barcodeRow?.id);
     if (!productBarcodeId) throw new Error("Product barcode was not created correctly.");
+
+    if (!barcodeRow?.mk_barcode) {
+      const updatedBarcode = await dispatch(
+        updateCatalogEntity({
+          entity: "product-barcodes",
+          id: productBarcodeId,
+          payload: {
+            mk_barcode: generatedMkBarcode,
+          },
+        })
+      ).unwrap();
+      barcodeRow = {
+        ...barcodeRow,
+        ...(updatedBarcode?.data || updatedBarcode || {}),
+        mk_barcode: generatedMkBarcode,
+      };
+      dispatch(fetchCatalogEntity("product-barcodes"));
+    }
 
     const normalizedVendorBarcode = String(vendorBarcode || "").trim();
     const existingVendorBarcode = String(barcodeRow?.barcode || "").trim();
@@ -4630,10 +5047,14 @@ const ApplicationMigrationHelperPage = () => {
   };
 
   const buildManualFinancialRow = () => {
-    const productNameValue = String(productForm.product_name_eng || "").trim();
+    const packUnit = units.find((unit) => String(unit.id) === String(financialForm.unit_id));
+    const productNameValue = stripPackFromProductName(
+      productForm.product_name_eng,
+      financialForm.quantity,
+      packUnit?.unit_short_code || packUnit?.unit_name || ""
+    );
     const brandValue = String(productForm.brand_name || "").trim();
     const categoryValue = String(productForm.category_name || "").trim();
-    const packUnit = units.find((unit) => String(unit.id) === String(financialForm.unit_id));
     const selectedFinancial = catalogBarcodes.find(
       (item) => String(getEntityId(item) || item.id) === String(manualSelectedFinancialId)
     );
@@ -4758,21 +5179,26 @@ const ApplicationMigrationHelperPage = () => {
       updateManualDraftRow(row.id, { status: "running", message: "Migrating product..." });
       try {
         const destination = row.destination === "inventory" ? "inventory" : "outlet";
-        const context = await buildBulkContext(row, destination);
+        const rowForMigration = {
+          ...row,
+          expDate: row.expDate || getRelativeDateInput(90),
+        };
+        const context = await buildBulkContext(rowForMigration, destination);
         context.financialForm = {
           ...context.financialForm,
-          countInStock: row.countInStock || row.noOfUnits || context.financialForm.countInStock,
+          countInStock: rowForMigration.countInStock || rowForMigration.noOfUnits || context.financialForm.countInStock,
         };
         if (destination === "inventory") {
           context.inventoryForm = {
             ...context.inventoryForm,
-            no_of_units: row.countInStock || row.noOfUnits || context.inventoryForm.no_of_units,
+            no_of_units: rowForMigration.countInStock || rowForMigration.noOfUnits || context.inventoryForm.no_of_units,
           };
           await handleInventoryMigrationSave(context);
         } else {
           context.outletPostingForm = {
             ...context.outletPostingForm,
-            no_of_units: row.countInStock || row.noOfUnits || context.outletPostingForm.no_of_units,
+            no_of_units: rowForMigration.countInStock || rowForMigration.noOfUnits || context.outletPostingForm.no_of_units,
+            exp_date: rowForMigration.expDate,
           };
           await handleStockUpdate(context);
         }
@@ -4790,8 +5216,11 @@ const ApplicationMigrationHelperPage = () => {
   };
 
   const manualDraftGroups = manualDraftRows.reduce((groups, row) => {
+    const cleanProductName = stripPackFromProductName(row.productName, row.packQuantity, row.packUnit);
     const productKey = [
-      normalizeText(row.productName),
+      normalizeText(cleanProductName),
+      normalizeText(row.brand),
+      normalizeText(row.category),
       normalizeText(row.productTeluguName),
       normalizeText(row.hsnCode),
     ].join("|");
@@ -4800,7 +5229,7 @@ const ApplicationMigrationHelperPage = () => {
     if (!productGroup) {
       productGroup = {
         key: productKey,
-        productName: row.productName,
+        productName: cleanProductName,
         productTeluguName: row.productTeluguName,
         hsnCode: row.hsnCode,
         rows: [],
@@ -4833,7 +5262,7 @@ const ApplicationMigrationHelperPage = () => {
       Status: row.status || "pending",
       Message: row.message || "",
       Destination: row.destination || "outlet",
-      "Product Name": row.productName || "",
+      "Product Name": stripPackFromProductName(row.productName, row.packQuantity, row.packUnit),
       "Telugu Name": row.productTeluguName || "",
       Brand: row.brand || "",
       Category: row.category || "",
@@ -4949,6 +5378,141 @@ const ApplicationMigrationHelperPage = () => {
     setManualDraftMessage(`Exported ${rows.length} manual migration rows.`);
   };
 
+  const resolveManualTemplateDraftRow = (row, index) => {
+    const taxFallback = applyHsnGstFallback(
+      { hsn_code: row.hsnCode, gst_rate: row.gstRate },
+      row.productName,
+      row.category
+    );
+    const warehouse =
+      warehouses.find((item) => String(item.id) === String(row.warehouseId || "")) ||
+      findBulkOption(warehouses, row.warehouse, ["warehouse_name", "warehouse_code", "id"]);
+    const outlet =
+      outlets.find((item) => String(item.id) === String(row.outletId || "")) ||
+      findBulkOption(outlets, row.outlet, ["outlet_name", "unit_code", "id"]);
+    const supplier =
+      suppliers.find((item) => String(item.id) === String(row.supplierId || "")) ||
+      findBulkOption(suppliers, row.supplier, ["stakeholder_name", "stackholder_code", "id"]);
+    const selectedUnit = findCatalogUnit(units, row.packUnit);
+    const matchedProduct =
+      catalogProducts.find((product) =>
+        [product.product_name_eng, product.product_name_tel, product.product_code].some((value) =>
+          sameNormalizedText(value, row.productName)
+        ) && catalogProductMatchesCategoryName(product, row.category)
+      ) || null;
+    const matchedBrand = findCatalogBrandByName(catalogBrands, row.brand);
+    const matchedCategory = findCatalogCategoryByName(catalogCategories, row.category);
+    const selectedFinancial = catalogBarcodes.find(
+      (item) =>
+        row.mkBarcode &&
+        normalizeText(item.mk_barcode) === normalizeText(row.mkBarcode) &&
+        catalogBarcodeMatchesProductBrandCategory(item, row) &&
+        catalogBarcodeMatchesPack(item, row.packQuantity, row.packUnit)
+    );
+    const generatedDraftMkBarcode =
+      row.mkBarcode ||
+      selectedFinancial?.mk_barcode ||
+      (matchedProduct?.id && matchedBrand?.id && matchedCategory?.id && selectedUnit?.id && row.packQuantity
+        ? makeMkBarcode({
+            product_id: matchedProduct.id,
+            brand_id: matchedBrand.id,
+            category_id: matchedCategory.id,
+            unit_id: selectedUnit.id,
+            quantity: row.packQuantity,
+          })
+        : "");
+    const mrp = row.unitMrp || "";
+    const sellingPrice = row.sellingPrice || "";
+
+    return {
+      id: `manual-import-${Date.now()}-${index + 1}`,
+      rowNumber: manualDraftRows.length + index + 1,
+      status: "pending",
+      message: row.message || "",
+      productName: stripPackFromProductName(row.productName, row.packQuantity, row.packUnit),
+      destination: row.destination || "outlet",
+      productTeluguName: row.productTeluguName || "",
+      brand: row.brand || "",
+      category: row.category || "",
+      hsnCode: taxFallback.hsn_code || "",
+      gstRate: taxFallback.gst_rate || "",
+      packQuantity: row.packQuantity || "",
+      packUnit: row.packUnit || selectedUnit?.unit_short_code || "",
+      packText: makeWeightPack(row.packQuantity || "", row.packUnit || selectedUnit?.unit_short_code || ""),
+      productBarcodeId: selectedFinancial ? getEntityId(selectedFinancial) || selectedFinancial.id : row.productBarcodeId || "",
+      mkBarcode: generatedDraftMkBarcode,
+      barcode: "",
+      unitMrp: mrp,
+      unitPrice: row.unitPrice || "",
+      sellingPrice,
+      discount: row.discount || calculateDiscountPercent(mrp, sellingPrice),
+      marginPercentage: row.marginPercentage || DEFAULT_OUTLET_RATE_PLAN.margin_percentage,
+      gstPercentage: row.gstPercentage || DEFAULT_OUTLET_RATE_PLAN.gst_rate,
+      labourPercentage: row.labourPercentage || DEFAULT_OUTLET_RATE_PLAN.labour_percentage,
+      transportPercentage: row.transportPercentage || DEFAULT_OUTLET_RATE_PLAN.transport_percentage,
+      loadPercentage: row.loadPercentage || DEFAULT_OUTLET_RATE_PLAN.load_percentage,
+      unloadPercentage: row.unloadPercentage || DEFAULT_OUTLET_RATE_PLAN.unload_percentage,
+      noOfUnits: row.noOfUnits || "",
+      countInStock: row.noOfUnits || "",
+      warehouseId: warehouse?.id || row.warehouseId || "",
+      outletId: outlet?.id || row.outletId || "",
+      supplierId: supplier?.id || row.supplierId || "",
+      warehouse: warehouse?.warehouse_name || row.warehouse || "",
+      outlet: outlet?.outlet_name || row.outlet || "",
+      supplier: supplier?.stakeholder_name || row.supplier || "",
+      mfgDate: row.mfgDate || "",
+      expDate: row.expDate || getRelativeDateInput(90),
+      imageUrl:
+        getExcelImageUrl(row) ||
+        getMigrationImageUrl(
+          findCatalogImageByName(row.imageName),
+          findBulkMongoProduct(row),
+          selectedFinancial,
+          catalogBarcodes.find(
+            (item) =>
+              catalogBarcodeMatchesProductBrandCategory(item, row) &&
+              catalogBarcodeMatchesPack(item, row.packQuantity, row.packUnit)
+          ),
+          matchedProduct
+        ),
+      remarks: row.remarks || "Manual migration imported from Excel",
+    };
+  };
+
+  const handleManualTemplateUpload = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const data = await file.arrayBuffer();
+      const workbook = XLSX.read(data, { type: "array", cellDates: true });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows = XLSX.utils
+        .sheet_to_json(sheet, { defval: "" })
+        .map(normalizeBulkRow)
+        .filter((row) => row.productName && row.brand && row.category && row.packQuantity && row.packUnit);
+
+      if (!rows.length) {
+        setManualDraftMessage("No valid manual migration rows found in this Excel file.");
+        return;
+      }
+
+      const draftRows = rows.map(resolveManualTemplateDraftRow);
+      setManualDraftRows((prev) => [
+        ...prev,
+        ...draftRows.map((row, index) => ({
+          ...row,
+          rowNumber: prev.length + index + 1,
+        })),
+      ]);
+      setManualDraftMessage(`Imported ${draftRows.length} rows from ${file.name} into draft.`);
+    } catch (error) {
+      setManualDraftMessage(error?.message || "Unable to import this Excel file.");
+    } finally {
+      event.target.value = "";
+    }
+  };
+
   const findBulkOption = (rows, value, fields) => {
     const q = normalizeText(value);
     if (!q) return null;
@@ -4963,14 +5527,20 @@ const ApplicationMigrationHelperPage = () => {
   const findBulkCatalogBarcode = (row) => {
     if (row.productBarcodeId) {
       const idMatch = catalogBarcodes.find(
-        (item) => String(getEntityId(item) || item.id) === String(row.productBarcodeId)
+        (item) =>
+          String(getEntityId(item) || item.id) === String(row.productBarcodeId) &&
+          catalogBarcodeMatchesProductBrandCategory(item, row) &&
+          catalogBarcodeMatchesPack(item, row.packQuantity, row.packUnit)
       );
       if (idMatch) return idMatch;
     }
 
     if (row.mkBarcode) {
       const mkMatch = catalogBarcodes.find(
-        (item) => normalizeText(item.mk_barcode) === normalizeText(row.mkBarcode)
+        (item) =>
+          normalizeText(item.mk_barcode) === normalizeText(row.mkBarcode) &&
+          catalogBarcodeMatchesProductBrandCategory(item, row) &&
+          catalogBarcodeMatchesPack(item, row.packQuantity, row.packUnit)
       );
       if (mkMatch) return mkMatch;
     }
@@ -4979,12 +5549,15 @@ const ApplicationMigrationHelperPage = () => {
     const productText = normalizeText(row.productName);
     const brandText = normalizeText(row.brand);
     const categoryText = normalizeText(row.category);
-    const packQuantity = Number(row.packQuantity);
-    const packUnitText = normalizeUnitText(row.packUnit);
 
     const barcodeMatch = catalogBarcodes.find((item) => {
       const itemBarcodes = [item.mk_barcode, item.barcode].map(normalizeText);
-      return barcodeText && itemBarcodes.includes(barcodeText);
+      return (
+        barcodeText &&
+        itemBarcodes.includes(barcodeText) &&
+        catalogBarcodeMatchesProductBrandCategory(item, row) &&
+        catalogBarcodeMatchesPack(item, row.packQuantity, row.packUnit)
+      );
     });
     if (barcodeMatch) return barcodeMatch;
 
@@ -5006,22 +5579,18 @@ const ApplicationMigrationHelperPage = () => {
         const categoryMatched =
           categoryText &&
           [item.category_name_english, item.category_name, item.category].some((value) =>
-            textMatchesLoosely(value, categoryText)
+            sameNormalizedText(value, categoryText)
           );
-        const quantityMatched =
-          Number.isFinite(packQuantity) && Number(item.quantity) === packQuantity;
-        const unitMatched =
-          packUnitText &&
-          [item.unit_short_code, item.unit_name, item.weight, item.units, item.unit].some(
-            (value) => normalizeUnitText(value) === packUnitText
-          );
+        const packMatched = catalogBarcodeMatchesPack(item, row.packQuantity, row.packUnit);
 
         if (!productMatched) return null;
         score += 8;
+        if (brandText && !brandMatched) return null;
+        if (categoryText && !categoryMatched) return null;
+        if ((row.packQuantity || row.packUnit) && !packMatched) return null;
         if (!brandText || brandMatched) score += 4;
         if (!categoryText || categoryMatched) score += 4;
-        if (!row.packQuantity || quantityMatched) score += 2;
-        if (!row.packUnit || unitMatched) score += 2;
+        if (packMatched) score += 4;
 
         return { item, score };
       })
@@ -5034,7 +5603,9 @@ const ApplicationMigrationHelperPage = () => {
   const findBulkCatalogProduct = (row, matchedBarcode) => {
     if (matchedBarcode?.product_id) {
       return catalogProducts.find(
-        (product) => String(product.id) === String(matchedBarcode.product_id)
+        (product) =>
+          String(product.id) === String(matchedBarcode.product_id) &&
+          catalogProductMatchesCategoryName(product, row.category)
       );
     }
 
@@ -5058,10 +5629,58 @@ const ApplicationMigrationHelperPage = () => {
           product.category_name_english,
           product.category_name,
           product.category,
-        ].some((value) => textMatchesLoosely(value, row.category));
+        ].some((value) => sameNormalizedText(value, row.category));
 
       return productMatched && brandMatched && categoryMatched;
     }) || null;
+  };
+
+  const findBulkMongoProduct = (row) => {
+    const productText = normalizeText(row.productName);
+    if (!productText) return null;
+
+    return productsList.find((product) => {
+      const productMatched = [
+        getProductName(product),
+        product.productname,
+        product.englishname,
+        product.productName,
+      ].some((value) => textMatchesLoosely(value, row.productName));
+      const brandMatched =
+        !row.brand ||
+        asArray(product.details || product.brands).some((detail) =>
+          sameNormalizedText(getBrandName(detail), row.brand)
+        );
+      const categoryMatched =
+        !row.category ||
+        [getCategoryName(product), product.category_name, product.category].some((value) =>
+          sameNormalizedText(value, row.category)
+        );
+
+      return productMatched && brandMatched && categoryMatched;
+    }) || null;
+  };
+
+  const findCatalogImageByName = (name) => {
+    const q = normalizeText(name);
+    if (!q) return null;
+
+    return catalogImages.find((image) =>
+      [
+        image?.image_name,
+        image?.name,
+        image?.fileName,
+        image?.image,
+        image?.url,
+        image?.imageUrl,
+      ].some((value) => normalizeText(value) === q)
+    ) || catalogImages.find((image) =>
+      [
+        image?.image_name,
+        image?.name,
+        image?.fileName,
+      ].some((value) => normalizeText(value).includes(q))
+    ) || null;
   };
 
   const enrichBulkRowFromLegacy = async (row) => {
@@ -5078,6 +5697,7 @@ const ApplicationMigrationHelperPage = () => {
   const buildBulkContext = async (row, mode) => {
     const matchedBarcode = findBulkCatalogBarcode(row);
     const matchedProduct = findBulkCatalogProduct(row, matchedBarcode);
+    const matchedMongoProduct = findBulkMongoProduct(row);
     const legacyProduct = matchedBarcode ? null : await enrichBulkRowFromLegacy(row);
     const warehouse =
       warehouses.find((item) => String(item.id) === String(row.warehouseId || "")) ||
@@ -5123,6 +5743,7 @@ const ApplicationMigrationHelperPage = () => {
     const packQuantity = row.packQuantity || getBarcodeQuantity(matchedBarcode);
     const packUnit = row.packUnit || getBarcodeWeight(matchedBarcode);
     const packText = makeWeightPack(packQuantity, packUnit);
+    const effectiveExpDate = row.expDate || getRelativeDateInput(90);
     const commonMissing = [
       !productName ? "product name" : "",
       !brandName ? "brand" : "",
@@ -5131,7 +5752,6 @@ const ApplicationMigrationHelperPage = () => {
       !supplier ? "supplier" : "",
       !packQuantity ? "pack quantity" : "",
       !packUnit ? "pack unit" : "",
-      !row.expDate ? "expiry date" : "",
     ].filter(Boolean);
 
     if (mode === "outlet" && !outlet) commonMissing.push("outlet");
@@ -5146,7 +5766,15 @@ const ApplicationMigrationHelperPage = () => {
     );
     const batchId = makeBatchId();
     const vendorBarcode = "";
-    const image = row.imageUrl || getProductImageUrl(legacyProduct) || matchedBarcode?.image_url || "";
+    const image =
+      getExcelImageUrl(row) ||
+      getMigrationImageUrl(
+        findCatalogImageByName(row.imageName),
+        matchedMongoProduct,
+        matchedBarcode,
+        matchedProduct,
+        legacyProduct
+      );
     const mrpValue = row.unitMrp || row.mrp || row.price || row.unitPrice || "";
     const sellingValue = row.sellingPrice || row.dprice || row.salePrice || row.unitPrice || "";
     const purchaseValue = row.purchasePrice || row.unitPrice || "";
@@ -5181,8 +5809,8 @@ const ApplicationMigrationHelperPage = () => {
           unit_price: row.unitPrice || "",
           unit_mrp: row.unitMrp || "",
           mfg_date: row.mfgDate || "",
-          exp_date: row.expDate,
-          sku_id: makeSkuId({ productCode: productName, batchId, expDate: row.expDate }),
+          exp_date: effectiveExpDate,
+          sku_id: makeSkuId({ productCode: productName, batchId, expDate: effectiveExpDate }),
           remarks: row.remarks || `Bulk inventory migration row ${row.rowNumber}`,
         },
       };
@@ -5192,6 +5820,9 @@ const ApplicationMigrationHelperPage = () => {
       productName,
       scannedProduct: null,
       selectedCatalogProductId: matchedBarcode?.product_id || matchedProduct?.id || "",
+      imageUrl: image,
+      resolvedImageUrl: image,
+      existingImageUrl: image,
         productForm: {
         ...productForm,
         product_name_eng: productName,
@@ -5232,8 +5863,8 @@ const ApplicationMigrationHelperPage = () => {
         unload_percentage: row.unloadPercentage || outletPostingForm.unload_percentage,
         mk_barcode: row.mkBarcode || matchedBarcode?.mk_barcode || "",
         mfg_date: row.mfgDate || "",
-        exp_date: row.expDate,
-        sku_id: makeSkuId({ productCode: productName, batchId, expDate: row.expDate }),
+        exp_date: effectiveExpDate,
+        sku_id: makeSkuId({ productCode: productName, batchId, expDate: effectiveExpDate }),
         vendor_barcode: vendorBarcode,
         remarks: row.remarks || `Bulk outlet migration row ${row.rowNumber}`,
       },
@@ -6979,7 +7610,7 @@ const ApplicationMigrationHelperPage = () => {
                               <tr key={row.id} className="border-t">
                                 <td className="p-2">{row.brand}</td>
                                 <td className="p-2">{row.category}</td>
-                                <td className="p-2">{row.packQuantity} {row.packUnit}</td>
+                                <td className="p-2">{getManualFinancialPackText(row)}</td>
                                 <td className="p-2">{row.unitMrp}</td>
                                 <td className="p-2">{row.sellingPrice}</td>
                                 <td className="p-2">{row.countInStock}</td>
@@ -7164,7 +7795,7 @@ const ApplicationMigrationHelperPage = () => {
                                         </span>
                                       </td>
                                       <td className="p-2 font-semibold capitalize">{row.destination || "outlet"}</td>
-                                      <td className="p-2">{row.packQuantity} {row.packUnit}</td>
+                                      <td className="p-2">{getManualFinancialPackText(row)}</td>
                                       <td className="p-2">{row.unitMrp}</td>
                                       <td className="p-2">{row.sellingPrice}</td>
                                       <td className="p-2">{row.countInStock}</td>
@@ -7220,6 +7851,17 @@ const ApplicationMigrationHelperPage = () => {
                     <Download size={17} />
                     Export Data
                   </button>
+                  <label className={`${buttonClass} cursor-pointer border bg-white text-gray-700 hover:bg-gray-50 ${manualDraftRunning ? "pointer-events-none text-gray-300" : ""}`}>
+                    <UploadCloud size={17} />
+                    Import Excel
+                    <input
+                      type="file"
+                      accept=".xlsx,.xls,.csv"
+                      onChange={handleManualTemplateUpload}
+                      disabled={manualDraftRunning}
+                      className="hidden"
+                    />
+                  </label>
                   <button
                     type="button"
                     onClick={migrateManualDraftRows}
@@ -7728,6 +8370,36 @@ const ApplicationMigrationHelperPage = () => {
             <form
               onSubmit={(event) => {
                 event.preventDefault();
+                handleBarcodeAssignScan();
+              }}
+              className="mb-4 grid grid-cols-1 gap-3 lg:grid-cols-[1fr_auto]"
+            >
+              <label className="text-sm font-semibold text-gray-800">
+                Scan Barcode
+                <input
+                  value={barcodeAssignScan}
+                  onChange={(event) => setBarcodeAssignScan(event.target.value)}
+                  className={`${fieldClass} mt-1`}
+                  placeholder="Scan or enter vendor/MK barcode"
+                />
+              </label>
+              <button
+                type="submit"
+                disabled={busy}
+                className={`${buttonClass} mt-6 bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-300`}
+              >
+                <Barcode size={17} />
+                Check Barcode
+              </button>
+            </form>
+            {barcodeAssignFound ? (
+              <div className="mb-4 rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm font-semibold text-blue-900">
+                Barcode found. Review and change product, financial, stock, or image details below before saving.
+              </div>
+            ) : null}
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
                 if (barcodeAssignMatches[0]) selectBarcodeAssignProduct(barcodeAssignMatches[0]);
               }}
               className="mb-4 flex flex-col gap-3 sm:flex-row"
@@ -7743,7 +8415,7 @@ const ApplicationMigrationHelperPage = () => {
                     if (barcodeAssignMatches.length > 0) setBarcodeAssignLookupOpen(true);
                   }}
                   className={fieldClass}
-                  placeholder="Search Mongo product / financial"
+                  placeholder="Search product to assign this barcode"
                 />
                 {barcodeAssignLookupOpen && barcodeAssignMatches.length > 0 ? (
                   <div className="absolute z-50 mt-1 max-h-72 w-full overflow-auto rounded-lg border bg-white shadow-lg">
@@ -7800,15 +8472,63 @@ const ApplicationMigrationHelperPage = () => {
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
               <label className="text-sm font-semibold text-gray-800">
                 Product Name
-                <input value={productForm.product_name_eng} readOnly className={`${fieldClass} mt-1 bg-gray-50`} />
+                <input
+                  value={productForm.product_name_eng}
+                  onChange={(event) =>
+                    setProductForm((prev) => ({ ...prev, product_name_eng: event.target.value }))
+                  }
+                  className={`${fieldClass} mt-1`}
+                />
+              </label>
+              <label className="text-sm font-semibold text-gray-800">
+                Telugu Name
+                <input
+                  value={productForm.product_name_tel}
+                  onChange={(event) =>
+                    setProductForm((prev) => ({ ...prev, product_name_tel: event.target.value }))
+                  }
+                  className={`${fieldClass} mt-1`}
+                />
               </label>
               <label className="text-sm font-semibold text-gray-800">
                 Brand
-                <input value={productForm.brand_name} readOnly className={`${fieldClass} mt-1 bg-gray-50`} />
+                <input
+                  value={productForm.brand_name}
+                  onChange={(event) =>
+                    setProductForm((prev) => ({ ...prev, brand_name: event.target.value, brand_id: "" }))
+                  }
+                  className={`${fieldClass} mt-1`}
+                />
               </label>
               <label className="text-sm font-semibold text-gray-800">
                 Category
-                <input value={productForm.category_name} readOnly className={`${fieldClass} mt-1 bg-gray-50`} />
+                <input
+                  value={productForm.category_name}
+                  onChange={(event) =>
+                    setProductForm((prev) => ({ ...prev, category_name: event.target.value, category_id: "" }))
+                  }
+                  className={`${fieldClass} mt-1`}
+                />
+              </label>
+              <label className="text-sm font-semibold text-gray-800">
+                HSN
+                <input
+                  value={productForm.hsn_code}
+                  onChange={(event) =>
+                    setProductForm((prev) => ({ ...prev, hsn_code: event.target.value }))
+                  }
+                  className={`${fieldClass} mt-1`}
+                />
+              </label>
+              <label className="text-sm font-semibold text-gray-800">
+                GST
+                <input
+                  value={productForm.gst_rate}
+                  onChange={(event) =>
+                    setProductForm((prev) => ({ ...prev, gst_rate: event.target.value }))
+                  }
+                  className={`${fieldClass} mt-1`}
+                />
               </label>
               <label className="text-sm font-semibold text-gray-800">
                 Pack Quantity
@@ -7832,6 +8552,54 @@ const ApplicationMigrationHelperPage = () => {
                     </option>
                   ))}
                 </select>
+              </label>
+              <label className="text-sm font-semibold text-gray-800">
+                Price / MRP
+                <input
+                  type="number"
+                  value={financialForm.price}
+                  onChange={(event) =>
+                    setFinancialForm((prev) => ({
+                      ...prev,
+                      price: event.target.value,
+                      discount: calculateDiscountPercent(event.target.value, prev.dprice),
+                    }))
+                  }
+                  className={`${fieldClass} mt-1`}
+                />
+              </label>
+              <label className="text-sm font-semibold text-gray-800">
+                Selling Price
+                <input
+                  type="number"
+                  value={financialForm.dprice}
+                  onChange={(event) =>
+                    setFinancialForm((prev) => ({
+                      ...prev,
+                      dprice: event.target.value,
+                      discount: calculateDiscountPercent(prev.price, event.target.value),
+                    }))
+                  }
+                  className={`${fieldClass} mt-1`}
+                />
+              </label>
+              <label className="text-sm font-semibold text-gray-800">
+                Discount %
+                <input
+                  type="number"
+                  value={financialForm.discount}
+                  onChange={(event) => setFinancialForm((prev) => ({ ...prev, discount: event.target.value }))}
+                  className={`${fieldClass} mt-1`}
+                />
+              </label>
+              <label className="text-sm font-semibold text-gray-800">
+                Count In Stock
+                <input
+                  type="number"
+                  value={financialForm.countInStock}
+                  onChange={(event) => setFinancialForm((prev) => ({ ...prev, countInStock: event.target.value }))}
+                  className={`${fieldClass} mt-1`}
+                />
               </label>
               <label className="text-sm font-semibold text-gray-800">
                 Vendor Barcode
@@ -7865,6 +8633,43 @@ const ApplicationMigrationHelperPage = () => {
               </label>
             </div>
 
+            <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-[1fr_auto]">
+              <label className="text-sm font-semibold text-gray-800">
+                Image URL
+                <input
+                  value={imageUrl || resolvedImageUrl || existingImageUrl}
+                  onChange={(event) => {
+                    setImageUrl(event.target.value);
+                    setResolvedImageUrl("");
+                    setExistingImageUrl("");
+                  }}
+                  className={`${fieldClass} mt-1`}
+                  placeholder="Paste image URL"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={handleDownloadAndUploadImage}
+                disabled={busy || !imageUrl}
+                className={`${buttonClass} mt-6 bg-green-600 text-white hover:bg-green-700 disabled:bg-gray-300`}
+              >
+                <UploadCloud size={17} />
+                Upload
+              </button>
+            </div>
+            {imageUrl || resolvedImageUrl || existingImageUrl ? (
+              <div className="mt-3 flex items-center gap-3 rounded-lg border bg-white p-2">
+                <img
+                  src={resolvedImageUrl || existingImageUrl || imageUrl}
+                  alt={productForm.product_name_eng || "Product"}
+                  className="h-14 w-14 rounded border object-cover"
+                />
+                <span className="truncate text-xs font-semibold text-gray-600">
+                  {resolvedImageUrl || existingImageUrl || imageUrl}
+                </span>
+              </div>
+            ) : null}
+
             <div className="mt-4 flex flex-wrap gap-2">
               <button
                 type="button"
@@ -7873,7 +8678,7 @@ const ApplicationMigrationHelperPage = () => {
                 className={`${buttonClass} bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-300`}
               >
                 <Barcode size={17} />
-                Assign Barcode
+                Save Barcode Assignment
               </button>
             </div>
 
