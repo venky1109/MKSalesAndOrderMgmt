@@ -1,7 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { useDispatch } from 'react-redux';
+import { useDispatch, useSelector } from 'react-redux';
 import { clearCart } from '../features/cart/cartSlice';
+import { updateProductStockOnly } from '../features/products/productSlice';
 import InvoiceShareModal from '../components/InvoiceShareModal';
 import PaymentResultCard from '../components/PaymentResultCard';
 
@@ -9,6 +10,7 @@ const PaymentSuccessPage = () => {
   const navigate = useNavigate();
   const dispatch = useDispatch();
   const [params] = useSearchParams();
+  const token = useSelector((state) => state.posUser?.userInfo?.token);
 
   const urlOrderId = params.get('orderId');
   const urlAmount = params.get('amount');
@@ -21,10 +23,54 @@ const PaymentSuccessPage = () => {
     return Number.isFinite(n) ? n.toFixed(2) : '0.00';
   }, [urlAmount]);
 
-  const handleOk = () => {
+  const updateStockAfterSuccess = async (snapshot) => {
+    const items = Array.isArray(snapshot?.items) ? snapshot.items : [];
+    const orderId = snapshot?.orderId || urlOrderId || snapshot?.mkOrderId || '';
+    const stockUpdateKey = orderId ? `upiStockUpdated:${orderId}` : '';
+
+    if (!token || !stockUpdateKey || localStorage.getItem(stockUpdateKey)) {
+      return;
+    }
+
+    const updates = items
+      .filter((item) => item.productId && item.brandId && item.financialId)
+      .map((item) => {
+        const newQuantity = Number(item.stock);
+
+        if (!Number.isFinite(newQuantity) || newQuantity < 0) {
+          return null;
+        }
+
+        return dispatch(
+          updateProductStockOnly({
+            productID: item.productId,
+            brandID: item.brandId,
+            financialID: item.financialId,
+            newQuantity,
+            token,
+          })
+        ).unwrap();
+      })
+      .filter(Boolean);
+
+    if (!updates.length) {
+      return;
+    }
+
+    const results = await Promise.allSettled(updates);
+    if (results.every((result) => result.status === 'fulfilled')) {
+      localStorage.setItem(stockUpdateKey, '1');
+    }
+  };
+
+  const handleOk = async () => {
     try {
       const rawSnapshot = localStorage.getItem('upiInvoiceSnapshot');
       const snapshot = rawSnapshot ? JSON.parse(rawSnapshot) : null;
+
+      if (snapshot) {
+        await updateStockAfterSuccess(snapshot);
+      }
 
       dispatch(clearCart());
       localStorage.removeItem('cartItems');

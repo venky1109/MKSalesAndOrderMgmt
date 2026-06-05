@@ -42,6 +42,35 @@ const getProductBarcodeId = (financial) =>
     financial?.mkid
   )[0] || '';
 
+const getUnitFromMkBarcode = (mkBarcode) => {
+  const text = String(mkBarcode || '');
+  if (text.length < 15) return '';
+
+  const unitCode = text.slice(12, 14);
+  if (unitCode === '02') return 'GMS';
+  if (unitCode === '03') return 'KGS';
+  if (unitCode === '01') return 'QTY';
+  return '';
+};
+
+const getFinancialUnits = (financial = {}) =>
+  getUnitFromMkBarcode(financial.mk_barcode || financial.mkBarcode) ||
+  financial.units ||
+  '';
+
+const getFinancialQuantity = (financial = {}) => {
+  const mkBarcode = String(financial.mk_barcode || financial.mkBarcode || '');
+  if (mkBarcode.length >= 17) {
+    const encodedQuantity = Number(mkBarcode.slice(14, 17));
+    if (Number.isFinite(encodedQuantity) && encodedQuantity > 0) return encodedQuantity;
+  }
+
+  return Number(financial.quantity || 0);
+};
+
+const getFinancialPackLabel = (financial = {}) =>
+  `${getFinancialQuantity(financial)} ${getFinancialUnits(financial)}`.trim();
+
 const getProductNameKey = (product) =>
   safeLower(
     product?.productname ||
@@ -60,7 +89,20 @@ const getPreferredProductScore = (product) =>
   (product?.catalogProductId ? 100 : 0) +
   (product?.productname ? 10 : 0) +
   (product?.englishname ? 10 : 0) +
-  (product?.teluguname ? 10 : 0);
+  (product?.teluguname ? 10 : 0) +
+  asArray(product?.details).reduce(
+    (sum, detail) =>
+      sum +
+      asArray(detail?.financials).reduce(
+        (financialSum, financial) =>
+          financialSum +
+          (financial?.mk_barcode ? 5 : 0) +
+          (financial?.catalogProductBarcodeId || financial?.product_barcode_id ? 3 : 0) +
+          (financial?.updatedAt ? 1 : 0),
+        0
+      ),
+    0
+  );
 
 const dedupePreferredProducts = (products = []) => {
   const byKey = new Map();
@@ -221,11 +263,11 @@ const ProductList = forwardRef((props, ref) => {
         mkid: financial.mkid || '',
         MRP: financial.price,
         dprice: financial.dprice,
-        quantity: financial.quantity,
+        quantity: getFinancialQuantity(financial),
         countInStock: financial.countInStock,
-        units: financial.units,
+        units: getFinancialUnits(financial),
         image: detail.images?.[0]?.image,
-        catalogQuantity: financial.quantity,
+        catalogQuantity: getFinancialQuantity(financial),
         discount: Math.round(((financial.price - financial.dprice) / financial.price) * 100),
         qty: 1
       }));
@@ -263,11 +305,11 @@ const ProductList = forwardRef((props, ref) => {
         mkid: financial.mkid || '',
         MRP: financial.price,
         dprice: financial.dprice,
-        quantity: financial.quantity,
+        quantity: getFinancialQuantity(financial),
         countInStock: financial.countInStock,
-        units: financial.units,
+        units: getFinancialUnits(financial),
         image: detail.images?.[0]?.image,
-        catalogQuantity: financial.quantity,
+        catalogQuantity: getFinancialQuantity(financial),
         discount: Math.round(((financial.price - financial.dprice) / financial.price) * 100),
         qty: 1
       }));
@@ -370,11 +412,11 @@ const ProductList = forwardRef((props, ref) => {
             mkid: f.mkid || '',
             MRP: f.price,
             dprice: f.dprice,
-            quantity: f.quantity,
+            quantity: getFinancialQuantity(f),
             countInStock: f.countInStock,
-            units: f.units,
+            units: getFinancialUnits(f),
             image: d.images?.[0]?.image,
-            catalogQuantity: f.quantity,
+            catalogQuantity: getFinancialQuantity(f),
             discount: Math.round(((f.price - f.dprice) / f.price) * 100),
             qty: 1
           }))
@@ -392,7 +434,7 @@ const ProductList = forwardRef((props, ref) => {
           className="w-full h-24 object-contain mb-2"
           loading="lazy"
         />
-        <div className="text-xs text-red-600 font-semibold">Qty: {f.quantity} {f.units}</div>
+        <div className="text-xs text-red-600 font-semibold">Qty: {getFinancialPackLabel(f)}</div>
         <div className="font-bold text-sm">{p.name}</div>
         <div className="text-xs text-gray-500 italic">{d.brand}</div>
         <div className="text-green-700 font-semibold">₹ {f.dprice}</div>

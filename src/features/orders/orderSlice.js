@@ -101,7 +101,7 @@ export const queueOrder = createAsyncThunk(
 // -----------------------------
 export const createOrder = createAsyncThunk(
   "orders/create",
-  async ({ payload, token, cartItems }, thunkAPI) => {
+  async ({ payload, token, cartItems, updateStock = true }, thunkAPI) => {
     try {
       const normalizedPayload = normalizeOrderDiscountPayload(payload);
 
@@ -125,6 +125,7 @@ export const createOrder = createAsyncThunk(
 
       const stockErrors = [];
 
+      if (updateStock) {
       for (const item of cartItems || []) {
         const newStock = item.stock;
 
@@ -156,6 +157,7 @@ export const createOrder = createAsyncThunk(
             );
           }
         }
+      }
       }
 
       return {

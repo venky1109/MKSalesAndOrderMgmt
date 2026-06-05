@@ -21,7 +21,7 @@ const PaymentFailurePage = () => {
 
   const handleHome = () => {
     dispatch(clearPaymentState());
-    navigate('/');
+    navigate('/pos', { replace: true });
   };
 
   const handleRetry = async () => {
@@ -31,8 +31,13 @@ const PaymentFailurePage = () => {
     }
 
     try {
+      const savedToken =
+        token ||
+        JSON.parse(localStorage.getItem('posUserInfo') || '{}')?.token ||
+        '';
+
       const result = await dispatch(
-        retryExistingUpiPayment({ orderId, token })
+        retryExistingUpiPayment({ orderId, token: savedToken })
       ).unwrap();
 
       const redirectUrl =

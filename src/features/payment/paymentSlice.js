@@ -47,7 +47,7 @@ export const initiateUpiPayment = createAsyncThunk(
 
       // 1) Create order first
       const orderRes = await thunkAPI.dispatch(
-        createOrder({ payload: finalPayload, token, cartItems })
+        createOrder({ payload: finalPayload, token, cartItems, updateStock: false })
       ).unwrap();
 
       const orderId = orderRes?._id;
@@ -75,6 +75,7 @@ export const initiateUpiPayment = createAsyncThunk(
           productId: item.id,
           brandId: item.brandId,
           financialId: item.financialId,
+          stock: item.stock,
         })),
         total: Number(orderRes?.totalPrice || finalPayload?.totalPrice || 0),
         totalPrice: Number(orderRes?.totalPrice || finalPayload?.totalPrice || 0),

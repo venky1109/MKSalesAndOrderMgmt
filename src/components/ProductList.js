@@ -87,6 +87,35 @@ const calcDiscount = (price, dprice) => {
   return Math.max(0, Math.round(((p - dp) / p) * 100));
 };
 
+const getUnitFromMkBarcode = (mkBarcode) => {
+  const text = String(mkBarcode || "");
+  if (text.length < 15) return "";
+
+  const unitCode = text.slice(12, 14);
+  if (unitCode === "02") return "GMS";
+  if (unitCode === "03") return "KGS";
+  if (unitCode === "01") return "QTY";
+  return "";
+};
+
+const getFinancialUnits = (financial = {}) =>
+  getUnitFromMkBarcode(financial.mk_barcode || financial.mkBarcode) ||
+  financial.units ||
+  "";
+
+const getFinancialQuantity = (financial = {}) => {
+  const mkBarcode = String(financial.mk_barcode || financial.mkBarcode || "");
+  if (mkBarcode.length >= 17) {
+    const encodedQuantity = Number(mkBarcode.slice(14, 17));
+    if (Number.isFinite(encodedQuantity) && encodedQuantity > 0) return encodedQuantity;
+  }
+
+  return Number(financial.quantity || 0);
+};
+
+const getFinancialPackLabel = (financial = {}) =>
+  `${getFinancialQuantity(financial)} ${getFinancialUnits(financial)}`.trim();
+
 const normalizeScan = (raw) => {
   let s = String(raw ?? "").trim();
   try {
@@ -111,7 +140,20 @@ const getPreferredProductScore = (p) =>
   (p?.catalogProductId ? 100 : 0) +
   (p?.productname ? 10 : 0) +
   (p?.englishname ? 10 : 0) +
-  (p?.teluguname ? 10 : 0);
+  (p?.teluguname ? 10 : 0) +
+  asArray(p?.details).reduce(
+    (sum, detail) =>
+      sum +
+      asArray(detail?.financials).reduce(
+        (financialSum, financial) =>
+          financialSum +
+          (financial?.mk_barcode ? 5 : 0) +
+          (financial?.catalogProductBarcodeId || financial?.product_barcode_id ? 3 : 0) +
+          (financial?.updatedAt ? 1 : 0),
+        0
+      ),
+    0
+  );
 
 const dedupePreferredProducts = (products = []) => {
   const byKey = new Map();
@@ -644,12 +686,12 @@ const ProductList = forwardRef((props, ref) => {
           price: Number(f?.price || 0),
           MRP: Number(f?.price || 0),
           dprice: Number(f?.dprice || 0),
-          quantity: Number(f?.quantity || 0),
+          quantity: getFinancialQuantity(f),
           countInStock: Number(f?.countInStock || 0),
           stock: Number(f?.countInStock || 0),
-          units: f?.units,
+          units: getFinancialUnits(f),
           image: d?.images?.[0]?.image || "",
-          catalogQuantity: Number(f?.quantity || 0),
+          catalogQuantity: getFinancialQuantity(f),
           discount: calcDiscount(f?.price, f?.dprice),
           qty: 1,
           subtotal: Number(f?.dprice || 0),
@@ -1054,9 +1096,7 @@ const ProductList = forwardRef((props, ref) => {
                   const mrp = Number(f?.price || 0);
                   const rate = Number(f?.dprice || 0);
                   const stock = Number(f?.countInStock || 0);
-                  const qtyLabel = `${Number(f?.quantity || 0)} ${
-                    f?.units || ""
-                  }`;
+                  const qtyLabel = getFinancialPackLabel(f);
                   const discount = calcDiscount(f?.price, f?.dprice);
 
                   return (
