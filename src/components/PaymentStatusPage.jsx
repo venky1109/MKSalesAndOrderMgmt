@@ -19,7 +19,7 @@ const PaymentStatusPage = () => {
 
       if (!orderId || !pending?.cartItems?.length) {
         alert('Payment verification data missing');
-        navigate('/');
+        navigate('/pos', { replace: true });
         return;
       }
 
@@ -52,14 +52,14 @@ const PaymentStatusPage = () => {
           dispatch(clearCartItems());
           localStorage.removeItem('pendingPosUpi');
           alert('Payment Complete');
-          navigate('/');
+          navigate('/pos', { replace: true });
         } else {
           alert('Payment done, but order creation failed');
-          navigate('/');
+          navigate('/pos', { replace: true });
         }
       } else {
         alert('Payment Failed');
-        navigate('/');
+        navigate('/pos', { replace: true });
       }
     };
 

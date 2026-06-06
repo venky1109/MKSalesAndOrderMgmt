@@ -198,6 +198,9 @@ const cleanInvoiceItems = (items = []) =>
   const cashGiven = order.cashGiven ?? 0;
   const change = order.change ?? 0;
   const orderId = order._id || order.id || order.orderId || "--";
+  const paymentBreakdown = Array.isArray(order.paymentBreakdown)
+    ? order.paymentBreakdown
+    : [];
 
   const dt = order.datetime || order.createdAt || new Date().toISOString();
   const formattedDate = new Date(dt).toLocaleDateString();
@@ -327,6 +330,19 @@ const cleanInvoiceItems = (items = []) =>
           Date: {formattedDate} {formattedTime}
         </div>
         <div>Payment: {order.paymentMethod || "--"}</div>
+        {paymentBreakdown.length > 0 && (
+          <div>
+            {paymentBreakdown.map((payment, index) => (
+              <div
+                key={`${payment.channel || "payment"}-${index}`}
+                style={{ display: "flex", justifyContent: "space-between" }}
+              >
+                <span>{payment.channel || "Payment"}</span>
+                <span>{money(payment.amount)}</span>
+              </div>
+            ))}
+          </div>
+        )}
 
         <div style={{ borderTop: "1px dashed #000", margin: "1.5mm 0" }} />
 

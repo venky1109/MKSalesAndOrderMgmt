@@ -5,6 +5,7 @@ import { clearCart } from '../features/cart/cartSlice';
 import { updateProductStockOnly } from '../features/products/productSlice';
 import InvoiceShareModal from '../components/InvoiceShareModal';
 import PaymentResultCard from '../components/PaymentResultCard';
+import { API_BASE_URL } from '../utils/apiConfig';
 
 const PaymentSuccessPage = () => {
   const navigate = useNavigate();
@@ -63,6 +64,43 @@ const PaymentSuccessPage = () => {
     }
   };
 
+  const fetchOrderInvoiceFallback = async () => {
+    if (!urlOrderId || !token) return null;
+
+    const response = await fetch(
+      `${API_BASE_URL}/orders/pos/orders/details/${urlOrderId}`,
+      {
+        headers: { Authorization: `Bearer ${token}` },
+      }
+    );
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) return null;
+
+    return {
+      _id: data._id || urlOrderId,
+      id: data._id || urlOrderId,
+      orderId: data.MK_order_id || data.orderId || data._id || urlOrderId,
+      items: data.items || data.orderItems || [],
+      total: Number(data.totalPrice ?? urlAmount ?? 0),
+      totalPrice: Number(data.totalPrice ?? urlAmount ?? 0),
+      totalQty: (data.items || []).reduce(
+        (sum, item) => sum + Number(item.qty || 0),
+        0
+      ),
+      totalDiscount: Number(data.discountAmount || 0),
+      datetime: data.createdAt || new Date().toISOString(),
+      phone: data.phoneNo || '',
+      paymentMethod: data.paymentMethod || 'UPI',
+      paymentBreakdown: Array.isArray(data.paymentBreakdown)
+        ? data.paymentBreakdown
+        : [],
+      posUserName: data.posUserName || '',
+      posLocation: data.posLocation || '',
+      source: data.source || 'POS',
+    };
+  };
+
   const handleOk = async () => {
     try {
       const rawSnapshot = localStorage.getItem('upiInvoiceSnapshot');
@@ -97,11 +135,22 @@ const PaymentSuccessPage = () => {
           datetime: snapshot.datetime || new Date().toISOString(),
           phone: snapshot.phone || '',
           paymentMethod: snapshot.paymentMethod || 'UPI',
+          paymentBreakdown: Array.isArray(snapshot.paymentBreakdown)
+            ? snapshot.paymentBreakdown
+            : [],
           posUserName: snapshot.posUserName || '',
           posLocation: snapshot.posLocation || '',
           source: snapshot.source || 'POS',
         });
       } else {
+        const fallbackInvoice = await fetchOrderInvoiceFallback();
+
+        if (fallbackInvoice) {
+          setInvoiceOrder(fallbackInvoice);
+          setShowInvoice(true);
+          return;
+        }
+
         const fallbackOrderId = urlOrderId || '';
 
         setInvoiceOrder({
@@ -124,14 +173,14 @@ const PaymentSuccessPage = () => {
     } catch (err) {
       console.error('Failed to prepare invoice:', err);
       alert('Failed to prepare invoice');
-      navigate('/');
+      navigate('/pos', { replace: true });
     }
   };
 
   const handleInvoiceClose = () => {
     setShowInvoice(false);
     localStorage.removeItem('upiInvoiceSnapshot');
-    navigate('/');
+    navigate('/pos', { replace: true });
   };
 
   return (

@@ -10,15 +10,24 @@ import {
 } from "lucide-react";
 import { logout } from "../features/auth/posUserSlice";
 import {
+  queueOrder,
+  createOrder,
+  fetchLatestOrders,
   publishQueuedOrdersSequential,
   fetchPOSOrders,
   fetchPOSOrderDetails,
 } from "../features/orders/orderSlice";
+import { initiateDeliveryPayment } from "../features/payment/paymentSlice";
+import { fetchCustomerByPhone, createCustomer } from "../features/customers/customerSlice";
 import { pingBackend } from "../utils/network";
 import { openPrinterSettingsWindow } from "../utils/printerConfig";
 import UpiPaymentModal from "../components/UpiPaymentModal";
+import MultiPaymentModal from "../components/MultiPaymentModal";
 import { clearCart } from "../features/cart/cartSlice";
+import { fetchAllProducts } from "../features/products/productSlice";
 import CreateOrderButton from "./CreateOrderButton";
+import PhoneModal from "./PhoneModal";
+import OrderFulfillmentModal from "./OrderFulfillmentModal";
 import logo from "../assests/ManaKiranaLogo1024x1024.png";
 import POSDispatchButtons from "./POSDispatchButtons";
 import InvoiceShareModal from "./InvoiceShareModal";
@@ -225,6 +234,7 @@ export default function POSActionsBar() {
   const posOrderDetailsLoading = useSelector(
     (s) => s.orders?.posOrderDetailsLoading || false
   );
+  const paymentLoading = useSelector((s) => s.payment?.loading || false);
 
   const [toast, setToast] = useState({
     open: false,
@@ -252,7 +262,15 @@ export default function POSActionsBar() {
   const [toDate, setToDate] = useState("");
 
   const [showUpiModal, setShowUpiModal] = useState(false);
+  const [showMultiModal, setShowMultiModal] = useState(false);
+  const [showMultiPhoneModal, setShowMultiPhoneModal] = useState(false);
+  const [showMultiFulfillmentModal, setShowMultiFulfillmentModal] = useState(false);
+  const [multiPhone, setMultiPhone] = useState("");
+  const [multiFulfillmentOptions, setMultiFulfillmentOptions] = useState(null);
+  const [multiUpiPaid, setMultiUpiPaid] = useState(false);
   const [invoiceOpen, setInvoiceOpen] = useState(false);
+  const [multiInvoiceOpen, setMultiInvoiceOpen] = useState(false);
+  const [multiInvoiceOrder, setMultiInvoiceOrder] = useState(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [userMenuPosition, setUserMenuPosition] = useState({
     right: 12,
@@ -473,8 +491,273 @@ export default function POSActionsBar() {
   );
 
   const handleMulti = useCallback(() => {
-    showToast("Multi action clicked.", "info");
-  }, [showToast]);
+    if (cartItems.length === 0) {
+      showToast("Cart is empty.", "error");
+      return;
+    }
+
+    setMultiPhone("");
+    setMultiFulfillmentOptions(null);
+    setMultiUpiPaid(false);
+    setShowMultiPhoneModal(true);
+  }, [cartItems.length, showToast]);
+
+  const handleMultiPhoneConfirm = useCallback((digits) => {
+    setMultiPhone(digits);
+    setShowMultiPhoneModal(false);
+    setShowMultiFulfillmentModal(true);
+  }, []);
+
+  const handleMultiFulfillmentConfirm = useCallback((options) => {
+    setMultiFulfillmentOptions(options);
+    setShowMultiFulfillmentModal(false);
+    setShowMultiModal(true);
+  }, []);
+
+  const buildMultiOrderPayload = useCallback(
+    (payments, customerId = null) => {
+      const paymentSummary = payments
+        .map((payment) => `${payment.channel} Rs. ${payment.amount.toFixed(2)}`)
+        .join(" + ");
+      const packingWarehouseLocation =
+        multiFulfillmentOptions?.packingWarehouseLocation || "";
+      const basePosLocation = posUserInfo?.location || "";
+      const posLocation = packingWarehouseLocation
+        ? [basePosLocation, packingWarehouseLocation].filter(Boolean).join("|")
+        : basePosLocation;
+
+      return {
+        MK_order_id: Number(`${Date.now()}${Math.floor(Math.random() * 90 + 10)}`),
+        user: customerId,
+        shippingAddress: {
+          street: "Gollavelli",
+          city: "Amalapuram",
+          postalCode: "533222",
+          country: "India",
+        },
+        paymentMethod: "Multi",
+        paymentBreakdown: payments,
+        orderItems: cartItems.map((item) => ({
+          name: item.item,
+          quantity: item.catalogQuantity,
+          units: item.units,
+          brand: item.brand,
+          qty: item.qty,
+          image: item.image || "",
+          price: item.dprice,
+          product_code: item.product_code || "",
+          productId: item.id,
+          brandId: item.brandId,
+          financialId: item.financialId,
+        })),
+        itemsPrice: Number(cartTotal || 0),
+        totalPrice: Number(cartTotal || 0),
+        discountPercentage: 0,
+        discountAmount: 0,
+        phoneNo: multiPhone,
+        posUserName: posUserInfo?.username || "",
+        posLocation,
+        source: "POS",
+        ...(multiFulfillmentOptions || {}),
+        remarks: `Multi payment: ${paymentSummary}`,
+      };
+    },
+    [cartItems, cartTotal, multiFulfillmentOptions, multiPhone, posUserInfo]
+  );
+
+  const getOrCreateCustomerForMulti = useCallback(async () => {
+    try {
+      const customer = await dispatch(
+        fetchCustomerByPhone({ phone: multiPhone, token })
+      ).unwrap();
+      return customer?._id || null;
+    } catch {
+      const customer = await dispatch(
+        createCustomer({
+          name: "NA",
+          phone: multiPhone,
+          address: {
+            street: "Gollavelli",
+            city: "Amalapuram",
+            postalCode: "533222",
+          },
+          token,
+        })
+      ).unwrap();
+      return customer?._id || null;
+    }
+  }, [dispatch, multiPhone, token]);
+
+  const getPaymentRedirectUrl = (result) =>
+    result?.redirect_url ||
+    result?.paymentUrl ||
+    result?.webUrl ||
+    result?.data?.payment_links?.web ||
+    null;
+
+  const handlePayMultiUpi = useCallback(
+    async ({ payments }) => {
+      const upiAmount = payments.reduce((sum, payment) => {
+        const channel = String(payment.channel || "").toUpperCase();
+        const isUpi = channel.includes("UPI") || channel.includes("QR");
+        return isUpi ? sum + Number(payment.amount || 0) : sum;
+      }, 0);
+
+      if (upiAmount <= 0) {
+        showToast("Enter UPI / QR amount before payment.", "warning");
+        return;
+      }
+
+      try {
+        const customerId = await getOrCreateCustomerForMulti();
+        const orderPayload = buildMultiOrderPayload(payments, customerId);
+        const createdOrder = await dispatch(
+          createOrder({
+            payload: orderPayload,
+            token,
+            cartItems,
+            updateStock: false,
+          })
+        ).unwrap();
+
+        const orderId = createdOrder?._id;
+        if (!orderId) {
+          throw new Error("Order created but order ID missing");
+        }
+
+        localStorage.setItem(
+          "upiInvoiceSnapshot",
+          JSON.stringify({
+            orderId,
+            mkOrderId: createdOrder?.MK_order_id || orderPayload.MK_order_id,
+            items: cartItems.map((item) => ({
+              item: item.item,
+              name: item.item,
+              catalogQuantity: item.catalogQuantity,
+              quantity: item.catalogQuantity,
+              units: item.units,
+              brand: item.brand,
+              qty: item.qty,
+              image: item.image || "",
+              dprice: item.dprice,
+              price: item.dprice,
+              product_code: item.product_code || "",
+              id: item.id,
+              productId: item.id,
+              brandId: item.brandId,
+              financialId: item.financialId,
+              stock: item.stock,
+            })),
+            total: Number(createdOrder?.totalPrice || cartTotal || 0),
+            totalPrice: Number(createdOrder?.totalPrice || cartTotal || 0),
+            totalQty: cartItems.reduce((sum, item) => sum + Number(item.qty || 0), 0),
+            totalDiscount: 0,
+            phone: multiPhone,
+            paymentMethod: "Multi",
+            paymentBreakdown: payments,
+            datetime: createdOrder?.createdAt || new Date().toISOString(),
+            posUserName: posUserInfo?.username || "",
+            posLocation: orderPayload.posLocation || "",
+            source: "POS",
+          })
+        );
+
+        const paymentResult = await dispatch(
+          initiateDeliveryPayment({
+            customerId: multiPhone,
+            order_id: orderId,
+            amount: upiAmount,
+          })
+        ).unwrap();
+
+        const redirectUrl = getPaymentRedirectUrl(paymentResult);
+        if (!redirectUrl) {
+          throw new Error("Payment URL not received");
+        }
+
+        setMultiUpiPaid(true);
+        window.location.href = redirectUrl;
+      } catch (e) {
+        showToast(e?.message || "Failed to start UPI payment.", "error");
+      }
+    },
+    [
+      buildMultiOrderPayload,
+      cartItems,
+      cartTotal,
+      dispatch,
+      getOrCreateCustomerForMulti,
+      multiPhone,
+      posUserInfo,
+      showToast,
+      token,
+    ]
+  );
+
+  const handleConfirmMultiPayment = useCallback(
+    async ({ payments, paidAmount }) => {
+      const orderPayload = buildMultiOrderPayload(payments);
+
+      try {
+        const result = await dispatch(
+          queueOrder({
+            payload: orderPayload,
+            token,
+            cartItems,
+            phone: multiPhone,
+          })
+        ).unwrap();
+
+        const orderId =
+          result?._id ||
+          result?.id ||
+          result?._localId ||
+          result?.orderId ||
+          "";
+
+        setMultiInvoiceOrder({
+          _id: result?._id || undefined,
+          id: orderId,
+          orderId,
+          items: cartItems,
+          total: Number(cartTotal || 0),
+          totalPrice: Number(cartTotal || 0),
+          totalQty: cartItems.reduce((sum, item) => sum + Number(item.qty || 0), 0),
+          totalDiscount: 0,
+          datetime: result?.createdAt || new Date().toISOString(),
+          phone: multiPhone,
+          paymentMethod: "Multi",
+          paymentBreakdown: payments,
+          paidAmount,
+          posUserName: posUserInfo?.username || "",
+          posLocation: orderPayload.posLocation || "",
+          fulfillment: multiFulfillmentOptions,
+          source: "POS",
+        });
+
+        setShowMultiModal(false);
+        setMultiPhone("");
+        setMultiFulfillmentOptions(null);
+        dispatch(fetchLatestOrders());
+        dispatch(clearCart());
+        dispatch(fetchAllProducts(token));
+        setMultiInvoiceOpen(true);
+        showToast("Multi payment order queued.", "success");
+      } catch (e) {
+        showToast(e?.message || "Failed to create multi payment order.", "error");
+      }
+    },
+    [
+      buildMultiOrderPayload,
+      cartItems,
+      dispatch,
+      multiFulfillmentOptions,
+      multiPhone,
+      posUserInfo,
+      showToast,
+      token,
+    ]
+  );
 
   const handleCreateOrderShortcut = useCallback(() => {
     window.dispatchEvent(new Event("mkpos:create-order"));
@@ -1055,6 +1338,51 @@ export default function POSActionsBar() {
         phone={posOrderDetails?.phoneNo || ""}
         title="POS Order Invoice"
       />
+
+      <InvoiceShareModal
+        open={multiInvoiceOpen}
+        onClose={() => setMultiInvoiceOpen(false)}
+        order={multiInvoiceOrder}
+        phone={multiInvoiceOrder?.phone || ""}
+        title="Multi Payment Invoice"
+      />
+
+      {showMultiPhoneModal && (
+        <PhoneModal
+          onCancel={() => {
+            setShowMultiPhoneModal(false);
+            setMultiPhone("");
+          }}
+          onConfirm={handleMultiPhoneConfirm}
+        />
+      )}
+
+      <OrderFulfillmentModal
+        open={showMultiFulfillmentModal}
+        onCancel={() => {
+          setShowMultiFulfillmentModal(false);
+          setMultiPhone("");
+          setMultiFulfillmentOptions(null);
+        }}
+        onConfirm={handleMultiFulfillmentConfirm}
+        confirmLabel="Continue to Payment"
+      />
+
+      {showMultiModal && (
+        <MultiPaymentModal
+          total={Number(cartTotal || 0)}
+          onCancel={() => {
+            setShowMultiModal(false);
+            setMultiPhone("");
+            setMultiFulfillmentOptions(null);
+            setMultiUpiPaid(false);
+          }}
+          onConfirm={handleConfirmMultiPayment}
+          onPayUpi={handlePayMultiUpi}
+          upiPaid={multiUpiPaid}
+          paymentLoading={paymentLoading}
+        />
+      )}
 
       {showUpiModal && (
         <UpiPaymentModal

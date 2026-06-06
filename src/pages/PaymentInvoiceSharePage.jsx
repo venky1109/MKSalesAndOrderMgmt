@@ -46,7 +46,7 @@ const PaymentInvoiceSharePage = () => {
     } catch (err) {
       console.error(err);
       alert("Failed to load invoice details");
-      navigate("/");
+      navigate("/pos", { replace: true });
     } finally {
       setLoading(false);
     }
@@ -137,7 +137,7 @@ const PaymentInvoiceSharePage = () => {
   };
 
   const handleClose = () => {
-    navigate("/");
+    navigate("/pos", { replace: true });
   };
 
   const handleProfileChange = (profileId) => {
