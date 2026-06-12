@@ -30,6 +30,23 @@ const formatAddress = (shippingAddress) => {
     .join(', ');
 };
 
+const formatNumber = (value) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return value;
+  return numeric.toFixed(3).replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
+};
+
+const getOrderedItemCount = (item) => {
+  const count = Number(item?.no_of_units ?? item?.qty ?? item?.quantityOrdered);
+  return Number.isFinite(count) && count > 0 ? count : 0;
+};
+
+const getOrderItemCount = (order) =>
+  (order.orderItems || []).reduce(
+    (sum, item) => sum + (getOrderedItemCount(item) || 1),
+    0
+  );
+
 const DeliverOrdersCards = ({ orders = [], refetch }) => {
   const dispatch = useDispatch();
   const [expandedOrderId, setExpandedOrderId] = useState(null);
@@ -136,7 +153,7 @@ const DeliverOrdersCards = ({ orders = [], refetch }) => {
         const isPaid = order.isPaid;
         const isDelivered = order.isDelivered;
         const isBusy = loadingOrderId === order._id;
-        const itemCount = order.orderItems?.length || 0;
+        const itemCount = getOrderItemCount(order);
 
         return (
           <article
@@ -275,7 +292,10 @@ const DeliverOrdersCards = ({ orders = [], refetch }) => {
                         </div>
                       </div>
                       <div className="flex-none rounded-md bg-white px-2 py-1 text-xs font-bold text-gray-700">
-                        {item.quantity || 0} {item.units || ''}
+                        <div>{item.quantity || 0} {item.units || ''}</div>
+                        <div className="mt-1 text-right text-[11px] text-gray-500">
+                          No.of Units: {formatNumber(getOrderedItemCount(item) || 1)}
+                        </div>
                       </div>
                     </li>
                   ))}

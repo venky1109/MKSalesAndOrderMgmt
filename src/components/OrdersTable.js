@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import {
+  ArrowLeft,
   CheckCircle2,
   Clock3,
   MapPin,
@@ -9,7 +10,6 @@ import {
   Phone,
   RefreshCw,
   ShoppingBag,
-  X,
 } from 'lucide-react';
 import { formatDateTime } from '../utils/dateFormatter';
 import { getElapsedTime } from '../utils/timeUtils';
@@ -67,7 +67,11 @@ const OrdersTable = ({ orders, title = 'Orders List', refetch }) => {
   );
   const packedCount = Object.values(packedStatus).filter(Boolean).length;
   const selectedOrderTotal = orderItems.reduce(
-    (sum, item) => sum + Number(item.price || 0),
+    (sum, item) => sum + Number(item.price || 0) * (getOrderedUnitCount(item) || 1),
+    0
+  );
+  const totalPacks = orderItems.reduce(
+    (sum, item) => sum + (getOrderedUnitCount(item) || 0),
     0
   );
 
@@ -294,15 +298,25 @@ const OrdersTable = ({ orders, title = 'Orders List', refetch }) => {
         </div>
 
         {showModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-4">
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-gray-950/60 p-4">
             <div className="relative flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-lg bg-white shadow-2xl">
               <div className="border-b border-gray-200 bg-gray-50 px-5 py-4">
                 <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                  <div>
-                    <h3 className="text-xl font-bold text-gray-900">Order details</h3>
-                    <p className="mt-1 break-all font-mono text-xs font-semibold text-gray-500">
-                      #{selectedOrderId}
-                    </p>
+                  <div className="flex items-start gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setShowModal(false)}
+                      className="mt-1 inline-flex h-9 items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-700 hover:bg-gray-100"
+                    >
+                      <ArrowLeft size={16} />
+                      Back
+                    </button>
+                    <div>
+                      <h3 className="text-xl font-bold text-gray-900">Order details</h3>
+                      <p className="mt-1 break-all font-mono text-xs font-semibold text-gray-500">
+                        #{selectedOrderId}
+                      </p>
+                    </div>
                   </div>
                   <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-3">
                     <ModalMetric label="Items" value={`${packedCount}/${orderItems.length}`} />
@@ -322,18 +336,25 @@ const OrdersTable = ({ orders, title = 'Orders List', refetch }) => {
                 <p className="p-8 text-center text-gray-500">No items found.</p>
               ) : (
                 <div className="overflow-auto p-4">
-                  <table className="min-w-[860px] w-full table-fixed overflow-hidden rounded-lg border border-gray-200 text-sm">
+                  <table className="min-w-[1080px] w-full table-fixed overflow-hidden rounded-lg border border-gray-200 text-sm">
                     <thead className="sticky top-0 bg-gray-100 text-xs font-bold uppercase tracking-wide text-gray-500">
                       <tr>
                         <th className="w-[52px] px-3 py-3 text-center">Done</th>
-                        <th className="w-1/5 px-3 py-3 text-left">Brand</th>
+                        <th className="w-[170px] px-3 py-3 text-left">Brand</th>
                         <th className="px-3 py-3 text-left">Item</th>
-                        <th className="w-[120px] px-3 py-3 text-left">Qty</th>
-                        <th className="w-[140px] px-3 py-3 text-right">Price</th>
+                        <th className="w-[110px] px-3 py-3 text-left">Pack</th>
+                        <th className="w-[90px] px-3 py-3 text-right">Units</th>
+                        <th className="w-[130px] px-3 py-3 text-right">Price/Unit</th>
+                        <th className="w-[130px] px-3 py-3 text-right">Price</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
-                      {orderItems.map((item, index) => (
+                      {orderItems.map((item, index) => {
+                        const unitCount = getOrderedUnitCount(item) || 0;
+                        const unitPrice = Number(item.price || 0);
+                        const linePrice = unitPrice * (unitCount || 1);
+
+                        return (
                         <tr
                           key={index}
                           className={`cursor-pointer transition ${
@@ -361,37 +382,34 @@ const OrdersTable = ({ orders, title = 'Orders List', refetch }) => {
                             {item.name}
                           </td>
                           <td className="px-3 py-3 text-left font-bold text-gray-900">
-                            {item.quantity}
-                            {item.units}
+                            {formatOrderPackLabel(item)}
+                          </td>
+                          <td className="px-3 py-3 text-right font-bold text-gray-900">
+                            {unitCount ? formatNumber(unitCount) : '-'}
                           </td>
                           <td className="px-3 py-3 text-right font-semibold text-gray-900">
-                            ₹ {Number(item.price || 0).toFixed(2)}
+                            ₹ {unitPrice.toFixed(2)}
+                          </td>
+                          <td className="px-3 py-3 text-right font-semibold text-gray-900">
+                            ₹ {linePrice.toFixed(2)}
                           </td>
                         </tr>
-                      ))}
+                        );
+                      })}
                     </tbody>
                     <tfoot className="sticky bottom-0 bg-gray-50">
                       <tr>
                         <td
-                          colSpan="5"
+                          colSpan="7"
                           className="px-3 py-3 text-right font-semibold text-gray-700"
                         >
-                          Total Items: {orderItems.length}
+                          Total Products: {orderItems.length} | Total Packs: {formatNumber(totalPacks)} | Total Amount: ₹ {selectedOrderTotal.toFixed(2)}
                         </td>
                       </tr>
                     </tfoot>
                   </table>
                 </div>
               )}
-
-              <button
-                type="button"
-                onClick={() => setShowModal(false)}
-                className="absolute right-3 top-3 flex h-9 w-9 items-center justify-center rounded-lg text-gray-500 hover:bg-white hover:text-red-600"
-                aria-label="Close order details"
-              >
-                <X size={22} />
-              </button>
             </div>
           </div>
         )}
@@ -432,6 +450,27 @@ const getWarehouseLocationFromPosLocation = (posLocation = '') => {
     .filter(Boolean);
 
   return parts[1] || parts[0] || '';
+};
+
+const formatNumber = (value) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return value;
+  return numeric.toFixed(3).replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
+};
+
+const getOrderedUnitCount = (item) => {
+  const count = Number(item?.no_of_units ?? item?.qty ?? item?.quantityOrdered);
+  return Number.isFinite(count) && count > 0 ? count : null;
+};
+
+const formatOrderPackLabel = (item) => {
+  const quantity = item?.quantity ?? item?.catalogQuantity ?? item?.barcode_quantity;
+  const units = item?.units ?? item?.unit ?? item?.unit_short_code;
+
+  return [quantity !== undefined && quantity !== null ? formatNumber(quantity) : '', units]
+    .map((part) => String(part || '').trim())
+    .filter(Boolean)
+    .join(' ') || '-';
 };
 
 const ModalMetric = ({ label, value }) => (
