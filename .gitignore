@@ -11,6 +11,7 @@
 /build-check
 /dist
 /outputs/
+/tmp-build/
 
 # misc
 .DS_Store

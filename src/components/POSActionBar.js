@@ -21,11 +21,12 @@ import { initiateDeliveryPayment } from "../features/payment/paymentSlice";
 import { fetchCustomerByPhone, createCustomer } from "../features/customers/customerSlice";
 import { pingBackend } from "../utils/network";
 import { openPrinterSettingsWindow } from "../utils/printerConfig";
-import UpiPaymentModal from "../components/UpiPaymentModal";
 import MultiPaymentModal from "../components/MultiPaymentModal";
 import { clearCart } from "../features/cart/cartSlice";
-import { fetchAllProducts } from "../features/products/productSlice";
-import CreateOrderButton from "./CreateOrderButton";
+import {
+  fetchAllProducts,
+  fetchAllProductsFresh,
+} from "../features/products/productSlice";
 import PhoneModal from "./PhoneModal";
 import OrderFulfillmentModal from "./OrderFulfillmentModal";
 import logo from "../assests/ManaKiranaLogo1024x1024.png";
@@ -225,6 +226,7 @@ export default function POSActionsBar() {
 
   const cartItems = useSelector((s) => s.cart.items || []);
   const cartTotal = useSelector((s) => s.cart.total || 0);
+  const productsRefreshing = useSelector((s) => s.products?.loading || false);
 
   const posOrdersList = useSelector((s) => s.orders?.posOrdersList || []);
   const posOrdersListLoading = useSelector(
@@ -261,7 +263,6 @@ export default function POSActionsBar() {
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
 
-  const [showUpiModal, setShowUpiModal] = useState(false);
   const [showMultiModal, setShowMultiModal] = useState(false);
   const [showMultiPhoneModal, setShowMultiPhoneModal] = useState(false);
   const [showMultiFulfillmentModal, setShowMultiFulfillmentModal] = useState(false);
@@ -306,6 +307,38 @@ export default function POSActionsBar() {
   const handleReloadApp = useCallback(() => {
     window.location.reload();
   }, []);
+
+  const handleRefreshProducts = useCallback(async () => {
+    if (!navigator.onLine) {
+      showInfoModal(
+        "No Network",
+        "Connect to the internet to refresh products from DB.",
+        "warning"
+      );
+      return;
+    }
+
+    const ok = await pingBackend(undefined, 2000, token);
+    if (!ok) {
+      showInfoModal(
+        "Backend Unreachable",
+        "Check the API server and try again.",
+        "error"
+      );
+      return;
+    }
+
+    try {
+      const products = await dispatch(fetchAllProductsFresh({ token })).unwrap();
+      showToast(`Products refreshed from DB (${products.length}).`, "success");
+    } catch (e) {
+      showInfoModal(
+        "Refresh Failed",
+        e?.message || "Could not refresh products from DB.",
+        "error"
+      );
+    }
+  }, [dispatch, showInfoModal, showToast, token]);
 
   const handleOpenTopProducts = useCallback(() => {
     setSettingsOpen(false);
@@ -742,7 +775,7 @@ export default function POSActionsBar() {
         dispatch(clearCart());
         dispatch(fetchAllProducts(token));
         setMultiInvoiceOpen(true);
-        showToast("Multi payment order queued.", "success");
+        showToast("Payment order queued.", "success");
       } catch (e) {
         showToast(e?.message || "Failed to create multi payment order.", "error");
       }
@@ -759,33 +792,6 @@ export default function POSActionsBar() {
     ]
   );
 
-  const handleCreateOrderShortcut = useCallback(() => {
-    window.dispatchEvent(new Event("mkpos:create-order"));
-
-    const createBtn =
-      document.querySelector("[data-shortcut='create-order'] button") ||
-      document.querySelector("[data-shortcut='create-order']") ||
-      document.querySelector("[data-create-order]");
-
-    if (!createBtn) {
-      showToast("Create Order button not found.", "warning");
-    } else if (document.activeElement !== createBtn) {
-      createBtn.focus?.();
-    }
-  }, [showToast]);
-
-  const handleCreateOrderClickFallback = useCallback(() => {
-    const createBtn =
-      document.querySelector("[data-create-order]") ||
-      document.querySelector("[data-shortcut='create-order'] button");
-
-    if (createBtn) {
-      createBtn.click();
-    } else {
-      showToast("Create Order button not found.", "warning");
-    }
-  }, [showToast]);
-
   useEffect(() => {
     const onKeyDown = (e) => {
       if (e.repeat) return;
@@ -798,18 +804,12 @@ export default function POSActionsBar() {
       };
 
       if (!e.altKey) {
-        if (key === "f2" || e.code === "F2" || (e.ctrlKey && key === "enter")) {
-          run(handleCreateOrderShortcut);
-        } else if (key === "insert") {
-          run(handleCreateOrderClickFallback);
-        } else if (key === "f3") {
+        if (key === "f3") {
           run(handleHold);
         } else if (key === "f4") {
           run(handleClearCart);
         } else if (key === "f5") {
           run(openOrdersModal);
-        } else if (key === "f6") {
-          run(() => setShowUpiModal(true));
         } else if (key === "f7") {
           run(() => {
             if (!isPublishing && queueCount && navigator.onLine) {
@@ -838,10 +838,6 @@ export default function POSActionsBar() {
         run(openOrdersModal);
       } else if (key === "m") {
         run(handleMulti);
-      } else if (key === "u") {
-        run(() => setShowUpiModal(true));
-      } else if (key === "n") {
-        run(handleCreateOrderShortcut);
       } else if (key === "l") {
         run(handleLogout);
       }
@@ -857,8 +853,6 @@ export default function POSActionsBar() {
     handleClearCart,
     openOrdersModal,
     handleMulti,
-    handleCreateOrderShortcut,
-    handleCreateOrderClickFallback,
     handleLogout,
   ]);
 
@@ -1344,7 +1338,7 @@ export default function POSActionsBar() {
         onClose={() => setMultiInvoiceOpen(false)}
         order={multiInvoiceOrder}
         phone={multiInvoiceOrder?.phone || ""}
-        title="Multi Payment Invoice"
+        title="Payment Invoice"
       />
 
       {showMultiPhoneModal && (
@@ -1384,19 +1378,6 @@ export default function POSActionsBar() {
         />
       )}
 
-      {showUpiModal && (
-        <UpiPaymentModal
-          onClose={() => setShowUpiModal(false)}
-          cartItems={cartItems}
-          customer={null}
-          totals={{
-            itemsPrice: Number(cartTotal || 0),
-            shippingPrice: 0,
-            totalPrice: Number(cartTotal || 0),
-          }}
-        />
-      )}
-
       <div className="h-full w-full bg-white">
         <div className="border-t bg-white px-2 py-2 md:hidden">
           <div className="no-scrollbar flex items-center gap-2 overflow-x-auto">
@@ -1433,6 +1414,21 @@ export default function POSActionsBar() {
             </button>
 
             <button
+              onClick={handleRefreshProducts}
+              disabled={productsRefreshing || !navigator.onLine}
+              className={[
+                baseBtn,
+                mobileBtn,
+                productsRefreshing || !navigator.onLine
+                  ? "cursor-not-allowed border border-gray-300 bg-gray-400 text-white"
+                  : "border border-emerald-300 bg-emerald-600 text-white hover:bg-emerald-700",
+              ].join(" ")}
+              title="Reload products from DB"
+            >
+              {productsRefreshing ? "Refreshing..." : "Refresh"}
+            </button>
+
+            <button
               onClick={handleHold}
               className={[baseBtn, orangeBtn, mobileBtn].join(" ")}
               title="Shortcut: F3 or Alt + H"
@@ -1465,25 +1461,8 @@ export default function POSActionsBar() {
               className={[baseBtn, orangeBtn, mobileBtn].join(" ")}
               title="Shortcut: F8 or Alt + M"
             >
-              Multi
+              Payment
             </button>
-
-            <button
-              type="button"
-              className={[baseBtn, orangeBtn, mobileBtn].join(" ")}
-              onClick={() => setShowUpiModal(true)}
-              title="Shortcut: F6 or Alt + U"
-            >
-              UPI
-            </button>
-
-            <div
-              className="shrink-0 h-10 [&>*]:h-full [&>*]:rounded-xl [&>*]:px-3 [&>*]:text-xs [&>*]:font-bold"
-              data-shortcut="create-order"
-              title="Shortcut: F2 or Alt + N"
-            >
-              <CreateOrderButton />
-            </div>
 
             <POSDispatchButtons
               buttonClass={[baseBtn, orangeBtn, mobileBtn].join(" ")}
@@ -1542,6 +1521,22 @@ export default function POSActionsBar() {
             </button>
 
             <button
+              onClick={handleRefreshProducts}
+              disabled={productsRefreshing || !navigator.onLine}
+              className={[
+                baseBtn,
+                desktopBtn,
+                "h-9 text-xs",
+                productsRefreshing || !navigator.onLine
+                  ? "cursor-not-allowed border border-gray-300 bg-gray-400 text-white"
+                  : "border border-emerald-300 bg-emerald-600 text-white hover:bg-emerald-700",
+              ].join(" ")}
+              title="Reload products from DB"
+            >
+              {productsRefreshing ? "Refreshing..." : "Refresh"}
+            </button>
+
+            <button
               onClick={handleHold}
               className={[baseBtn, orangeBtn, "h-9 text-xs", desktopBtn].join(
                 " "
@@ -1580,27 +1575,8 @@ export default function POSActionsBar() {
               )}
               title="Shortcut: F8 or Alt + M"
             >
-              Multi
+              Payment
             </button>
-
-            <button
-              type="button"
-              onClick={() => setShowUpiModal(true)}
-              className={[baseBtn, orangeBtn, "h-9 text-xs", desktopBtn].join(
-                " "
-              )}
-              title="Shortcut: F6 or Alt + U"
-            >
-              UPI
-            </button>
-
-            <div
-              className="w-full [&>*]:h-9 [&>*]:w-full [&>*]:rounded-lg [&>*]:text-xs [&>*]:font-semibold"
-              data-shortcut="create-order"
-              title="Shortcut: F2 or Alt + N"
-            >
-              <CreateOrderButton />
-            </div>
 
             <POSDispatchButtons
               buttonClass={[baseBtn, orangeBtn, "h-9 text-xs", desktopBtn].join(

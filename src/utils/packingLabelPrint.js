@@ -9,6 +9,9 @@ import {
 
 const LABEL_WIDTH_MM = 57.5;
 const LABEL_HEIGHT_MM = 40;
+const LABEL_DPI = 203;
+const LABEL_CONTENT_TOP_MM = 22;
+const LABEL_BITMAP_Y_ADJUST_MM = -17;
 const LABEL_EXPIRY_DAYS = 90;
 const LOCAL_LABEL_PRINTER_URL =
   process.env.REACT_APP_LABEL_PRINTER_URL || 'http://127.0.0.1:8765/print-label';
@@ -142,6 +145,33 @@ const compactValues = (...values) =>
     .map((value) => String(value ?? '').trim())
     .filter(Boolean);
 
+const joinLabelBrandAndProductName = (brandName, productName) => {
+  const brand = String(brandName || '').trim();
+  const product = String(productName || '').trim();
+
+  if (!brand) return product || '-';
+  if (!product) return brand;
+  if (product.toLowerCase().startsWith(brand.toLowerCase())) return product;
+
+  return `${brand} ${product}`;
+};
+
+const getLabelProductName = (item) =>
+  joinLabelBrandAndProductName(
+    firstValue(item.brand_name_telugu, item.brand_name_english, item.brand_name, item.brand),
+    firstValue(
+      item.product_name_tel,
+      item.product_name_telugu,
+      item.teluguname,
+      item.telugu_name,
+      item.product_name_eng,
+      item.product_name,
+      item.productName,
+      item.name,
+      item.product_code
+    )
+  );
+
 const getLabelId = (item) =>
   firstValue(
     item.product_barcode_id,
@@ -221,6 +251,247 @@ const makeCode128Svg = (value) => {
   return `<svg class="barcodeSvg" viewBox="0 0 ${x} 34" preserveAspectRatio="none" aria-label="${escapeHtml(text)}">${bars.join(
     ''
   )}</svg>`;
+};
+
+const mmToPx = (mm) => Math.round((mm / 25.4) * LABEL_DPI);
+
+const encodeCode128 = (value) => {
+  const text = String(value || '').replace(/[^\x20-\x7e]/g, '');
+  if (!text) return [];
+
+  const codes = [104];
+
+  for (const char of text) {
+    codes.push(char.charCodeAt(0) - 32);
+  }
+
+  const checksum =
+    codes.reduce((sum, code, index) => sum + code * (index === 0 ? 1 : index), 0) %
+    103;
+  codes.push(checksum, 106);
+
+  return codes;
+};
+
+const drawCode128 = (ctx, value, x, y, width, height) => {
+  const codes = encodeCode128(value);
+  if (!codes.length) return false;
+
+  const moduleCount = codes.reduce((sum, code) => {
+    const pattern = code128Patterns[code];
+    return sum + (pattern ? pattern.split('').reduce((total, part) => total + Number(part), 0) : 0);
+  }, 0);
+  const moduleWidth = width / moduleCount;
+  let cursor = x;
+
+  ctx.fillStyle = '#111';
+  codes.forEach((code) => {
+    const pattern = code128Patterns[code];
+    if (!pattern) return;
+
+    pattern.split('').forEach((widthText, index) => {
+      const barWidth = Number(widthText) * moduleWidth;
+      if (index % 2 === 0) {
+        ctx.fillRect(Math.round(cursor), y, Math.ceil(barWidth), height);
+      }
+      cursor += barWidth;
+    });
+  });
+
+  return true;
+};
+
+const fitFontSize = (ctx, text, maxWidth, startSize, minSize) => {
+  for (let size = startSize; size >= minSize; size -= 1) {
+    ctx.font = `700 ${size}px "Noto Sans Telugu", "Nirmala UI", Gautami, Arial, sans-serif`;
+    if (ctx.measureText(text).width <= maxWidth) return size;
+  }
+
+  return minSize;
+};
+
+const drawFittedText = (ctx, text, x, y, maxWidth, startSize, minSize, weight = 700) => {
+  const value = String(text || '-').trim() || '-';
+  const size = fitFontSize(ctx, value, maxWidth, startSize, minSize);
+
+  ctx.font = `${weight} ${size}px "Noto Sans Telugu", "Nirmala UI", Gautami, Arial, sans-serif`;
+  ctx.fillText(value, x, y, maxWidth);
+};
+
+const rotateContentArea180 = (canvas, top) => {
+  const contentHeight = canvas.height - top;
+  const source = document.createElement('canvas');
+  const sourceCtx = source.getContext('2d');
+  const ctx = canvas.getContext('2d');
+
+  source.width = canvas.width;
+  source.height = contentHeight;
+  sourceCtx.drawImage(canvas, 0, top, canvas.width, contentHeight, 0, 0, canvas.width, contentHeight);
+
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, top, canvas.width, contentHeight);
+  ctx.save();
+  ctx.translate(canvas.width, top + contentHeight);
+  ctx.rotate(Math.PI);
+  ctx.drawImage(source, 0, 0);
+  ctx.restore();
+};
+
+const shiftCanvasContent = (canvas, yOffset) => {
+  if (!yOffset) return;
+
+  const source = document.createElement('canvas');
+  const sourceCtx = source.getContext('2d');
+  const ctx = canvas.getContext('2d');
+
+  source.width = canvas.width;
+  source.height = canvas.height;
+  sourceCtx.drawImage(canvas, 0, 0);
+
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(source, 0, yOffset);
+};
+
+const renderLabelToCanvas = async (item, order) => {
+  const width = mmToPx(LABEL_WIDTH_MM);
+  const height = mmToPx(LABEL_HEIGHT_MM);
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+  canvas.width = width;
+  canvas.height = height;
+
+  if (document.fonts?.load) {
+    await Promise.allSettled([
+      document.fonts.load('700 24px "Noto Sans Telugu"'),
+      document.fonts.load('700 24px "Nirmala UI"'),
+      document.fonts.load('700 24px Gautami'),
+    ]);
+  }
+
+  const productName = getLabelProductName(item).replace(/\(.*?\)/g, '').trim();
+  const discountPrice = getPrice(item);
+  const mrp = getLabelMrp(item);
+  const unit = item.unitText || getDispatchItemUnit(item);
+  const barcode = getLabelBarcode(item);
+  const labelId = getLabelId(item);
+  const pkd = formatDate(new Date());
+  const expDate = new Date();
+  expDate.setDate(expDate.getDate() + LABEL_EXPIRY_DAYS);
+  const exp = formatDate(expDate);
+  const perUnitPrice = getPerUnitPrice(item);
+  const paddingX = mmToPx(3);
+  const contentTop = mmToPx(LABEL_CONTENT_TOP_MM);
+  const contentWidth = width - paddingX * 2;
+
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, width, height);
+  ctx.fillStyle = '#111';
+  ctx.textBaseline = 'alphabetic';
+
+  drawFittedText(ctx, productName, paddingX, contentTop + 18, contentWidth, 24, 15);
+
+  ctx.font = '800 22px Arial, sans-serif';
+  ctx.fillText(`MRP:Rs ${mrp || '-'}`, paddingX, contentTop + 43);
+  ctx.fillText(`MKP:Rs ${discountPrice || '-'}`, paddingX + mmToPx(25), contentTop + 43);
+
+  ctx.font = '700 16px Arial, sans-serif';
+  ctx.fillText(`PkdDt ${pkd}`, paddingX, contentTop + 64);
+  ctx.fillText(`ExpDt ${exp}`, paddingX + mmToPx(25), contentTop + 64);
+  ctx.fillText(perUnitPrice ? `PerGm Rs:${perUnitPrice}` : '', paddingX, contentTop + 84);
+  ctx.fillText(unit || '-', paddingX + mmToPx(25), contentTop + 84);
+
+  if (labelId) {
+    ctx.save();
+    ctx.translate(width - mmToPx(4), contentTop + 32);
+    ctx.rotate(Math.PI / 2);
+    ctx.font = '800 20px Arial, sans-serif';
+    ctx.fillText(labelId, 0, 0, mmToPx(19));
+    ctx.restore();
+  }
+
+  const barcodeTop = contentTop + 86;
+  const barcodeHeight = mmToPx(5.8);
+  if (!drawCode128(ctx, barcode, paddingX, barcodeTop, contentWidth, barcodeHeight)) {
+    ctx.font = '700 16px Arial, sans-serif';
+    ctx.fillText(barcode || '-', paddingX, barcodeTop + 18, contentWidth);
+  }
+
+  ctx.font = '700 17px "Courier New", monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText(barcode || '-', width / 2, barcodeTop + barcodeHeight + 11, contentWidth);
+  ctx.textAlign = 'left';
+
+  rotateContentArea180(canvas, contentTop);
+  shiftCanvasContent(canvas, mmToPx(LABEL_BITMAP_Y_ADJUST_MM));
+
+  return canvas;
+};
+
+const canvasToTsplBitmapBytes = (canvas) => {
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  const image = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const widthBytes = Math.ceil(canvas.width / 8);
+  const bitmap = new Uint8Array(widthBytes * canvas.height).fill(0xff);
+
+  for (let y = 0; y < canvas.height; y += 1) {
+    for (let x = 0; x < canvas.width; x += 1) {
+      const index = (y * canvas.width + x) * 4;
+      const red = image.data[index];
+      const green = image.data[index + 1];
+      const blue = image.data[index + 2];
+      const alpha = image.data[index + 3];
+      const luminance = 0.299 * red + 0.587 * green + 0.114 * blue;
+
+      if (alpha > 0 && luminance < 180) {
+        bitmap[y * widthBytes + Math.floor(x / 8)] &= ~(0x80 >> (x % 8));
+      }
+    }
+  }
+
+  return bitmap;
+};
+
+const textToBytes = (text) => new TextEncoder().encode(text);
+
+const concatBytes = (parts) => {
+  const totalLength = parts.reduce((sum, part) => sum + part.length, 0);
+  const output = new Uint8Array(totalLength);
+  let offset = 0;
+
+  parts.forEach((part) => {
+    output.set(part, offset);
+    offset += part.length;
+  });
+
+  return output;
+};
+
+const bytesToBase64 = (bytes) => {
+  let binary = '';
+  const chunkSize = 0x8000;
+
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+  }
+
+  return btoa(binary);
+};
+
+const buildTsplBitmapLabelBytes = async (item, order) => {
+  const canvas = await renderLabelToCanvas(item, order);
+  const bitmap = canvasToTsplBitmapBytes(canvas);
+  const widthBytes = Math.ceil(canvas.width / 8);
+  const header = `SIZE ${LABEL_WIDTH_MM} mm, ${LABEL_HEIGHT_MM} mm\r\nDIRECTION 0,0\r\nREFERENCE 0,0\r\nOFFSET 0 mm\r\nSET PEEL OFF\r\nSET CUTTER OFF\r\nSET PARTIAL_CUTTER OFF\r\nSET TEAR ON\r\nCLS\r\nBITMAP 0,0,${widthBytes},${canvas.height},0,`;
+  const footer = '\r\nPRINT 1,1\r\n';
+
+  return concatBytes([textToBytes(header), bitmap, textToBytes(footer)]);
+};
+
+const buildTsplBitmapLabelsBase64 = async (order, rows) => {
+  const labels = await Promise.all(rows.map((item) => buildTsplBitmapLabelBytes(item, order)));
+  return bytesToBase64(concatBytes(labels));
 };
 
 export const getPackingLabelRows = (order) =>
@@ -352,13 +623,13 @@ const downloadTsplLabels = (order, rows) => {
   URL.revokeObjectURL(url);
 };
 
-const sendTsplToLocalPrinter = async (prn) => {
+const sendTsplToLocalPrinter = async ({ prn, prnBase64 }) => {
   const response = await fetch(LOCAL_LABEL_PRINTER_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ prn }),
+    body: JSON.stringify(prnBase64 ? { prnBase64 } : { prn }),
   });
 
   const data = await response.json().catch(() => ({}));
@@ -444,7 +715,7 @@ export const summarizePackingLabelRows = (rows = []) => {
 };
 
 const buildLabel = (item, order) => {
-  const productName = getDispatchItemProductName(item).replace(/\(.*?\)/g, '').trim();
+  const productName = getLabelProductName(item).replace(/\(.*?\)/g, '').trim();
   const discountPrice = getPrice(item);
   const mrp = getLabelMrp(item);
   const unit = item.unitText || getDispatchItemUnit(item);
@@ -497,7 +768,7 @@ const buildPackingLabelsHtml = (order, labels, autoPrint = true) => `
         body {
           margin: 0;
           color: #111;
-          font-family: Arial, Helvetica, sans-serif;
+          font-family: 'Noto Sans Telugu', 'Nirmala UI', Gautami, Arial, Helvetica, sans-serif;
           width: ${LABEL_WIDTH_MM}mm;
         }
 
@@ -724,10 +995,9 @@ export const printPackingLabels = async (order, options = {}) => {
     return openPackingLabelsWindow(order, labelRows, false);
   }
 
-  const prn = labelRows.map((item) => buildTsplLabel(item, order)).join('\n');
-
   try {
-    await sendTsplToLocalPrinter(prn);
+    const prnBase64 = await buildTsplBitmapLabelsBase64(order, labelRows);
+    await sendTsplToLocalPrinter({ prnBase64 });
     alert('Labels sent to local TSC printer.');
     return true;
   } catch (error) {

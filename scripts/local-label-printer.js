@@ -27,7 +27,7 @@ const readBody = (req) =>
     req.on('data', (chunk) => {
       body += chunk;
 
-      if (body.length > 1024 * 1024) {
+      if (body.length > 8 * 1024 * 1024) {
         reject(new Error('Request body too large'));
         req.destroy();
       }
@@ -84,9 +84,11 @@ const server = http.createServer(async (req, res) => {
   try {
     const rawBody = await readBody(req);
     const payload = JSON.parse(rawBody || '{}');
+    const prnBase64 = String(payload.prnBase64 || '');
     const prn = String(payload.prn || '');
+    const printData = prnBase64 ? Buffer.from(prnBase64, 'base64') : Buffer.from(prn, 'utf8');
 
-    if (!prn.trim()) {
+    if (!printData.length || (!prnBase64 && !prn.trim())) {
       sendJson(res, 400, { ok: false, message: 'Missing PRN data' });
       return;
     }
@@ -96,7 +98,7 @@ const server = http.createServer(async (req, res) => {
       `mk-label-${Date.now()}-${Math.round(Math.random() * 100000)}.prn`
     );
 
-    fs.writeFileSync(tempFile, prn, 'utf8');
+    fs.writeFileSync(tempFile, printData);
     await copyRawToPrinter(tempFile);
 
     sendJson(res, 200, {

@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import html2canvas from "html2canvas";
-import WhatsAppShare from "./WhatsAppShare";
+import WhatsAppShare, { buildOrderText } from "./WhatsAppShare";
 import {
   getInvoicePrinterSettings,
   getPrinterProfile,
@@ -18,8 +17,6 @@ const InvoiceShareModal = ({
   const receiptRef = useRef(null);
   const waRef = useRef(null);
 
-  const [invoiceImgUrl, setInvoiceImgUrl] = useState(null);
-  const [pendingCapture, setPendingCapture] = useState(false);
   const [printerSettings, setPrinterSettings] = useState(() =>
     getInvoicePrinterSettings()
   );
@@ -56,45 +53,16 @@ const cleanInvoiceItems = (items = []) =>
   useEffect(() => {
     if (open && order) {
       setPrinterSettings(getInvoicePrinterSettings());
-      setInvoiceImgUrl(null);
-      setPendingCapture(true);
     }
   }, [open, order]);
 
-  useEffect(() => {
-    const doCapture = async () => {
-      if (!pendingCapture || !receiptRef.current) return;
-
-      try {
-        await new Promise((r) => requestAnimationFrame(r));
-        await new Promise((r) => setTimeout(r, 100));
-
-        const canvas = await html2canvas(receiptRef.current, {
-          scale: 2,
-          backgroundColor: "#ffffff",
-          useCORS: true,
-          logging: false,
-        });
-
-        setInvoiceImgUrl(canvas.toDataURL("image/png"));
-      } catch (e) {
-        console.error("html2canvas failed", e);
-        alert("Failed to generate invoice preview.");
-      } finally {
-        setPendingCapture(false);
-      }
-    };
-
-    doCapture();
-  }, [pendingCapture]);
-
-  const printReceiptImage = (imgUrl) => {
-    if (!imgUrl) return;
-
+  const printReceipt = () => {
+    if (!receiptRef.current) return;
     const profile = getPrinterProfile(printerSettings.profileId);
     const pageWidthCss =
       profile.imageWidth === "100%" ? "100%" : `${profile.imageWidth}`;
     const pageSizeCss = profile.pageSize || "auto";
+    const receiptHtml = receiptRef.current.outerHTML;
 
     const html = `
       <!DOCTYPE html>
@@ -117,45 +85,35 @@ const cleanInvoiceItems = (items = []) =>
 
             * { box-sizing: border-box; }
 
-            .page {
+            .receipt {
               width: ${pageWidthCss} !important;
+              max-width: ${pageWidthCss} !important;
+              min-width: ${pageWidthCss} !important;
+              padding: 2mm 2mm 0.5mm 2mm !important;
               margin: 0 !important;
-              padding: 0 !important;
-            }
-
-            .receipt-img {
-              display: block !important;
-              width: ${pageWidthCss} !important;
-              height: auto !important;
-              margin: 0 !important;
-              padding: 0 !important;
-              border: 0 !important;
+              background: #fff !important;
+              color: #000 !important;
+              font-family: Menlo, Consolas, "Courier New", monospace !important;
+              font-size: 11px !important;
+              line-height: 1.35 !important;
+              box-sizing: border-box !important;
+              white-space: normal !important;
+              overflow-wrap: break-word !important;
+              word-break: break-word !important;
             }
           </style>
         </head>
         <body>
-          <div class="page">
-            <img id="receipt-img" class="receipt-img" src="${imgUrl}" alt="Invoice" />
-          </div>
+          ${receiptHtml}
 
           <script>
             (function () {
-              const img = document.getElementById("receipt-img");
-
-              function doPrint() {
-                setTimeout(() => {
-                  try {
-                    window.focus();
-                    window.print();
-                  } catch (e) {}
-                }, 120);
-              }
-
-              if (img.complete) doPrint();
-              else {
-                img.onload = doPrint;
-                img.onerror = doPrint;
-              }
+              setTimeout(function () {
+                try {
+                  window.focus();
+                  window.print();
+                } catch (e) {}
+              }, 120);
             })();
           </script>
         </body>
@@ -165,24 +123,37 @@ const cleanInvoiceItems = (items = []) =>
     printHtmlInHiddenFrame(html);
   };
 
-  const handleShareWhatsApp = () => {
-    if (!waRef.current || !invoiceImgUrl) {
-      alert("Invoice image not ready yet.");
-      return;
-    }
-
+  const getCleanedOrder = () => {
     const originalItems = order.items || order.orderItems || [];
     const cleanedItems = cleanInvoiceItems(originalItems);
 
-    const cleanedOrder = {
+    return {
       ...order,
       items: cleanedItems,
       orderItems: cleanedItems,
     };
+  };
 
-    console.log("WhatsApp cleaned order:", cleanedOrder);
+  const handleShareWhatsApp = () => {
+    if (!waRef.current) {
+      return;
+    }
 
-    waRef.current.sendImage(cleanedOrder, phone, invoiceImgUrl);
+    waRef.current.sendText(getCleanedOrder(), phone);
+  };
+
+  const handleDownloadInvoice = () => {
+    const text = buildOrderText(getCleanedOrder());
+    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `invoice-${orderId}.txt`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
   };
 
   if (!open || !order) return null;
@@ -205,6 +176,131 @@ const cleanInvoiceItems = (items = []) =>
   const dt = order.datetime || order.createdAt || new Date().toISOString();
   const formattedDate = new Date(dt).toLocaleDateString();
   const formattedTime = new Date(dt).toLocaleTimeString();
+  const receiptStyle = {
+    width: printerProfile.captureWidth,
+    maxWidth: "100%",
+    padding: "2mm 2mm 0.5mm 2mm",
+    margin: "0 auto",
+    background: "#fff",
+    color: "#000",
+    fontFamily: 'Menlo, Consolas, "Courier New", monospace',
+    fontSize: "11px",
+    lineHeight: 1.35,
+    boxSizing: "border-box",
+    whiteSpace: "normal",
+    overflowWrap: "break-word",
+    wordBreak: "break-word",
+    border: "1px solid #eee",
+  };
+  const receiptContent = (
+    <>
+      <div style={{ textAlign: "center", marginBottom: "2mm" }}>
+        <div style={{ fontWeight: "bold", fontSize: "12px" }}>
+          {process.env.REACT_APP_SHOP_NAME || "MANAKIRANA"}
+        </div>
+        <div>{process.env.REACT_APP_SHOP_ADDRESS_LINE1 || "Gollavilli"}</div>
+        {process.env.REACT_APP_SHOP_PHONE && (
+          <div>Phone: {process.env.REACT_APP_SHOP_PHONE}</div>
+        )}
+      </div>
+
+      <div style={{ borderTop: "1px dashed #000", margin: "1.5mm 0" }} />
+
+      <div>Order ID: {orderId}</div>
+      <div>Bill To: {phone || order.phone || "--"}</div>
+      <div>
+        Date: {formattedDate} {formattedTime}
+      </div>
+      <div>Payment: {order.paymentMethod || "--"}</div>
+      {paymentBreakdown.length > 0 && (
+        <div>
+          {paymentBreakdown.map((payment, index) => (
+            <div
+              key={`${payment.channel || "payment"}-${index}`}
+              style={{ display: "flex", justifyContent: "space-between" }}
+            >
+              <span>{payment.channel || "Payment"}</span>
+              <span>{money(payment.amount)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={{ borderTop: "1px dashed #000", margin: "1.5mm 0" }} />
+
+      {items.map((it, idx) => {
+        const price = Number(it.pricePerQty || 0);
+        const qty = Number(it.qty || 0);
+        const lineTotal = qty * price;
+
+        return (
+          <div key={idx} style={{ marginBottom: "3px" }}>
+            <div style={{ fontWeight: 600 }}>
+              {it.name}
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                gap: 8,
+                fontSize: "10px",
+              }}
+            >
+              <div style={{ flex: 1, minWidth: 0 }}>
+                {qty} x {money(price)}
+              </div>
+
+              <div style={{ whiteSpace: "nowrap" }}>{money(lineTotal)}</div>
+            </div>
+          </div>
+        );
+      })}
+
+      <div style={{ borderTop: "1px dashed #000", margin: "1.5mm 0" }} />
+
+      <div style={{ display: "flex", justifyContent: "space-between" }}>
+        <strong>Total Qty</strong>
+        <strong>{Number(totalQty).toFixed(0)}</strong>
+      </div>
+
+      <div style={{ display: "flex", justifyContent: "space-between" }}>
+        <div>Total Discount</div>
+        <div>{money(totalDiscount)}</div>
+      </div>
+
+      <div style={{ display: "flex", justifyContent: "space-between" }}>
+        <strong>Total</strong>
+        <strong>{money(total)}</strong>
+      </div>
+
+      {order.paymentMethod === "Cash" && (
+        <>
+          <div style={{ display: "flex", justifyContent: "space-between" }}>
+            <div>Cash Given</div>
+            <div>{money(cashGiven)}</div>
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "space-between" }}>
+            <div>Change</div>
+            <div>{money(change)}</div>
+          </div>
+        </>
+      )}
+
+      <div style={{ borderTop: "1px dashed #000", margin: "1mm 0" }} />
+
+      <div
+        style={{
+          textAlign: "center",
+          marginBottom: "1mm",
+          fontWeight: 600,
+        }}
+      >
+        Thank you! Visit again
+      </div>
+    </>
+  );
 
   return (
     <>
@@ -239,19 +335,19 @@ const cleanInvoiceItems = (items = []) =>
           >
             <h3 style={{ marginTop: 0 }}>{title}</h3>
 
-            {!invoiceImgUrl ? (
-              <div>Generating...</div>
-            ) : (
-              <img
-                src={invoiceImgUrl}
-                alt="Invoice"
-                style={{
-                  width: "100%",
-                  height: "auto",
-                  border: "1px solid #eee",
-                }}
-              />
-            )}
+            <div
+              style={{
+                maxHeight: "58vh",
+                overflowY: "auto",
+                border: "1px solid #eee",
+                background: "#fafafa",
+                padding: 8,
+              }}
+            >
+              <div ref={receiptRef} className="receipt" style={receiptStyle}>
+                {receiptContent}
+              </div>
+            </div>
 
             <div
               style={{
@@ -262,19 +358,18 @@ const cleanInvoiceItems = (items = []) =>
               }}
             >
               <button
-                onClick={() => printReceiptImage(invoiceImgUrl)}
-                disabled={!invoiceImgUrl}
+                onClick={printReceipt}
               >
                 Print
               </button>
 
-              <button onClick={handleShareWhatsApp} disabled={!invoiceImgUrl}>
+              <button onClick={handleShareWhatsApp}>
                 Share WhatsApp
               </button>
 
-              <a href={invoiceImgUrl || "#"} download={`invoice-${orderId}.png`}>
-                <button disabled={!invoiceImgUrl}>Download PNG</button>
-              </a>
+              <button onClick={handleDownloadInvoice}>
+                Download
+              </button>
 
               <button onClick={onClose}>Close</button>
             </div>
@@ -288,146 +383,6 @@ const cleanInvoiceItems = (items = []) =>
         </div>,
         document.body
       )}
-
-      <div
-        ref={receiptRef}
-        style={{
-          width: printerProfile.captureWidth,
-          maxWidth: printerProfile.captureWidth,
-          minWidth: printerProfile.captureWidth,
-          padding: "2mm 2mm 0.5mm 2mm",
-          margin: 0,
-          background: "#fff",
-          color: "#000",
-          fontFamily: 'Menlo, Consolas, "Courier New", monospace',
-          fontSize: "11px",
-          lineHeight: 1.35,
-          boxSizing: "border-box",
-          position: "fixed",
-          left: "-10000px",
-          top: "0",
-          whiteSpace: "normal",
-          overflowWrap: "break-word",
-          wordBreak: "break-word",
-        }}
-        aria-hidden="true"
-      >
-        <div style={{ textAlign: "center", marginBottom: "2mm" }}>
-          <div style={{ fontWeight: "bold", fontSize: "12px" }}>
-            {process.env.REACT_APP_SHOP_NAME || "MANAKIRANA"}
-          </div>
-          <div>{process.env.REACT_APP_SHOP_ADDRESS_LINE1 || "Gollavilli"}</div>
-          {process.env.REACT_APP_SHOP_PHONE && (
-            <div>Phone: {process.env.REACT_APP_SHOP_PHONE}</div>
-          )}
-        </div>
-
-        <div style={{ borderTop: "1px dashed #000", margin: "1.5mm 0" }} />
-
-        <div>Order ID: {orderId}</div>
-        <div>Bill To: {phone || order.phone || "--"}</div>
-        <div>
-          Date: {formattedDate} {formattedTime}
-        </div>
-        <div>Payment: {order.paymentMethod || "--"}</div>
-        {paymentBreakdown.length > 0 && (
-          <div>
-            {paymentBreakdown.map((payment, index) => (
-              <div
-                key={`${payment.channel || "payment"}-${index}`}
-                style={{ display: "flex", justifyContent: "space-between" }}
-              >
-                <span>{payment.channel || "Payment"}</span>
-                <span>{money(payment.amount)}</span>
-              </div>
-            ))}
-          </div>
-        )}
-
-        <div style={{ borderTop: "1px dashed #000", margin: "1.5mm 0" }} />
-
-        {items.map((it, idx) => {
-          const price = Number(it.pricePerQty || 0);
-          const qty = Number(it.qty || 0);
-          const lineTotal = qty * price;
-
-          console.log("Invoice Item:", {
-            index: idx,
-            rawItem: it,
-            name: it.name,
-            qty,
-            price,
-            lineTotal,
-          });
-
-          return (
-            <div key={idx} style={{ marginBottom: "3px" }}>
-              <div style={{ fontWeight: 600 }}>
-                {it.name}
-                
-              </div>
-
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  gap: 8,
-                  fontSize: "10px",
-                }}
-              >
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  {qty} x {money(price)}
-                </div>
-
-                <div style={{ whiteSpace: "nowrap" }}>{money(lineTotal)}</div>
-              </div>
-            </div>
-          );
-        })}
-
-        <div style={{ borderTop: "1px dashed #000", margin: "1.5mm 0" }} />
-
-        <div style={{ display: "flex", justifyContent: "space-between" }}>
-          <strong>Total Qty</strong>
-          <strong>{Number(totalQty).toFixed(0)}</strong>
-        </div>
-
-        <div style={{ display: "flex", justifyContent: "space-between" }}>
-          <div>Total Discount</div>
-          <div>{money(totalDiscount)}</div>
-        </div>
-
-        <div style={{ display: "flex", justifyContent: "space-between" }}>
-          <strong>Total</strong>
-          <strong>{money(total)}</strong>
-        </div>
-
-        {order.paymentMethod === "Cash" && (
-          <>
-            <div style={{ display: "flex", justifyContent: "space-between" }}>
-              <div>Cash Given</div>
-              <div>{money(cashGiven)}</div>
-            </div>
-
-            <div style={{ display: "flex", justifyContent: "space-between" }}>
-              <div>Change</div>
-              <div>{money(change)}</div>
-            </div>
-          </>
-        )}
-
-        <div style={{ borderTop: "1px dashed #000", margin: "1mm 0" }} />
-
-        <div
-          style={{
-            textAlign: "center",
-            marginBottom: "1mm",
-            fontWeight: 600,
-          }}
-        >
-          Thank you! Visit again
-        </div>
-      </div>
 
       <WhatsAppShare ref={waRef} />
     </>

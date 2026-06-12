@@ -189,8 +189,8 @@ const PaymentSuccessPage = () => {
         <PaymentResultCard
           accent="green"
           icon="OK"
-          title="Payment Successful"
-          description="The payment was completed successfully"
+          title="Order Created"
+          description="Order created with payment details."
           rows={[
             { label: 'Order ID', value: urlOrderId || '-', alignRight: true },
             { label: 'Amount', value: `Rs ${displayAmount}` },

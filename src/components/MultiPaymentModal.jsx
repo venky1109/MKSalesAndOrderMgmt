@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 
 const PAYMENT_CHANNELS = [
+  { key: '', label: 'Select payment channel' },
   { key: 'Cash', label: 'Cash' },
   { key: 'UPI', label: 'UPI / QR' },
   { key: 'Card', label: 'Card' },
@@ -33,15 +34,21 @@ const MultiPaymentModal = ({
   paymentLoading = false,
 }) => {
   const payableTotal = Number(total || 0);
-  const [rows, setRows] = useState([{ channel: 'Cash', amount: '' }]);
+  const [rows, setRows] = useState([{ channel: '', amount: '' }]);
 
   const paidAmount = useMemo(
-    () => rows.reduce((sum, row) => sum + Number(row.amount || 0), 0),
+    () =>
+      rows.reduce(
+        (sum, row) => sum + (row.channel ? Number(row.amount || 0) : 0),
+        0
+      ),
     [rows]
   );
   const remaining = Number((payableTotal - paidAmount).toFixed(2));
-  const overpaid = remaining < 0;
-  const isComplete = Math.abs(remaining) < 0.01;
+  const underpaid = remaining > 0.009;
+  const balanceDue = Math.max(remaining, 0);
+  const changeDue = Math.max(Math.abs(Math.min(remaining, 0)), 0);
+  const canConfirm = !underpaid;
   const hasUpiPayment = rows.some(
     (row) => isUpiChannel(row.channel) && Number(row.amount || 0) > 0
   );
@@ -70,27 +77,28 @@ const MultiPaymentModal = ({
     if (remaining <= 0) return;
     setRows((prev) => [
       ...prev,
-      { channel: 'UPI', amount: remaining.toFixed(2) },
+      { channel: '', amount: remaining.toFixed(2) },
     ]);
   };
 
   const handleConfirm = () => {
     const payments = getPayments();
 
-    if (!isComplete || overpaid || payments.length === 0 || (hasUpiPayment && !upiPaid)) {
+    if (!canConfirm || payments.length === 0 || (hasUpiPayment && !upiPaid)) {
       return;
     }
 
     onConfirm?.({
       payments,
       paidAmount: Number(paidAmount.toFixed(2)),
+      changeDue: Number(changeDue.toFixed(2)),
     });
   };
 
   const handlePayUpi = () => {
     const payments = getPayments();
 
-    if (!isComplete || overpaid || payments.length === 0 || !hasUpiPayment) {
+    if (!canConfirm || payments.length === 0 || !hasUpiPayment) {
       return;
     }
 
@@ -104,7 +112,7 @@ const MultiPaymentModal = ({
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/45 px-3">
       <div className="w-full max-w-lg overflow-hidden rounded-2xl border border-orange-100 bg-white shadow-2xl">
         <div className="bg-[#ff8a00] px-5 py-4">
-          <h2 className="text-lg font-bold text-white">Multi Payment</h2>
+          <h2 className="text-lg font-bold text-white">Payment</h2>
           <div className="mt-1 text-sm font-semibold text-orange-50">
             Bill Amount: {money(payableTotal)}
           </div>
@@ -145,8 +153,7 @@ const MultiPaymentModal = ({
                   disabled={
                     !isUpiChannel(row.channel) ||
                     Number(row.amount || 0) <= 0 ||
-                    !isComplete ||
-                    overpaid ||
+                    !canConfirm ||
                     upiPaid ||
                     paymentLoading
                   }
@@ -176,9 +183,9 @@ const MultiPaymentModal = ({
               <span>Paid</span>
               <span>{money(paidAmount)}</span>
             </div>
-            <div className={`mt-1 flex justify-between ${overpaid ? 'text-red-700' : 'text-gray-800'}`}>
-              <span>{overpaid ? 'Overpaid' : 'Remaining'}</span>
-              <span>{money(Math.abs(remaining))}</span>
+            <div className={`mt-1 flex justify-between ${underpaid ? 'text-red-700' : 'text-gray-800'}`}>
+              <span>{underpaid ? 'Remaining' : 'Balance'}</span>
+              <span>{money(underpaid ? balanceDue : changeDue)}</span>
             </div>
           </div>
 
@@ -204,10 +211,10 @@ const MultiPaymentModal = ({
           <button
             type="button"
             onClick={handleConfirm}
-            disabled={!isComplete || overpaid || (hasUpiPayment && !upiPaid) || paymentLoading}
+            disabled={!canConfirm || (hasUpiPayment && !upiPaid) || paymentLoading}
             className="rounded-xl bg-[#ff8a00] px-5 py-2.5 text-sm font-bold text-white hover:bg-[#e57b00] disabled:cursor-not-allowed disabled:bg-orange-300"
           >
-            Confirm Multi Payment
+            Confirm Payment
           </button>
         </div>
       </div>
