@@ -2211,13 +2211,18 @@ const ApplicationMigrationHelperPage = () => {
   const selectBarcodeAssignProduct = (product) => {
     const name = getProductName(product) || "";
     const packText = getFinancialPackText(product);
-    const currentScannerBarcode = outletPostingForm.vendor_barcode;
+    const currentScannerBarcode = outletPostingForm.vendor_barcode || barcodeAssignScan.trim();
     const financial = getFirstFinancial(getFirstBrand(product));
     const selectedMkBarcode = financial?.mk_barcode || product?.mk_barcode || "";
 
     setBarcodeAssignSearch([name, packText].filter(Boolean).join(" - "));
+    setBarcodeAssignFound(null);
     setScannedProduct(product);
-    hydrateFormsFromProduct(product, "");
+    hydrateFormsFromProduct(product, currentScannerBarcode);
+    setFinancialForm((prev) => ({
+      ...prev,
+      barcode: currentScannerBarcode || "",
+    }));
     setOutletPostingForm((prev) => ({
       ...prev,
       vendor_barcode: currentScannerBarcode || "",
@@ -3305,7 +3310,7 @@ const ApplicationMigrationHelperPage = () => {
             quantity: numberOrNull(financialForm.quantity) ?? 0,
             countInStock: numberOrNull(financialForm.countInStock) ?? 0,
             units: pack.units,
-            barcode: uniqueValues([vendorBarcode, base.mkBarcode]),
+            barcode: vendorBarcode ? [vendorBarcode] : [],
           },
         }),
       });
