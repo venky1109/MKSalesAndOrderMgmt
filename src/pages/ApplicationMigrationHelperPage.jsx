@@ -1257,7 +1257,7 @@ const ApplicationMigrationHelperPage = () => {
   const [barcodeAssignFound, setBarcodeAssignFound] = useState(null);
   const [barcodeAssignLookupOpen, setBarcodeAssignLookupOpen] = useState(false);
   const [liteCountHighlight, setLiteCountHighlight] = useState(false);
-  const [migrationMode, setMigrationMode] = useState("outlet");
+  const [migrationMode, setMigrationMode] = useState("manual");
   const [productLookupOpen, setProductLookupOpen] = useState(false);
   const [legacyProductMatches, setLegacyProductMatches] = useState([]);
   const [scannedProduct, setScannedProduct] = useState(null);
@@ -6906,43 +6906,13 @@ const ApplicationMigrationHelperPage = () => {
     <StockManagerLayout>
       <main className="space-y-4">
         <section className="rounded-lg border bg-white p-4 shadow-sm">
-          <h1 className="text-xl font-bold text-gray-900">Application Migration Helper</h1>
+          <h1 className="text-xl font-bold text-gray-900">Manual Migration Helper</h1>
           <p className="mt-1 text-sm text-gray-500">
-            Move stock into outlet Mongo, migrate catalog barcode items into inventory, or rollback a selected product transaction.
+            Create migration drafts manually, run product migration, and assign scanned barcodes from one focused workspace.
           </p>
         </section>
 
         <section className="flex flex-wrap gap-2 rounded-lg border bg-white p-3 shadow-sm">
-          <button
-            type="button"
-            onClick={() => {
-              setMigrationMode("outlet");
-              resetLiteDefaultDates();
-            }}
-            className={`${buttonClass} ${
-              migrationMode === "outlet"
-                ? "bg-blue-600 text-white"
-                : "border bg-white text-gray-700 hover:bg-gray-50"
-            }`}
-          >
-            <PackagePlus size={17} />
-            Move To Outlet
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setMigrationMode("lite");
-              resetLiteDefaultDates();
-            }}
-            className={`${buttonClass} ${
-              migrationMode === "lite"
-                ? "bg-blue-600 text-white"
-                : "border bg-white text-gray-700 hover:bg-gray-50"
-            }`}
-          >
-            <PackagePlus size={17} />
-            Lite Migration
-          </button>
           <button
             type="button"
             onClick={() => {
@@ -6960,30 +6930,6 @@ const ApplicationMigrationHelperPage = () => {
           </button>
           <button
             type="button"
-            onClick={() => setMigrationMode("inventory")}
-            className={`${buttonClass} ${
-              migrationMode === "inventory"
-                ? "bg-blue-600 text-white"
-                : "border bg-white text-gray-700 hover:bg-gray-50"
-            }`}
-          >
-            <Barcode size={17} />
-            Inventory Migration
-          </button>
-          <button
-            type="button"
-            onClick={() => setMigrationMode("rollback")}
-            className={`${buttonClass} ${
-              migrationMode === "rollback"
-                ? "bg-blue-600 text-white"
-                : "border bg-white text-gray-700 hover:bg-gray-50"
-            }`}
-          >
-            <RotateCcw size={17} />
-            Product Rollback
-          </button>
-          <button
-            type="button"
             onClick={() => setMigrationMode("barcodeAssign")}
             className={`${buttonClass} ${
               migrationMode === "barcodeAssign"
@@ -6995,8 +6941,6 @@ const ApplicationMigrationHelperPage = () => {
             Barcode Assigner
           </button>
         </section>
-
-        {renderBulkMigrationPanel()}
 
         {["lite", "manual"].includes(migrationMode) ? (
           <section

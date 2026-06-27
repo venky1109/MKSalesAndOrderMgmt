@@ -85,7 +85,7 @@ const navSections = [
       { to: '/packing', label: 'Packing', icon: Package },
       { to: '/dispatch', label: 'Dispatch', icon: Truck },
       { to: '/delivery', label: 'Delivery', icon: Truck },
-      { to: '/applications/migration-helper', label: 'Migration Helper', icon: PackagePlus },
+      { to: '/applications/migration-helper', label: 'Manual Migration', icon: PackagePlus },
       { to: '/applications/pwa', label: 'PWA', icon: ExternalLink },
     ],
   },

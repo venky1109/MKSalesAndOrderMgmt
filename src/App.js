@@ -30,6 +30,7 @@ import PwaLinkPage from "./pages/PwaLinkPage";
 import OrderManagementPage from "./pages/OrderManagementPage";
 import ApplicationMigrationHelperPage from "./pages/ApplicationMigrationHelperPage";
 import AdvertisementsPage from "./pages/AdvertisementsPage";
+import POSPrivacyPolicyPage from "./pages/POSPrivacyPolicyPage";
 import PwaInstallPrompt from "./components/PwaInstallPrompt";
 
 const ALL_MANAGER_ROLES = ["ADMIN", "STOCKMANAGER", "DIRECTOR", "SUPERVISOR"];
@@ -67,6 +68,7 @@ function App() {
         <Routes>
           {/* Public Login Route */}
           <Route path="/login" element={<Login />} />
+          <Route path="/privacy-pos" element={<POSPrivacyPolicyPage />} />
 
           {/* POS Route */}
           <Route
