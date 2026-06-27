@@ -482,20 +482,30 @@ export const fetchPOSOrderDetails = createAsyncThunk(
   'orders/fetchPOSOrderDetails',
   async (id, thunkAPI) => {
     try {
-      const token = thunkAPI.getState().posUser?.userInfo?.token;
+      const token = thunkAPI.getState().posUser?.userInfo?.token || getStoredToken();
 
       const response = await fetch(
-        `${process.env.REACT_APP_API_BASE_URL}/orders/pos/orders/details/${id}`,
+        `${API_BASE_URL}/orders/pos/orders/details/${id}`,
         {
           headers: { Authorization: `Bearer ${token}` },
+          cache: 'no-store',
         }
       );
 
-      const data = await response.json();
+      const contentType = response.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        const text = await response.text();
+        const preview = text.replace(/\s+/g, ' ').trim().slice(0, 80);
+        throw new Error(
+          `Order details API returned non-JSON response from ${API_BASE_URL}. ${preview}`
+        );
+      }
+
+      const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.message || 'Failed to fetch order details');
       return data;
     } catch (error) {
-      return thunkAPI.rejectWithValue(error.message);
+      return thunkAPI.rejectWithValue(error.message || 'Failed to fetch order details');
     }
   }
 );
