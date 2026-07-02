@@ -1,11 +1,12 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
+import { API_BASE_URL } from '../../utils/apiConfig';
 // import { useAuth } from '../../context/AuthContext'; 
 // Async thunk to fetch items by order_id
 export const fetchOrderItemsByOrderId = createAsyncThunk(
   'orderItems/fetchByOrderId',
   async ({ orderId, token }, thunkAPI) => {
     try {
-      const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/orders/pos/${orderId}/items`, {
+      const response = await fetch(`${API_BASE_URL}/orders/pos/${orderId}/items`, {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,

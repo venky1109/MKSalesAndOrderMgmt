@@ -1,6 +1,7 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import { cacheProducts, getCachedProducts } from '../../utils/offlineStorage'; 
 import { fetchWithRetry } from '../../utils/network';
+import { API_BASE_URL } from '../../utils/apiConfig';
 
 export const fetchAllProductsFresh = createAsyncThunk(
   'products/fetchAllFresh',
@@ -13,7 +14,7 @@ export const fetchAllProductsFresh = createAsyncThunk(
       return thunkAPI.rejectWithValue('offline');
     }
 
-    const res = await fetchWithRetry(`${process.env.REACT_APP_API_BASE_URL}/products`, {
+    const res = await fetchWithRetry(`${API_BASE_URL}/products`, {
       headers: { Authorization: `Bearer ${token}` },
     });
 
@@ -51,7 +52,7 @@ export const fetchAllProducts = createAsyncThunk(
     }
 
     // 3) Fetch from API (first load / cache miss)
-    const res = await fetchWithRetry(`${process.env.REACT_APP_API_BASE_URL}/products`, {
+    const res = await fetchWithRetry(`${API_BASE_URL}/products`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     const data = await res.json();
@@ -74,7 +75,7 @@ export const deleteProduct = createAsyncThunk(
   'products/delete',
   async ({ id, token }, thunkAPI) => {
     try {
-      const res = await fetch(`${process.env.REACT_APP_API_BASE_URL}/products/${id}`, {
+      const res = await fetch(`${API_BASE_URL}/products/${id}`, {
         method: 'DELETE',
         headers: {
           Authorization: `Bearer ${token}`,
@@ -92,7 +93,7 @@ export const deleteProduct = createAsyncThunk(
 export const addProduct = createAsyncThunk(
   'products/add',
   async ({ payload, token }) => {
-    const res = await fetch(`${process.env.REACT_APP_API_BASE_URL}/products`, {
+    const res = await fetch(`${API_BASE_URL}/products`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -109,7 +110,7 @@ export const addProduct = createAsyncThunk(
 export const fetchProductByBarcode = createAsyncThunk(
   'products/fetchByBarcode',
   async ({ barcode, token }) => {
-    const res = await fetchWithRetry(`${process.env.REACT_APP_API_BASE_URL}/pos-products/barcode/${barcode}`, {
+    const res = await fetchWithRetry(`${API_BASE_URL}/pos-products/barcode/${barcode}`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     const data = await res.json();
@@ -122,7 +123,7 @@ export const fetchProductByBarcode = createAsyncThunk(
 export const fetchProductByMkid = createAsyncThunk(
   'products/fetchByMkid',
   async ({ mkid, token }) => {
-    const res = await fetchWithRetry(`${process.env.REACT_APP_API_BASE_URL}/pos-products/mkid/${mkid}`, {
+    const res = await fetchWithRetry(`${API_BASE_URL}/pos-products/mkid/${mkid}`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     const data = await res.json();
@@ -134,7 +135,7 @@ export const fetchProductByMkid = createAsyncThunk(
 export const suggestProducts = createAsyncThunk(
   'products/suggest',
   async ({ query, token }) => {
-    const res = await fetch(`${process.env.REACT_APP_API_BASE_URL}/products/suggest?q=${query}`, {
+    const res = await fetch(`${API_BASE_URL}/products/suggest?q=${query}`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     const data = await res.json();
@@ -147,7 +148,7 @@ export const updateProduct = createAsyncThunk(
   'products/update',
   async ({ id, data, token }, thunkAPI) => {
     try {
-      const res = await fetch(`${process.env.REACT_APP_API_BASE_URL}/pos-products/update-financial`, {
+      const res = await fetch(`${API_BASE_URL}/pos-products/update-financial`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -172,7 +173,7 @@ export const updateProductStockOnly = createAsyncThunk(
     // console.log(financialID);
     // console.log(newQuantity);
 
-    const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/products/stock/${productID}`, {
+    const response = await fetch(`${API_BASE_URL}/products/stock/${productID}`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
@@ -200,7 +201,7 @@ export const updateProductStockOnly = createAsyncThunk(
 export const fetchProductByCatalogId = createAsyncThunk(
   'products/fetchByCatalogId',
   async ({ catalogId, token }) => {
-    const res = await fetch(`${process.env.REACT_APP_API_BASE_URL}/products/catalog/${catalogId}`, {
+    const res = await fetch(`${API_BASE_URL}/products/catalog/${catalogId}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     const data = await res.json();
@@ -213,7 +214,7 @@ export const addFinancialToPOSProduct = createAsyncThunk(
   'products/addFinancialToPOSProduct',
   async ({ productId, brandId, data, token }, thunkAPI) => {
     try {
-      const res = await fetch(`${process.env.REACT_APP_API_BASE_URL}/pos-products/add-financial`, {
+      const res = await fetch(`${API_BASE_URL}/pos-products/add-financial`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -233,7 +234,7 @@ export const deletePOSProductFinancial = createAsyncThunk(
   'products/deletePOSProductFinancial',
   async ({ productId, brandId, financialId, token }, thunkAPI) => {
     try {
-      const res = await fetch(`${process.env.REACT_APP_API_BASE_URL}/pos-products/delete-financial`, {
+      const res = await fetch(`${API_BASE_URL}/pos-products/delete-financial`, {
         method: 'DELETE',
         headers: {
           'Content-Type': 'application/json',
@@ -253,7 +254,7 @@ export const addBrandToPOSProduct = createAsyncThunk(
   'products/addBrandToPOSProduct',
   async ({ productId, brandData, token }, thunkAPI) => {
     try {
-      const res = await fetch(`${process.env.REACT_APP_API_BASE_URL}/pos-products/add-brand`, {
+      const res = await fetch(`${API_BASE_URL}/pos-products/add-brand`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -273,7 +274,7 @@ export const deletePOSProductBrand = createAsyncThunk(
   'products/deletePOSProductBrand',
   async ({ productId, brandId, token }, thunkAPI) => {
     try {
-      const res = await fetch(`${process.env.REACT_APP_API_BASE_URL}/pos-products/delete-brand`, {
+      const res = await fetch(`${API_BASE_URL}/pos-products/delete-brand`, {
         method: 'DELETE',
         headers: {
           'Content-Type': 'application/json',

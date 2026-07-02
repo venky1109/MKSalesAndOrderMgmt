@@ -1,6 +1,8 @@
 // src/utils/network.js
+import { API_BASE_URL } from './apiConfig';
+
 export async function pingBackend(
-  url = `${process.env.REACT_APP_API_BASE_URL}/health`,
+  url = `${API_BASE_URL}/health`,
   timeoutMs = 2500,
   token
 ) {

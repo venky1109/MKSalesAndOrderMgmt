@@ -1,7 +1,8 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import axios from 'axios';
+import { API_BASE_URL } from '../../utils/apiConfig';
 
-const BASE_URL = process.env.REACT_APP_API_BASE_URL;
+const BASE_URL = API_BASE_URL;
 
 // 🔍 Async Thunk: Fetch user by phone number
 export const getUserByPhoneNo = createAsyncThunk(

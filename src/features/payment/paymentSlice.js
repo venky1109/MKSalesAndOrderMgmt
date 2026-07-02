@@ -1,8 +1,9 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import axios from 'axios';
 import { createOrder } from '../orders/orderSlice';
+import { API_BASE_URL } from '../../utils/apiConfig';
 
-const BASE_URL = process.env.REACT_APP_API_BASE_URL;
+const BASE_URL = API_BASE_URL;
 
 const generateMKOrderId = () =>
   Number(`${Date.now()}${Math.floor(Math.random() * 90 + 10)}`);

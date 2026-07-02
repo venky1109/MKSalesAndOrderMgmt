@@ -106,7 +106,7 @@ export const createOrder = createAsyncThunk(
       const normalizedPayload = normalizeOrderDiscountPayload(payload);
 
       const response = await fetch(
-        `${process.env.REACT_APP_API_BASE_URL}/orders/pos`,
+        `${API_BASE_URL}/orders/pos`,
         {
           method: "POST",
           headers: {
@@ -289,7 +289,7 @@ export const fetchLatestOrders = createAsyncThunk(
   'orders/fetchLatest',
   async (_, thunkAPI) => {
     const token = thunkAPI.getState().posUser?.userInfo?.token;
-    const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/orders/pos`, {
+    const response = await fetch(`${API_BASE_URL}/orders/pos`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     const data = await response.json();
@@ -302,7 +302,7 @@ export const fetchPackingOrders = createAsyncThunk(
   'orders/fetchPacking',
   async (_, thunkAPI) => {
     const token = thunkAPI.getState().posUser?.userInfo?.token;
-    const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/orders/pos/orders/packing`, {
+    const response = await fetch(`${API_BASE_URL}/orders/pos/orders/packing`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     const data = await response.json();
@@ -315,7 +315,7 @@ export const fetchDispatchOrders = createAsyncThunk(
   'orders/fetchDispatch',
   async (_, thunkAPI) => {
     const token = thunkAPI.getState().posUser?.userInfo?.token;
-    const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/orders/pos/orders/dispatch`, {
+    const response = await fetch(`${API_BASE_URL}/orders/pos/orders/dispatch`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     const data = await response.json();
@@ -328,7 +328,7 @@ export const fetchDeliveryOrders = createAsyncThunk(
   'orders/fetchDelivery',
   async (_, thunkAPI) => {
     const token = thunkAPI.getState().posUser?.userInfo?.token;
-    const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/orders/pos/orders/delivery`, {
+    const response = await fetch(`${API_BASE_URL}/orders/pos/orders/delivery`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     const data = await response.json();
@@ -341,7 +341,7 @@ export const fetchAllOrdersWithTimers = createAsyncThunk(
   'orders/fetchAllTimers',
   async (_, thunkAPI) => {
     const token = thunkAPI.getState().posUser?.userInfo?.token;
-    const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/orders/pos/orders/all`, {
+    const response = await fetch(`${API_BASE_URL}/orders/pos/orders/all`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     const data = await response.json();
@@ -353,7 +353,7 @@ export const fetchAllOrdersWithTimers = createAsyncThunk(
 export const markOrderAsPacked = createAsyncThunk(
   'orders/markPacked',
   async ({ id, token }, thunkAPI) => {
-    const res = await fetch(`${process.env.REACT_APP_API_BASE_URL}/orders/pos/${id}/mark-packed`, {
+    const res = await fetch(`${API_BASE_URL}/orders/pos/${id}/mark-packed`, {
       method: 'PUT',
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -366,7 +366,7 @@ export const markOrderAsPacked = createAsyncThunk(
 export const markOrderAsDispatched = createAsyncThunk(
   'orders/markDispatched',
   async ({ id, token }, thunkAPI) => {
-    const res = await fetch(`${process.env.REACT_APP_API_BASE_URL}/orders/pos/${id}/mark-dispatched`, {
+    const res = await fetch(`${API_BASE_URL}/orders/pos/${id}/mark-dispatched`, {
       method: 'PUT',
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -381,7 +381,7 @@ export const markOrderAsDelivered = createAsyncThunk(
   async (orderId, { rejectWithValue, getState }) => {
     try {
       const token = getState().posUser?.userInfo?.token;
-      const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/orders/pos/${orderId}/mark-delivered`, {
+      const response = await fetch(`${API_BASE_URL}/orders/pos/${orderId}/mark-delivered`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -402,7 +402,7 @@ export const markOrderAsPaid = createAsyncThunk(
   async (orderId, { rejectWithValue, getState }) => {
     try {
       const token = getState().posUser?.userInfo?.token;
-      const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/orders/pos/${orderId}/mark-paid`, {
+      const response = await fetch(`${API_BASE_URL}/orders/pos/${orderId}/mark-paid`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',

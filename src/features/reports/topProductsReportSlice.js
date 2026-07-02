@@ -1,4 +1,5 @@
 import { createAsyncThunk, createSlice } from "@reduxjs/toolkit";
+import { API_BASE_URL } from "../../utils/apiConfig";
 
 const parseWeight = (value) => {
   const text = String(value || "").trim();
@@ -70,7 +71,7 @@ export const fetchTopProductsReport = createAsyncThunk(
       params.set("limit", String(limit));
 
       const response = await fetch(
-        `${process.env.REACT_APP_API_BASE_URL}/orders/pos/reports/top-products?${params.toString()}`,
+        `${API_BASE_URL}/orders/pos/reports/top-products?${params.toString()}`,
         {
           headers: { Authorization: `Bearer ${token}` },
         }

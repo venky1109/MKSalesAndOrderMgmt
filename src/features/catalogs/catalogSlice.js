@@ -1,10 +1,11 @@
 // 📁 src/features/catalogs/catalogSlice.js
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
+import { API_BASE_URL } from '../../utils/apiConfig';
 
 export const fetchCatalogs = createAsyncThunk(
   'catalogs/fetchAll',
   async ({ token }) => { // destructure token from object
-    const res = await fetch(`${process.env.REACT_APP_API_BASE_URL}/catalogs`, {
+    const res = await fetch(`${API_BASE_URL}/catalogs`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     const data = await res.json();
@@ -19,7 +20,7 @@ export const fetchCatalogs = createAsyncThunk(
 export const addCatalog = createAsyncThunk(
   'catalogs/add',
   async ({ token, payload }) => {
-    const res = await fetch(`${process.env.REACT_APP_API_BASE_URL}/catalogs`, {
+    const res = await fetch(`${API_BASE_URL}/catalogs`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

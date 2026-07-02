@@ -1,11 +1,9 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import axios from 'axios';
+import { API_BASE_URL } from '../../utils/apiConfig';
 
 // const API_BASE = 'http://localhost:5000/api/catalog-pg';
-// const API_URL = process.env.REACT_APP_API_BASE_URL || '';
-const API_URL = process.env.REACT_APP_API_BASE_URL || '';
-
-const API_BASE = `${API_URL}/catalog-pg`;
+const API_BASE = `${API_BASE_URL}/catalog-pg`;
 
 const getConfig = (getState) => {
   const token = getState().posUser?.userInfo?.token;
